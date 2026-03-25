@@ -17,11 +17,13 @@ export interface TracerouteStore {
   error?: string;
   pendingRequest?: TracerouteRequest;
   selectedHopIndex?: number;
+  captureActive: boolean;
   startRun: (request: TracerouteRequest) => Promise<TracerouteExecutionResult | undefined>;
   cancelRun: () => Promise<void>;
   handleProgress: (event: TracerouteProgressEvent) => void;
   completeRun: (result: TracerouteExecutionResult) => void;
   setSelectedHop: (hopIndex: number | undefined) => void;
+  setCaptureActive: (active: boolean) => void;
   resetError: () => void;
 }
 
@@ -36,9 +38,10 @@ function mergeHop(existing: TracerouteRun, hop: TracerouteRun["hops"][number]): 
 export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
   runs: {},
   status: "idle",
+  captureActive: false,
   startRun: async (request) => {
     const api = window.visTracer;
-    set({ status: "running", error: undefined, pendingRequest: request });
+    set({ status: "running", error: undefined, pendingRequest: request, captureActive: false });
 
     try {
       const result = await api.runTraceroute(request);
@@ -101,6 +104,8 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
         };
       }
 
+      const hopWasPresent = !!(event.hop && baseRun?.hops.some((existing) => existing.hopIndex === event.hop!.hopIndex));
+
       if (event.hop) {
         run = mergeHop(run, event.hop);
       }
@@ -123,11 +128,11 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
       // Only auto-select hops during initial traceroute run, not on enrichment updates
       // Enrichment updates come with completed=true, so we preserve the current selection
       const selectedHopIndex =
-        event.hop && !event.completed
-          ? event.hop.hopIndex  // Auto-select during active traceroute
+        event.hop && !event.completed && !hopWasPresent
+          ? event.hop.hopIndex
           : event.completed && state.selectedHopIndex == null && run.hops.length > 0
-            ? run.hops[run.hops.length - 1].hopIndex  // Select last hop on completion if nothing selected
-            : state.selectedHopIndex;  // Preserve current selection (for enrichment updates)
+            ? run.hops[run.hops.length - 1].hopIndex
+            : state.selectedHopIndex;
 
       return {
         runs,
@@ -152,6 +157,7 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
     });
   },
   setSelectedHop: (hopIndex) => set({ selectedHopIndex: hopIndex }),
+  setCaptureActive: (active) => set({ captureActive: active }),
   resetError: () => set({ error: undefined }),
   error: undefined,
   pendingRequest: undefined,

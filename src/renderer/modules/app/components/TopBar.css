@@ -23,7 +23,7 @@
 
 .top-bar__input-group {
   display: grid;
-  grid-template-columns: auto minmax(240px, 1fr) 140px auto auto auto;
+  grid-template-columns: auto minmax(240px, 1fr) 140px auto auto auto auto;
   gap: 0.75rem;
   align-items: center;
 }
@@ -87,6 +87,7 @@
   color: var(--color-text);
 }
 
+.top-bar__toggle,
 .top-bar__settings {
   background: rgba(255, 255, 255, 0.08);
   border: none;
@@ -101,11 +102,13 @@
   transition: transform 0.18s ease, opacity 0.18s ease;
 }
 
+.top-bar__toggle:hover,
 .top-bar__settings:hover {
   transform: translateY(-1px);
   opacity: 0.9;
 }
 
+.top-bar__toggle svg,
 .top-bar__settings svg {
   width: 20px;
   height: 20px;
@@ -253,6 +256,7 @@
   }
 
   .top-bar__select,
+  .top-bar__toggle,
   .top-bar__run,
   .top-bar__cancel,
   .top-bar__reset,

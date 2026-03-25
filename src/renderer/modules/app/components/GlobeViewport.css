@@ -44,29 +44,3 @@
   opacity: 0.6;
   line-height: 1.5;
 }
-
-.globe-viewport__overlay {
-  position: absolute;
-  top: 1rem;
-  left: 1rem;
-  padding: 0.9rem 1.1rem;
-  border-radius: 12px;
-  background: rgba(17, 19, 27, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(10px);
-  min-width: 200px;
-  pointer-events: none;
-}
-
-.globe-viewport__overlay h3 {
-  margin: 0 0 0.35rem;
-  font-size: 0.9rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.globe-viewport__overlay p {
-  margin: 0.1rem 0;
-  font-size: 0.8rem;
-  opacity: 0.75;
-}

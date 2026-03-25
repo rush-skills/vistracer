@@ -3,6 +3,8 @@ import { useGeoDatabaseMeta } from "@renderer/hooks/useGeoDatabaseMeta";
 import { useTracerouteStore, selectCurrentRun } from "@renderer/state/tracerouteStore";
 import { GeoWarningBanner } from "./GeoWarningBanner";
 import { GeoSettingsModal } from "./GeoSettingsModal";
+import { ExportMediaModal } from "./ExportMediaModal";
+import { runExport } from "../lib/exportCapture";
 import type { VisTracerWindow } from "@common/bridge";
 import "./FooterBar.css";
 
@@ -14,48 +16,40 @@ export const FooterBar: React.FC = () => {
   const [exportState, setExportState] = useState<ExportState>("idle");
   const [message, setMessage] = useState<string | undefined>();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [defaultFormat, setDefaultFormat] = useState<"png" | "jpg" | "webp" | "webm" | "gif">("png");
 
-  const handleExport = async () => {
+  const beginExport = () => {
+    if (!currentRun || exportState === "working") {
+      return;
+    }
+    setDefaultFormat("png");
+    setIsExportModalOpen(true);
+  };
+
+  const handleExportConfirm = async (options: { format: "png" | "jpg" | "webp" | "webm" | "gif"; dwellSeconds: number }) => {
+    if (!currentRun) {
+      setIsExportModalOpen(false);
+      return;
+    }
+
+    setDefaultFormat(options.format);
+    setIsExportModalOpen(false);
     setExportState("working");
     setMessage(undefined);
     try {
-      // Capture the canvas from the globe viewport
-      const canvas = document.querySelector('.globe-viewport canvas') as HTMLCanvasElement;
-      if (!canvas) {
-        throw new Error('Globe canvas not found');
-      }
-
-      // Convert canvas to blob
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          setExportState("error");
-          setMessage("Failed to capture snapshot");
-          return;
-        }
-
-        // Create download link
-        const url = URL.createObjectURL(blob);
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const filename = `vistracer-snapshot-${timestamp}.png`;
-
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.click();
-
-        // Cleanup
-        URL.revokeObjectURL(url);
-
-        setExportState("success");
-        setMessage(`Downloaded ${filename}`);
-        setTimeout(() => {
-          setExportState("idle");
-          setMessage(undefined);
-        }, 3000);
-      }, 'image/png');
+      const { filename } = await runExport(options, currentRun);
+      setExportState("success");
+      setMessage(`Saved ${filename}`);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Export failed";
       setExportState("error");
-      setMessage(error instanceof Error ? error.message : "Download failed");
+      setMessage(message);
+    } finally {
+      setTimeout(() => {
+        setExportState("idle");
+        setMessage(undefined);
+      }, 3500);
     }
   };
 
@@ -99,10 +93,10 @@ export const FooterBar: React.FC = () => {
             <button
               type="button"
               className="footer-bar__export"
-              onClick={handleExport}
+              onClick={beginExport}
               disabled={exportDisabled}
             >
-              {exportState === "working" ? "Downloading…" : "Download snapshot"}
+              {exportState === "working" ? "Exporting…" : "Download export"}
             </button>
             {message && <span className="footer-bar__message">{message}</span>}
           </div>
@@ -124,6 +118,13 @@ export const FooterBar: React.FC = () => {
           onUpdate={handleUpdateGeoPaths}
         />
       )}
+      <ExportMediaModal
+        isOpen={isExportModalOpen}
+        defaultFormat={defaultFormat}
+        onCancel={() => setIsExportModalOpen(false)}
+        onConfirm={handleExportConfirm}
+        disabled={exportState === "working"}
+      />
     </>
   );
 };

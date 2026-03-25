@@ -459,37 +459,10 @@ const ArcLines: React.FC<{ run: TracerouteRun }> = ({ run }) => {
   );
 };
 
-const SelectedHopOverlay: React.FC<{ run?: TracerouteRun; selectedHopIndex?: number }> = ({
-  run,
-  selectedHopIndex
-}) => {
-  if (!run) {
-    return null;
-  }
-
-  const hop = run.hops.find((item) => item.hopIndex === selectedHopIndex);
-  if (!hop) {
-    return null;
-  }
-
-  return (
-    <div className="globe-viewport__overlay">
-      <h3>Hop {hop.hopIndex}</h3>
-      <p>{hop.ipAddress ?? "Unresolved"}</p>
-      {hop.hostName && <p>{hop.hostName}</p>}
-      {hop.geo && (
-        <p>
-          {hop.geo.city ? `${hop.geo.city}, ` : ""}
-          {hop.geo.country ?? "Unknown"}
-        </p>
-      )}
-      <p>RTT avg: {hop.latency.avgRttMs ?? "–"} ms</p>
-    </div>
-  );
-};
 
 export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIndex }) => {
   const hasRenderableHops = Boolean(run?.hops?.some((hop) => hop.geo));
+  const captureActive = useTracerouteStore((state) => state.captureActive);
 
   return (
     <section className="globe-viewport">
@@ -515,6 +488,7 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
           enableRotate
           minDistance={6}
           maxDistance={30}
+          enabled={!captureActive}
         />
       </Canvas>
       {/* {!run && (
@@ -553,9 +527,6 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
             Waiting for geolocation data…
           </p>
         </div>
-      )}
-      {run && hasRenderableHops && (
-        <SelectedHopOverlay run={run} selectedHopIndex={selectedHopIndex} />
       )}
     </section>
   );

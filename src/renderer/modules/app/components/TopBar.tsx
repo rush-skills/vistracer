@@ -8,7 +8,7 @@ import type {
 } from "@common/ipc";
 import { useRecentRuns } from "@renderer/hooks/useRecentRuns";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
-import { FiSettings } from "react-icons/fi";
+import { FiChevronDown, FiChevronUp, FiSettings } from "react-icons/fi";
 import { IntegrationSettingsModal } from "./IntegrationSettingsModal";
 import logo from "@assets/logo.png";
 import "./TopBar.css";
@@ -104,6 +104,7 @@ export const TopBar: React.FC = () => {
   const [integrationsLoading, setIntegrationsLoading] = useState(true);
   const [integrationSaveError, setIntegrationSaveError] = useState<string | undefined>(undefined);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [integrationsExpanded, setIntegrationsExpanded] = useState(false);
   const [geoMeta, setGeoMeta] = useState<GeoDatabaseMeta | undefined>(undefined);
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoError, setGeoError] = useState<string | undefined>(undefined);
@@ -370,6 +371,15 @@ export const TopBar: React.FC = () => {
             <option value="UDP">UDP</option>
             <option value="TCP">TCP</option>
           </select>
+          <button
+            type="button"
+            className="top-bar__toggle"
+            aria-label={integrationsExpanded ? "Hide enrichment services" : "Show enrichment services"}
+            aria-expanded={integrationsExpanded}
+            onClick={() => setIntegrationsExpanded((prev) => !prev)}
+          >
+            {integrationsExpanded ? <FiChevronUp /> : <FiChevronDown />}
+          </button>
           <button type="submit" className={runButtonClass} disabled={!isSubmitEnabled}>
             {isRunning ? "Running…" : "Run"}
           </button>
@@ -396,35 +406,39 @@ export const TopBar: React.FC = () => {
             <FiSettings />
           </button>
         </div>
-        <div className="top-bar__integrations">
-          {integrationToggleConfig.map((config) => {
-            const section = integrationSettings[config.key];
-            const providerError = providerErrors[config.providerId];
-            return (
-              <label key={config.key} className="top-bar__integration-toggle">
-                <span className="top-bar__integration-header">
-                  <input
-                    type="checkbox"
-                    checked={section.enabled}
-                    onChange={handleIntegrationToggle(config.key)}
-                    disabled={integrationsLoading}
-                  />
-                  <span>{config.label}</span>
-                </span>
-                <small className="top-bar__integration-note">{config.description}</small>
-                {providerError && (
-                  <small className="top-bar__integration-error" role="status">
-                    {providerError}
-                  </small>
-                )}
-              </label>
-            );
-          })}
-        </div>
-        {integrationSaveError && (
-          <div className="top-bar__integration-error top-bar__integration-error--global" role="status">
-            {integrationSaveError}
-          </div>
+        {integrationsExpanded && (
+          <>
+            <div className="top-bar__integrations">
+              {integrationToggleConfig.map((config) => {
+                const section = integrationSettings[config.key];
+                const providerError = providerErrors[config.providerId];
+                return (
+                  <label key={config.key} className="top-bar__integration-toggle">
+                    <span className="top-bar__integration-header">
+                      <input
+                        type="checkbox"
+                        checked={section.enabled}
+                        onChange={handleIntegrationToggle(config.key)}
+                        disabled={integrationsLoading}
+                      />
+                      <span>{config.label}</span>
+                    </span>
+                    <small className="top-bar__integration-note">{config.description}</small>
+                    {providerError && (
+                      <small className="top-bar__integration-error" role="status">
+                        {providerError}
+                      </small>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+            {integrationSaveError && (
+              <div className="top-bar__integration-error top-bar__integration-error--global" role="status">
+                {integrationSaveError}
+              </div>
+            )}
+          </>
         )}
         <div className="top-bar__advanced">
           <label className="top-bar__number">

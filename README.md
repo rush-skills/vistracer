@@ -130,12 +130,14 @@ The 3D globe features a **real-time day/night terminator** that accurately refle
 
 The terminator position uses a simplified solar algorithm that provides accuracy within a few degrees—perfect for visualization. The shader compares each surface point's normal with the calculated sun direction to determine illumination.
 
-## Snapshot Export
+## Snapshot & Media Export
 
-- Use the `Download snapshot` button in the footer to capture the current 3D globe view as a PNG.
+- Click **Download export** in the footer to capture the current globe.
+- Still images support PNG and JPG. Animated exports support WebM (browser-native) and GIF (lightweight JS encoder bundled with the app).
+- For animated formats you can configure the dwell time per hop; the tooltip stays on-screen with ASN, PeeringDB, and location details for each hop.
 - Files are saved to your system's default download location (typically `~/Downloads` on macOS/Linux or `C:\Users\<username>\Downloads` on Windows).
-- Snapshot filename format: `vistracer-snapshot-YYYY-MM-DDTHH-MM-SS.png`
-- The download button is only enabled when a completed traceroute run is available.
+- Filenames follow the pattern `vistracer-snapshot-YYYY-MM-DDTHH-MM-SS.ext`.
+- The export button is available once a traceroute run has completed.
 
 ## Known Gaps & Next Steps
 
