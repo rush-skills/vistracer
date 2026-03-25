@@ -28,7 +28,7 @@ This architecture ensures you get authentic network diagnostics from your actual
 - Optional secondary enrichment through Team Cymru, RDAP, RIPE Stat, and PeeringDB to fill gaps and validate MaxMind output.
 - 3D globe (Three.js) visualising hop arcs, coloured by latency bands, plus per-hop markers.
 - Detailed hop table with RTT stats, packet loss, location and ASN metadata (including PeeringDB facility context when available).
-- Snapshot export (PNG) saved to the OS-specific application data directory.
+- Snapshot and animation exports saved directly to your downloads folder (PNG/JPG/WebP for stills, WebM/GIF for animated routes).
 
 ## Getting Started
 
@@ -89,6 +89,20 @@ npm run build
 npm run start   # launches Electron against the production bundles
 ```
 
+### Desktop Packages
+
+Electron-based installers can now be generated with `electron-builder`. Every packaging command runs the production build first and drops artifacts in `release/`.
+
+```bash
+npm run package       # mac dmg + win nsis (.exe) + linux AppImage + deb
+npm run package:mac   # macOS dmg (contains the .app bundle)
+npm run package:win   # Windows NSIS installer (.exe)
+npm run package:linux # Linux AppImage + Debian package
+npm run bundle        # produces an unpacked dir for testing (no installer)
+```
+
+> **Cross-building tip:** Creating Windows installers from macOS/Linux (or vice versa) requires the platform-specific toolchain (`xcode-select --install` on macOS, `wine`/`mono` for Windows targets, `fpm` for Debian packages). For the most reliable output, run the matching command on that operating system or inside a CI runner/VM that provides the necessary dependencies.
+
 ### Linting & Tests
 
 ```bash
@@ -133,17 +147,21 @@ The terminator position uses a simplified solar algorithm that provides accuracy
 ## Snapshot & Media Export
 
 - Click **Download export** in the footer to capture the current globe.
-- Still images support PNG and JPG. Animated exports support WebM (browser-native) and GIF (lightweight JS encoder bundled with the app).
-- For animated formats you can configure the dwell time per hop; the tooltip stays on-screen with ASN, PeeringDB, and location details for each hop.
+- Still images support PNG, JPG, and WebP. Animated exports support WebM (hardware-accelerated via `MediaRecorder`) and GIF (bundled encoder).
+- Configure the dwell time per hop for animated formats; the tooltip stays on-screen with ASN, PeeringDB, and location details for each hop.
 - Files are saved to your system's default download location (typically `~/Downloads` on macOS/Linux or `C:\Users\<username>\Downloads` on Windows).
-- Filenames follow the pattern `vistracer-snapshot-YYYY-MM-DDTHH-MM-SS.ext`.
-- The export button is available once a traceroute run has completed.
+- Filenames follow the pattern `vistracer-snapshot-YYYY-MM-DDTHH-MM-SS.ext` for stills and `vistracer-route-YYYY-MM-DDTHH-MM-SS.ext` for animations.
+- The export button is available once a traceroute run has completed, and MP4 export is intentionally not supported (WebM/GIF cover animation needs without extra codecs).
+
+<video controls width="640" src="assets/demo.webm">
+  Your browser does not support the video tag. You can download the demo instead.
+</video>
 
 ## Known Gaps & Next Steps
 
 - Automatic GeoLite2 download and scheduled refresh (paths must still be supplied manually)
 - Provider rate-limit handling and retry UX for external enrichment APIs
-- GIF/MP4 capture is not yet implemented (PNG only)
+- MP4 export remains out of scope because Electron's built-in encoders focus on WebM; use WebM or GIF instead.
 - Advanced heuristics (anycast detection, jitter visualisation, comparison view) are planned but not
   implemented in this build
 - Windows environments rely on `tracert`; ensure it is available on `PATH` for the Electron runtime

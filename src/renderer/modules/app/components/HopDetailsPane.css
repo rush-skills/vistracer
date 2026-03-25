@@ -138,16 +138,6 @@
   font-size: 0.8rem;
 }
 
-@media (max-width: 900px) {
-  .hop-details {
-    min-height: 320px;
-  }
-
-  .hop-details__table {
-    font-size: 0.72rem;
-  }
-}
-
 .hop-details__empty {
   flex: 1;
   display: grid;

@@ -19,10 +19,17 @@
   --color-border: rgba(255, 255, 255, 0.08);
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   background-color: var(--color-background);
+  overflow: hidden; /* Prevent viewport scrolling; app layout handles overflow */
 }
 
 *,

@@ -64,7 +64,8 @@ Key IPC operations:
 - `TRACEROUTE_CANCEL`: Cancel running traceroute by runId
 - `RECENT_RUNS`: Retrieve recent traceroute history
 - `GEO_DB_META`: Get GeoLite2 database metadata
-- `SNAPSHOT_EXPORT`: Capture renderer view as PNG
+- `SNAPSHOT_EXPORT`: Capture renderer view as PNG/JPG/WebP
+- `ANIMATION_EXPORT`: Record animated route as WebM or GIF
 
 ### Traceroute Execution Pipeline
 
@@ -79,6 +80,7 @@ Key IPC operations:
 3. **Enrichment** (async per hop):
    - Reverse DNS lookup via `src/main/services/dns.ts` with caching
    - GeoIP/ASN lookup via `src/main/services/geo.ts` using MaxMind readers
+   - Optional external enrichment via Team Cymru, RDAP, RIPE Stat, and PeeringDB
    - Results cached in electron-store to minimize database queries
 
 4. **Progress streaming**:
@@ -93,6 +95,7 @@ The 3D globe (`src/renderer/lib/globe.ts`) uses Three.js via React Three Fiber:
 - **Great-circle arcs**: `interpolateGreatCircle` generates smooth paths between hops
 - **Arc coloring**: Each hop uses a distinct color from `hopIndexToColor` (20-color palette)
 - **Arc descriptors**: `buildArcDescriptors` creates renderable arc data from hop list
+- **Day/night terminator**: Real-time solar position calculation with declination (±23.5° seasonal variation) and hour angle, updating every second. Shader blends day texture with city lights texture on dark side.
 
 Rendering is handled by `@react-three/fiber` and `@react-three/drei` in `src/renderer/modules/app/components/GlobeViewport.tsx`.
 
@@ -118,8 +121,20 @@ GeoLite2 databases are configured at startup:
 2. Databases expected in `assets/GeoLite2-City.mmdb` and `assets/GeoLite2-ASN.mmdb`
 3. If missing, geo/ASN lookups return undefined (graceful degradation)
 4. Database paths stored in electron-store under `geo.cityDbPath` and `geo.asnDbPath`
+5. Settings modal allows browsing to custom `.mmdb` files with immediate reload (no restart required)
 
 IP lookups are cached in electron-store to avoid repeated database queries. Use `forceRefresh: true` in request options to bypass cache.
+
+### External Enrichment Providers
+
+VisTracer supports optional external enrichment providers to supplement MaxMind GeoLite2 data:
+
+- **Team Cymru**: IP-to-ASN mapping via whois (no credentials required)
+- **RDAP**: Registry owner/country data (default `https://rdap.org/ip`, optional custom base URL)
+- **RIPE Stat**: Prefix and ASN holder context (identifies as `VisTracer`)
+- **PeeringDB**: Facility/operator details for known ASNs (optional API key for higher rate limits)
+
+Providers can be toggled via the Integrations section in the UI. Credentials are configurable in the settings modal. All lookups are logged to the Electron console for debugging.
 
 ### TypeScript Project References
 
@@ -151,11 +166,14 @@ Tests run in jsdom environment with React plugin support.
 - **Traceroute binary paths**: Unix systems use `/usr/sbin/traceroute`, Windows uses `tracert` from PATH
 - **Private IP handling**: `isPrivateIpv4` in `src/common/net.ts` detects RFC1918 addresses (no geo lookup)
 - **Cancellation**: Active runs tracked in Map; cancel sends SIGINT to child process
-- **Snapshot export**: Uses Electron's `webContents.capturePage()` to capture PNG, saves to `{userData}/snapshots/`
+- **Snapshot export**: Uses Electron's `webContents.capturePage()` to capture still images (PNG/JPG/WebP), saves to system downloads folder (`~/Downloads`)
+- **Animation export**: WebM uses hardware-accelerated `MediaRecorder`, GIF uses bundled encoder. Files saved to downloads folder with pattern `vistracer-route-YYYY-MM-DDTHH-MM-SS.ext`. Configurable dwell time per hop with tooltips showing ASN/PeeringDB/location details.
 
 ## Known Limitations
 
-- GIF/MP4 export not yet implemented (PNG only)
-- IPv6 support planned but not in v0.1
+- Automatic GeoLite2 download and scheduled refresh not implemented (paths must be supplied manually)
+- Provider rate-limit handling and retry UX for external enrichment APIs not yet implemented
+- MP4 export intentionally not supported (WebM/GIF cover animation needs without extra codecs)
+- Advanced heuristics (anycast detection, jitter visualization, comparison view) planned but not implemented
+- IPv6 support planned but not in current build
 - Windows relies on `tracert` being available on PATH
-- GeoLite2 database updates require manual download and replacement

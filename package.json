@@ -4,6 +4,65 @@
   "description": "Electron-based visual traceroute application rendering hop paths on a 3D globe.",
   "private": true,
   "main": "dist/main/src/main/main.js",
+  "build": {
+    "appId": "com.vistracer.app",
+    "productName": "VisTracer",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "assets/icons/VisTracer.icns",
+      "target": [
+        "dmg"
+      ],
+      "artifactName": "VisTracer-${version}-mac.${ext}"
+    },
+    "dmg": {
+      "sign": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icons/VisTracer.ico",
+      "artifactName": "VisTracer-${version}-win.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "linux": {
+      "category": "Utility",
+      "icon": "assets/icons/VisTracer.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "artifactName": "VisTracer-${version}-linux.${ext}"
+    }
+  },
   "author": "VisTracer Team",
   "license": "MIT",
   "scripts": {
@@ -15,6 +74,11 @@
     "build:clean": "rimraf dist",
     "build:main": "tsc -p tsconfig.main.json && tsc-alias -p tsconfig.main.json",
     "build:renderer": "tsc -p tsconfig.renderer.json && vite build --config vite.config.ts",
+    "bundle": "npm run build && electron-builder --dir --publish never",
+    "package": "npm run build && electron-builder --mac dmg --win nsis --linux AppImage deb --publish never",
+    "package:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "package:win": "npm run build && electron-builder --win nsis --publish never",
+    "package:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
     "start": "cross-env NODE_ENV=production electron .",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "vitest run",
@@ -27,7 +91,6 @@
     "@reduxjs/toolkit": "^2.2.3",
     "@tanstack/react-query": "^5.29.0",
     "@visx/geo": "^3.7.0",
-    "electron": "^38.4.0",
     "electron-log": "^5.1.3",
     "electron-store": "^9.0.0",
     "lz-string": "^1.5.0",
@@ -54,8 +117,10 @@
     "cross-env": "^7.0.3",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
+    "electron": "^38.4.0",
     "eslint-plugin-react": "^7.34.1",
     "eslint-plugin-react-hooks": "^4.6.0",
+    "electron-builder": "^25.1.8",
     "jsdom": "^24.1.3",
     "prettier": "^3.2.5",
     "rimraf": "^5.0.5",

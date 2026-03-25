@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme } from "electron";
+import { app, BrowserWindow, nativeImage, nativeTheme } from "electron";
 import path from "node:path";
 import { setupIpcHandlers } from "./services/ipc";
 import { initializeLogger } from "./services/logger";
@@ -8,7 +8,34 @@ const isDev = process.env.NODE_ENV === "development";
 
 let mainWindow: BrowserWindow | null = null;
 
+function resolveAssetPath(...segments: string[]): string {
+  const baseDir = app.isPackaged
+    ? path.join(process.resourcesPath, "assets")
+    : path.join(app.getAppPath(), "assets");
+
+  return path.join(baseDir, ...segments);
+}
+
+function getPlatformIconPath(): string {
+  if (process.platform === "win32") {
+    return resolveAssetPath("icons", "VisTracer.ico");
+  }
+
+  if (process.platform === "darwin") {
+    return resolveAssetPath("icons", "VisTracer.icns");
+  }
+
+  return resolveAssetPath("icons", "VisTracer.png");
+}
+
 async function createMainWindow(): Promise<void> {
+  const iconPath = getPlatformIconPath();
+  const windowIcon = nativeImage.createFromPath(iconPath);
+
+  if (process.platform === "darwin" && app.dock && !windowIcon.isEmpty()) {
+    app.dock.setIcon(windowIcon);
+  }
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -21,7 +48,8 @@ async function createMainWindow(): Promise<void> {
       contextIsolation: true,
       sandbox: true
     },
-    title: "VisTracer"
+    title: "VisTracer",
+    icon: windowIcon.isEmpty() ? undefined : windowIcon
   });
 
   if (isDev) {
@@ -30,7 +58,7 @@ async function createMainWindow(): Promise<void> {
     await mainWindow.loadURL(devServerURL);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    const indexHtml = path.join(__dirname, "..", "..", "renderer", "index.html");
+    const indexHtml = path.join(app.getAppPath(), "dist", "renderer", "index.html");
     await mainWindow.loadFile(indexHtml);
   }
 }

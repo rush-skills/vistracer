@@ -82,20 +82,3 @@
   font-size: 0.75rem;
   opacity: 0.7;
 }
-
-@media (max-width: 900px) {
-  .footer-bar__content {
-    flex-direction: column;
-    gap: 0.75rem;
-    align-items: stretch;
-    text-align: center;
-  }
-
-  .footer-bar__legend {
-    justify-content: center;
-  }
-
-  .footer-bar__meta {
-    justify-content: center;
-  }
-}
