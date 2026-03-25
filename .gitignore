@@ -1,0 +1,12 @@
+node_modules
+dist
+.DS_Store
+*.log
+*.tsbuildinfo
+coverage
+
+# Compiled output should only be in dist/
+src/**/*.js
+src/**/*.js.map
+!src/**/*.d.ts
+*.mmdb

@@ -1,0 +1,154 @@
+.hop-details {
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(160deg, rgba(19, 21, 29, 0.92), rgba(13, 14, 20, 0.92));
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 1.25rem 1.5rem;
+  overflow: hidden;
+  min-width: 0;
+  flex-shrink: 0;
+  min-height: 0; /* Critical: allows flex child to shrink */
+  max-height: 100%; /* Constrain to parent height */
+}
+
+.hop-details__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.hop-details__header h2 {
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+}
+
+.hop-details__badge {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+}
+
+.hop-details__badge--running {
+  background: rgba(49, 196, 255, 0.25);
+}
+
+.hop-details__badge--success {
+  background: rgba(75, 214, 127, 0.25);
+}
+
+.hop-details__badge--error {
+  background: rgba(255, 95, 95, 0.25);
+}
+
+.hop-details__badge--idle {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.hop-details__target {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.hop-details__table-wrapper {
+  flex: 1;
+  overflow: auto;
+  max-height: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 16, 24, 0.65);
+}
+
+.hop-details__table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow-y: auto;
+}
+
+.hop-details__table thead {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hop-details__table th,
+.hop-details__table td {
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  font-size: 0.78rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.hop-details__row {
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.hop-details__row:hover {
+  background: rgba(49, 196, 255, 0.12);
+}
+
+.hop-details__row--selected {
+  background: rgba(49, 196, 255, 0.18);
+}
+
+.hop-details__endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.hop-details__endpoint small,
+.hop-details__latency small,
+.hop-details__table td small {
+  opacity: 0.6;
+  font-size: 0.7rem;
+}
+
+.hop-details__latency {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.hop-details__row-empty {
+  text-align: center;
+  opacity: 0.7;
+}
+
+.hop-details__error {
+  padding: 0.75rem 1rem;
+  background: rgba(255, 95, 95, 0.12);
+  border-top: 1px solid rgba(255, 95, 95, 0.35);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .hop-details {
+    min-height: 320px;
+  }
+
+  .hop-details__table {
+    font-size: 0.72rem;
+  }
+}
+
+.hop-details__empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 1rem;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(17, 19, 27, 0.65);
+}
+
+.hop-details__empty p {
+  max-width: 280px;
+  line-height: 1.55;
+  opacity: 0.7;
+}

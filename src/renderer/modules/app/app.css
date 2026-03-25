@@ -1,0 +1,27 @@
+.app-shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  width: 100vw;
+  background: radial-gradient(circle at 20% 20%, rgba(49, 196, 255, 0.12), transparent 60%),
+    radial-gradient(circle at 80% 30%, rgba(83, 70, 255, 0.12), transparent 55%),
+    var(--color-background);
+  color: var(--color-text);
+  overflow: hidden; /* Prevent page-level scrolling */
+}
+
+.app-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background-color: var(--color-border);
+  min-height: 0; /* Allow grid items to shrink below content size */
+  overflow: hidden; /* Contain children */
+}
+
+@media (max-width: 1100px) {
+  .app-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1.4fr 1fr;
+  }
+}
