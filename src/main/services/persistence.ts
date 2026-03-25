@@ -3,7 +3,13 @@ import { app } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { getLogger } from "./logger";
-import type { GeoDatabaseMeta, RecentRun, TracerouteRun } from "@common/ipc";
+import type {
+  GeoDatabaseMeta,
+  PeeringDbDetails,
+  ProviderStatus,
+  RecentRun,
+  TracerouteRun
+} from "@common/ipc";
 
 const log = getLogger();
 
@@ -20,6 +26,23 @@ type SettingsSchema = {
   cache: {
     dnsTtlMs: number;
     geoTtlMs: number;
+  };
+  integrations: {
+    teamCymru: {
+      enabled: boolean;
+    };
+    rdap: {
+      enabled: boolean;
+      baseUrl?: string;
+    };
+    ripeStat: {
+      enabled: boolean;
+      sourceApp: string;
+    };
+    peeringDb: {
+      enabled: boolean;
+      apiKey?: string;
+    };
   };
 };
 
@@ -62,6 +85,12 @@ const settingsStore = new Store<SettingsSchema>({
     cache: {
       dnsTtlMs: 1000 * 60 * 60 * 24, // 24h
       geoTtlMs: 1000 * 60 * 60 * 24 * 7 // 7d
+    },
+    integrations: {
+      teamCymru: { enabled: true },
+      rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
+      ripeStat: { enabled: true, sourceApp: "VisTracer" },
+      peeringDb: { enabled: false }
     }
   }
 }) as unknown as StoreAdapter<SettingsSchema>;
@@ -116,8 +145,8 @@ export function setCachedDns(host: string, value: string): void {
 }
 
 export interface GeoCacheValue {
-  latitude: number;
-  longitude: number;
+  latitude?: number;
+  longitude?: number;
   city?: string;
   country?: string;
   isoCode?: string;
@@ -125,6 +154,10 @@ export interface GeoCacheValue {
   asn?: number;
   asnName?: string;
   network?: string;
+  asnCountry?: string;
+  asnRegistry?: string;
+  providers?: ProviderStatus[];
+  peeringDb?: PeeringDbDetails;
 }
 
 export function getCachedGeo(ip: string): GeoCacheValue | undefined {
@@ -138,8 +171,15 @@ export function getCachedGeo(ip: string): GeoCacheValue | undefined {
 
 export function setCachedGeo(ip: string, value: GeoCacheValue): void {
   const ttl = settingsStore.get<number>("cache.geoTtlMs");
+
+  // Filter out error statuses before caching - we don't want to persist errors
+  const cleanedValue = {
+    ...value,
+    providers: value.providers?.filter(p => p.status !== "error")
+  };
+
   cacheStore.set(`geo.${ip}`, {
-    value,
+    value: cleanedValue,
     expiresAt: Date.now() + ttl
   });
 }
@@ -156,12 +196,41 @@ export async function ensureAppDataDirs(): Promise<void> {
   }
 }
 
-export function getGeoDatabaseMeta(): GeoDatabaseMeta {
+export async function getGeoDatabaseMeta(): Promise<GeoDatabaseMeta> {
   const { cityDbPath, asnDbPath, lastUpdated } = settingsStore.get("geo");
+
+  // Check if databases actually exist
+  const cityExists = cityDbPath ? await fileExists(cityDbPath) : false;
+  const asnExists = asnDbPath ? await fileExists(asnDbPath) : false;
+
+  const cityDbStatus: GeoDatabaseMeta["cityDbStatus"] = cityDbPath
+    ? cityExists
+      ? "loaded"
+      : "error"
+    : "missing";
+
+  const asnDbStatus: GeoDatabaseMeta["asnDbStatus"] = asnDbPath
+    ? asnExists
+      ? "loaded"
+      : "error"
+    : "missing";
+
+  let statusMessage: string | undefined;
+  if (!cityExists && !asnExists) {
+    statusMessage = "GeoIP databases not found. Location data will be unavailable.";
+  } else if (!cityExists) {
+    statusMessage = "City database not found. Location data will be limited.";
+  } else if (!asnExists) {
+    statusMessage = "ASN database not found. Network information will be unavailable.";
+  }
+
   return {
     cityDbPath,
     asnDbPath,
-    updatedAt: lastUpdated
+    updatedAt: lastUpdated,
+    cityDbStatus,
+    asnDbStatus,
+    statusMessage
   };
 }
 
@@ -211,4 +280,25 @@ export async function configureGeoDatabaseDefaults(): Promise<void> {
     asnDbPath,
     lastUpdated: updated
   });
+
+  log.info("Geo database configuration", {
+    cityDbPath,
+    cityExists: await fileExists(cityAssetPath),
+    asnDbPath,
+    asnExists: await fileExists(asnAssetPath)
+  });
+}
+
+export async function updateGeoDatabasePaths(cityPath?: string, asnPath?: string): Promise<void> {
+  const store = getSettingsStore();
+  const geoSettings = store.get("geo");
+
+  store.set("geo", {
+    ...geoSettings,
+    cityDbPath: cityPath,
+    asnDbPath: asnPath,
+    lastUpdated: Date.now()
+  });
+
+  log.info("Updated geo database paths", { cityPath, asnPath });
 }

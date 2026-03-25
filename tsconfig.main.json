@@ -1,13 +1,13 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "composite": true,
     "outDir": "dist/main",
     "module": "CommonJS",
     "target": "ES2021",
     "lib": ["ES2021"],
     "types": ["node"],
-    "isolatedModules": false,
-    "declaration": false
+    "isolatedModules": false
   },
   "include": ["src/main/**/*.ts", "src/common/**/*.ts"],
   "exclude": ["src/renderer"]

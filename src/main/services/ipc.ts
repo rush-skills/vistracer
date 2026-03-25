@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
 import {
@@ -16,9 +16,11 @@ import {
   addCompletedRun,
   getGeoDatabaseMeta,
   getRecentRuns,
-  getSettingsStore
+  getSettingsStore,
+  updateGeoDatabasePaths
 } from "./persistence";
 import { getLogger } from "./logger";
+import { reloadGeoDatabases } from "./geo";
 
 const log = getLogger();
 
@@ -135,8 +137,41 @@ export function setupIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC_CHANNELS.GEO_DB_META, async (): Promise<GeoDatabaseMeta> => {
-    return getGeoDatabaseMeta();
+    return await getGeoDatabaseMeta();
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.GEO_DB_UPDATE_PATHS,
+    async (_event, payload: { cityPath?: string; asnPath?: string }): Promise<void> => {
+      await updateGeoDatabasePaths(payload.cityPath, payload.asnPath);
+      await reloadGeoDatabases();
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GEO_DB_SELECT_FILE,
+    async (event): Promise<string | undefined> => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window) {
+        return undefined;
+      }
+
+      const result = await dialog.showOpenDialog(window, {
+        title: "Select GeoLite2 Database File",
+        filters: [
+          { name: "MaxMind Database", extensions: ["mmdb"] },
+          { name: "All Files", extensions: ["*"] }
+        ],
+        properties: ["openFile"]
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return undefined;
+      }
+
+      return result.filePaths[0];
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.SNAPSHOT_EXPORT,

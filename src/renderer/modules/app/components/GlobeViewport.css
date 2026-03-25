@@ -29,13 +29,13 @@
   width: clamp(240px, 40vw, 360px);
   aspect-ratio: 1;
   border-radius: 999px;
-  background: radial-gradient(circle at 30% 30%, rgba(58, 201, 255, 0.85), transparent 60%),
-    radial-gradient(circle at 70% 70%, rgba(83, 70, 255, 0.45), transparent 55%),
+  background: radial-gradient(circle at 30% 30%, rgba(95, 168, 151, 0.85), transparent 60%),
+    radial-gradient(circle at 70% 70%, rgba(201, 168, 87, 0.45), transparent 55%),
     rgba(9, 10, 15, 0.7);
   box-shadow:
-    0 0 40px rgba(0, 209, 255, 0.18),
+    0 0 40px rgba(95, 168, 151, 0.18),
     inset 0 0 22px rgba(8, 11, 18, 0.9);
-  border: 1px solid rgba(49, 196, 255, 0.2);
+  border: 1px solid rgba(95, 168, 151, 0.2);
 }
 
 .globe-viewport__message {

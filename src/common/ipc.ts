@@ -25,6 +25,27 @@ export interface AsnDetails {
   asn?: number;
   name?: string;
   network?: string;
+  country?: string;
+  registry?: string;
+}
+
+export type ProviderId = "maxmind" | "team-cymru" | "rdap" | "ripe-stat" | "peeringdb";
+
+export interface ProviderStatus {
+  provider: ProviderId;
+  status: "success" | "error" | "skipped";
+  message?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface PeeringDbDetails {
+  id?: number;
+  name?: string;
+  aka?: string;
+  website?: string;
+  city?: string;
+  country?: string;
+  ixCount?: number;
 }
 
 export interface HopLatencyStats {
@@ -45,6 +66,8 @@ export interface HopResolution {
   isPrivate: boolean;
   isAnycastSuspected: boolean;
   rawLine: string;
+  providers?: ProviderStatus[];
+  peeringDb?: PeeringDbDetails;
 }
 
 export interface TracerouteSummary {
@@ -83,10 +106,15 @@ export interface RecentRun {
   protocol: TracerouteProtocol;
 }
 
+export type GeoDatabaseStatus = "loaded" | "missing" | "error";
+
 export interface GeoDatabaseMeta {
   cityDbPath?: string;
   asnDbPath?: string;
   updatedAt?: number;
+  cityDbStatus: GeoDatabaseStatus;
+  asnDbStatus: GeoDatabaseStatus;
+  statusMessage?: string;
 }
 
 export interface SnapshotExportOptions {
@@ -100,11 +128,39 @@ export interface SnapshotExportResult {
   error?: string;
 }
 
+export interface TeamCymruSettings {
+  enabled: boolean;
+}
+
+export interface RdapSettings {
+  enabled: boolean;
+  baseUrl?: string;
+}
+
+export interface RipeStatSettings {
+  enabled: boolean;
+  sourceApp: string;
+}
+
+export interface PeeringDbSettings {
+  enabled: boolean;
+  apiKey?: string;
+}
+
+export interface IntegrationSettings {
+  teamCymru: TeamCymruSettings;
+  rdap: RdapSettings;
+  ripeStat: RipeStatSettings;
+  peeringDb: PeeringDbSettings;
+}
+
 export const IPC_CHANNELS = {
   TRACEROUTE_RUN: "vistracer:traceroute:run",
   TRACEROUTE_CANCEL: "vistracer:traceroute:cancel",
   TRACEROUTE_PROGRESS: "vistracer:traceroute:progress",
   GEO_DB_META: "vistracer:geo:meta",
+  GEO_DB_UPDATE_PATHS: "vistracer:geo:update-paths",
+  GEO_DB_SELECT_FILE: "vistracer:geo:select-file",
   RECENT_RUNS: "vistracer:runs:list",
   SNAPSHOT_EXPORT: "vistracer:snapshot:export",
   SETTINGS_GET: "vistracer:settings:get",

@@ -3,8 +3,8 @@
   grid-template-rows: auto 1fr auto;
   height: 100vh;
   width: 100vw;
-  background: radial-gradient(circle at 20% 20%, rgba(49, 196, 255, 0.12), transparent 60%),
-    radial-gradient(circle at 80% 30%, rgba(83, 70, 255, 0.12), transparent 55%),
+  background: radial-gradient(circle at 20% 20%, rgba(95, 168, 151, 0.12), transparent 60%),
+    radial-gradient(circle at 80% 30%, rgba(201, 168, 87, 0.12), transparent 55%),
     var(--color-background);
   color: var(--color-text);
   overflow: hidden; /* Prevent page-level scrolling */

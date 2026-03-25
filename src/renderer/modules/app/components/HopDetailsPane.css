@@ -34,11 +34,11 @@
 }
 
 .hop-details__badge--running {
-  background: rgba(49, 196, 255, 0.25);
+  background: rgba(95, 168, 151, 0.25);
 }
 
 .hop-details__badge--success {
-  background: rgba(75, 214, 127, 0.25);
+  background: rgba(95, 168, 151, 0.25);
 }
 
 .hop-details__badge--error {
@@ -88,11 +88,23 @@
 }
 
 .hop-details__row:hover {
-  background: rgba(49, 196, 255, 0.12);
+  background: rgba(95, 168, 151, 0.12);
 }
 
 .hop-details__row--selected {
-  background: rgba(49, 196, 255, 0.18);
+  background: rgba(95, 168, 151, 0.18);
+}
+
+.hop-details__asn-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.hop-details__asn-cell small {
+  display: block;
+  opacity: 0.75;
+  line-height: 1.4;
 }
 
 .hop-details__endpoint {

@@ -404,26 +404,40 @@ const HopMarkers: React.FC<{ run: TracerouteRun; selectedHopIndex?: number }> = 
 }) => {
   const setSelectedHop = useTracerouteStore((state) => state.setSelectedHop);
 
+  // Sort hops so that the selected hop is rendered last (appears on top)
+  const sortedHops = useMemo(() => {
+    const hopsWithGeo = run.hops.filter((hop) => hop.geo);
+
+    if (selectedHopIndex === undefined) {
+      return hopsWithGeo;
+    }
+
+    // Separate selected hop from others
+    const selectedHop = hopsWithGeo.find((hop) => hop.hopIndex === selectedHopIndex);
+    const otherHops = hopsWithGeo.filter((hop) => hop.hopIndex !== selectedHopIndex);
+
+    // Return with selected hop at the end
+    return selectedHop ? [...otherHops, selectedHop] : hopsWithGeo;
+  }, [run.hops, selectedHopIndex]);
+
   return (
     <group>
-      {run.hops
-        .filter((hop) => hop.geo)
-        .map((hop) => {
-          const position = latLngToVector3(hop.geo!.latitude, hop.geo!.longitude, EARTH_RADIUS_UNITS + 0.05);
-          const isSelected = hop.hopIndex === selectedHopIndex;
-          const color = hopIndexToColor(hop.hopIndex);
+      {sortedHops.map((hop) => {
+        const position = latLngToVector3(hop.geo!.latitude, hop.geo!.longitude, EARTH_RADIUS_UNITS + 0.05);
+        const isSelected = hop.hopIndex === selectedHopIndex;
+        const color = hopIndexToColor(hop.hopIndex);
 
-          return (
-            <mesh
-              key={`hop-${hop.hopIndex}`}
-              position={position.toArray() as [number, number, number]}
-              onClick={() => setSelectedHop(hop.hopIndex)}
-            >
-              <sphereGeometry args={[isSelected ? 0.16 : 0.12, 24, 24]} />
-              <meshStandardMaterial color={color} emissive={color} emissiveIntensity={isSelected ? 0.8 : 0.4} />
-            </mesh>
-          );
-        })}
+        return (
+          <mesh
+            key={`hop-${hop.hopIndex}`}
+            position={position.toArray() as [number, number, number]}
+            onClick={() => setSelectedHop(hop.hopIndex)}
+          >
+            <sphereGeometry args={[isSelected ? 0.16 : 0.12, 24, 24]} />
+            <meshStandardMaterial color={color} emissive={color} emissiveIntensity={isSelected ? 0.8 : 0.4} />
+          </mesh>
+        );
+      })}
     </group>
   );
 };
@@ -503,7 +517,7 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
           maxDistance={30}
         />
       </Canvas>
-      {!run && (
+      {/* {!run && (
         <div style={{
           position: 'absolute',
           bottom: '2rem',
@@ -518,10 +532,10 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
             margin: 0,
             maxWidth: '260px'
           }}>
-            Run a traceroute to animate the globe.
+            Run a traceroute to animate the globe
           </p>
         </div>
-      )}
+      )} */}
       {run && !hasRenderableHops && (
         <div style={{
           position: 'absolute',

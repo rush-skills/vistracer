@@ -1,15 +1,19 @@
 import React, { useState } from "react";
 import { useGeoDatabaseMeta } from "@renderer/hooks/useGeoDatabaseMeta";
 import { useTracerouteStore, selectCurrentRun } from "@renderer/state/tracerouteStore";
+import { GeoWarningBanner } from "./GeoWarningBanner";
+import { GeoSettingsModal } from "./GeoSettingsModal";
+import type { VisTracerWindow } from "@common/bridge";
 import "./FooterBar.css";
 
 type ExportState = "idle" | "working" | "success" | "error";
 
 export const FooterBar: React.FC = () => {
-  const { data: geoMeta } = useGeoDatabaseMeta();
+  const { data: geoMeta, refetch: refetchGeoMeta } = useGeoDatabaseMeta();
   const currentRun = useTracerouteStore(selectCurrentRun);
   const [exportState, setExportState] = useState<ExportState>("idle");
   const [message, setMessage] = useState<string | undefined>();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const handleExport = async () => {
     setExportState("working");
@@ -55,43 +59,71 @@ export const FooterBar: React.FC = () => {
     }
   };
 
+  const handleUpdateGeoPaths = async (cityPath?: string, asnPath?: string) => {
+    await (window as VisTracerWindow).visTracer.updateGeoDatabasePaths(cityPath, asnPath);
+    await refetchGeoMeta();
+  };
+
   const exportDisabled = !currentRun || exportState === "working";
   const updatedLabel = geoMeta?.updatedAt
     ? new Date(geoMeta.updatedAt).toLocaleDateString()
     : "unknown";
 
-  const geoStatus = geoMeta?.cityDbPath
-    ? `GeoLite2 loaded (updated ${updatedLabel})`
-    : "GeoLite2 database not configured";
+  const geoStatus =
+    geoMeta?.cityDbStatus === "loaded" && geoMeta?.asnDbStatus === "loaded"
+      ? `GeoLite2 loaded (updated ${updatedLabel})`
+      : geoMeta?.cityDbStatus === "loaded" || geoMeta?.asnDbStatus === "loaded"
+        ? `GeoLite2 partially loaded (updated ${updatedLabel})`
+        : "GeoLite2 database not configured";
 
   return (
-    <footer className="footer-bar">
-      <div className="footer-bar__legend">
-        <span className="footer-bar__legend-item">
-          <span className="footer-bar__color footer-bar__color--fast"></span>
-          Fast (&lt; 50ms)
-        </span>
-        <span className="footer-bar__legend-item">
-          <span className="footer-bar__color footer-bar__color--moderate"></span>
-          Moderate (50-150ms)
-        </span>
-        <span className="footer-bar__legend-item">
-          <span className="footer-bar__color footer-bar__color--slow"></span>
-          Slow (&gt; 150ms)
-        </span>
-      </div>
-      <div className="footer-bar__meta">
-        <span>{geoStatus}</span>
-        <button
-          type="button"
-          className="footer-bar__export"
-          onClick={handleExport}
-          disabled={exportDisabled}
-        >
-          {exportState === "working" ? "Downloading…" : "Download snapshot"}
-        </button>
-        {message && <span className="footer-bar__message">{message}</span>}
-      </div>
-    </footer>
+    <>
+      <footer className="footer-bar">
+        <div className="footer-bar__content">
+          <div className="footer-bar__legend">
+            <span className="footer-bar__legend-item">
+              <span className="footer-bar__color footer-bar__color--fast"></span>
+              Fast (&lt; 50ms)
+            </span>
+            <span className="footer-bar__legend-item">
+              <span className="footer-bar__color footer-bar__color--moderate"></span>
+              Moderate (50-150ms)
+            </span>
+            <span className="footer-bar__legend-item">
+              <span className="footer-bar__color footer-bar__color--slow"></span>
+              Slow (&gt; 150ms)
+            </span>
+          </div>
+          <div className="footer-bar__meta">
+            <span>{geoStatus}</span>
+            <button
+              type="button"
+              className="footer-bar__export"
+              onClick={handleExport}
+              disabled={exportDisabled}
+            >
+              {exportState === "working" ? "Downloading…" : "Download snapshot"}
+            </button>
+            {message && <span className="footer-bar__message">{message}</span>}
+          </div>
+        </div>
+        {geoMeta && (
+          <div className="footer-bar__warning">
+            <GeoWarningBanner
+              geoMeta={geoMeta}
+              onConfigure={() => setIsSettingsOpen(true)}
+            />
+          </div>
+        )}
+      </footer>
+      {geoMeta && (
+        <GeoSettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          geoMeta={geoMeta}
+          onUpdate={handleUpdateGeoPaths}
+        />
+      )}
+    </>
   );
 };

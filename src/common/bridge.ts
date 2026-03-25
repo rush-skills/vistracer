@@ -13,6 +13,8 @@ export interface RendererApi {
   cancelTraceroute: (runId: string) => Promise<void>;
   getRecentRuns: () => Promise<RecentRun[]>;
   getGeoDatabaseMeta: () => Promise<GeoDatabaseMeta>;
+  updateGeoDatabasePaths: (cityPath?: string, asnPath?: string) => Promise<void>;
+  selectGeoDbFile: () => Promise<string | undefined>;
   exportSnapshot: (options: SnapshotExportOptions) => Promise<SnapshotExportResult>;
   getSettings: <T = unknown>(key: string) => Promise<T | undefined>;
   setSettings: <T = unknown>(key: string, value: T) => Promise<void>;

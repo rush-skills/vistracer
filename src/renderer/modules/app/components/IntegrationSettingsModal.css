@@ -1,0 +1,302 @@
+.integration-settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 18, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  backdrop-filter: blur(6px);
+  padding: 1rem;
+}
+
+.integration-settings-modal {
+  background: rgba(18, 20, 28, 0.94);
+  border-radius: 18px;
+  width: min(520px, 92%);
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text);
+  position: relative;
+  max-height: 90vh;
+  overflow: auto;
+}
+
+.integration-settings-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.integration-settings-modal__title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.integration-settings-modal__close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.25rem;
+  border-radius: 10px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.integration-settings-modal__close:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: var(--color-accent);
+}
+
+.integration-settings-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.integration-settings-modal__intro {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.integration-settings-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.integration-settings-modal__label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.integration-settings-modal__input {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 14, 20, 0.85);
+  color: var(--color-text);
+  padding: 0.6rem 0.85rem;
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.integration-settings-modal__input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-muted);
+}
+
+.integration-settings-modal__input[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.integration-settings-modal__hint {
+  font-size: 0.78rem;
+  opacity: 0.75;
+  line-height: 1.4;
+}
+
+.integration-settings-modal__field--note {
+  padding: 0.6rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.integration-settings-modal__geo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin-top: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(12, 14, 20, 0.6);
+}
+
+.integration-settings-modal__geo-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.integration-settings-modal__geo-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.integration-settings-modal__geo-header small {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  opacity: 0.72;
+}
+
+.integration-settings-modal__geo-updated {
+  font-size: 0.75rem;
+  opacity: 0.65;
+  white-space: nowrap;
+}
+
+.integration-settings-modal__geo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.integration-settings-modal__geo-field label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  opacity: 0.85;
+}
+
+.integration-settings-modal__geo-field code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+.integration-settings-modal__geo-inputs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.integration-settings-modal__geo-inputs input {
+  flex: 1;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 10, 16, 0.85);
+  color: var(--color-text);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.85rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.integration-settings-modal__geo-inputs input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-muted);
+}
+
+.integration-settings-modal__geo-inputs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.integration-settings-modal__geo-inputs button:hover:not([disabled]) {
+  transform: translateY(-1px);
+  opacity: 0.9;
+}
+
+.integration-settings-modal__geo-inputs button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.integration-settings-modal__geo-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+}
+
+.integration-settings-modal__geo-status--success {
+  background: rgba(95, 168, 151, 0.16);
+  color: #5fa897;
+}
+
+.integration-settings-modal__geo-status--warning {
+  background: rgba(255, 184, 77, 0.16);
+  color: #ffb84d;
+}
+
+.integration-settings-modal__geo-status--error {
+  background: rgba(255, 95, 95, 0.16);
+  color: #ff5f5f;
+}
+
+.integration-settings-modal__geo-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.integration-settings-modal__geo-message {
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.integration-settings-modal__geo-message--info {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.integration-settings-modal__geo-message--error {
+  color: #ff5f5f;
+}
+
+.integration-settings-modal__error {
+  color: var(--color-danger);
+  background: rgba(255, 87, 87, 0.12);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.integration-settings-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.integration-settings-modal__button {
+  border: none;
+  border-radius: 12px;
+  padding: 0.6rem 1.1rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.integration-settings-modal__button:hover:not([disabled]) {
+  transform: translateY(-1px);
+  opacity: 0.9;
+}
+
+.integration-settings-modal__button--primary {
+  background: linear-gradient(132deg, rgba(95, 168, 151, 0.9), rgba(201, 168, 87, 0.85));
+}
+
+.integration-settings-modal__button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

@@ -120,11 +120,14 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
           : "success"
         : "running";
 
-      const selectedHopIndex = event.hop
-        ? event.hop.hopIndex
-        : event.completed && state.selectedHopIndex == null && run.hops.length > 0
-          ? run.hops[run.hops.length - 1].hopIndex
-          : state.selectedHopIndex;
+      // Only auto-select hops during initial traceroute run, not on enrichment updates
+      // Enrichment updates come with completed=true, so we preserve the current selection
+      const selectedHopIndex =
+        event.hop && !event.completed
+          ? event.hop.hopIndex  // Auto-select during active traceroute
+          : event.completed && state.selectedHopIndex == null && run.hops.length > 0
+            ? run.hops[run.hops.length - 1].hopIndex  // Select last hop on completion if nothing selected
+            : state.selectedHopIndex;  // Preserve current selection (for enrichment updates)
 
       return {
         runs,

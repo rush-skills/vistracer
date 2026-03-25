@@ -25,6 +25,7 @@ interface TracerouteContext {
   child: ChildProcessWithoutNullStreams;
   onUpdate: (event: TracerouteProgressEvent) => void;
   canceled: boolean;
+  completed: boolean;
 }
 
 const activeRuns = new Map<string, TracerouteContext>();
@@ -198,7 +199,8 @@ function computeLatencyStats(values: number[]): HopLatencyStats {
 
 async function toHopResolution(
   parsed: ParsedHop,
-  request: TracerouteRequest
+  request: TracerouteRequest,
+  onEnrichmentUpdate?: (hop: HopResolution) => void
 ): Promise<HopResolution> {
   const latency = computeLatencyStats(parsed.rtts);
   const lossPercent = request.packetCount
@@ -210,7 +212,30 @@ async function toHopResolution(
     (parsed.ipAddress ? await resolveReverseDns(parsed.ipAddress, { forceRefresh: request.forceFresh }) : undefined);
 
   const geoLookup = parsed.ipAddress
-    ? await lookupGeo(parsed.ipAddress, { forceRefresh: request.forceFresh })
+    ? await lookupGeo(parsed.ipAddress, {
+        forceRefresh: request.forceFresh,
+        // When enrichment completes, send updated hop data
+        onEnrichmentComplete: (enrichedData) => {
+          if (onEnrichmentUpdate) {
+            const enrichedHop: HopResolution = {
+              hopIndex: parsed.hopIndex,
+              ipAddress: parsed.ipAddress,
+              hostName,
+              lossPercent,
+              latency,
+              geo: enrichedData.geo,
+              asn: enrichedData.asn,
+              providers: enrichedData.providers,
+              peeringDb: enrichedData.peeringDb,
+              isPrivate: isPrivateIpv4(parsed.ipAddress),
+              isAnycastSuspected: false,
+              rawLine: parsed.rawLine
+            };
+            log.info(`[traceroute] Sending enriched hop update for ${parsed.ipAddress}`);
+            onEnrichmentUpdate(enrichedHop);
+          }
+        }
+      })
     : undefined;
 
   return {
@@ -221,6 +246,8 @@ async function toHopResolution(
     latency,
     geo: geoLookup?.geo,
     asn: geoLookup?.asn,
+    providers: geoLookup?.providers ?? [],
+    peeringDb: geoLookup?.peeringDb,
     isPrivate: isPrivateIpv4(parsed.ipAddress),
     isAnycastSuspected: false,
     rawLine: parsed.rawLine
@@ -236,7 +263,25 @@ async function processLine(
     return null;
   }
 
-  const hop = await toHopResolution(parsed, context.request);
+  // Pass enrichment callback to send progressive updates
+  const hop = await toHopResolution(parsed, context.request, (enrichedHop) => {
+    // Update the hop map with enriched data
+    context.hopMap.set(enrichedHop.hopIndex, enrichedHop);
+
+    // Send progressive update to UI
+    // If traceroute already completed, send hop-only update without changing completion status
+    if (context.completed) {
+      log.info(`[traceroute] Sending enrichment update for completed run ${context.runId}`);
+      context.onUpdate({
+        runId: context.runId,
+        hop: enrichedHop,
+        completed: true // Keep completed status
+      });
+    } else {
+      context.onUpdate({ runId: context.runId, hop: enrichedHop, completed: false });
+    }
+  });
+
   context.hopMap.set(hop.hopIndex, hop);
   context.onUpdate({ runId: context.runId, hop, completed: false });
   return hop;
@@ -297,7 +342,8 @@ export async function runTraceroute(
     hopMap: new Map(),
     child,
     onUpdate,
-    canceled: false
+    canceled: false,
+    completed: false
   };
 
   activeRuns.set(runId, context);
@@ -360,6 +406,9 @@ export async function runTraceroute(
     summary,
     hops: hopList
   };
+
+  // Mark context as completed so enrichment callbacks know not to change status
+  context.completed = true;
 
   onUpdate({
     runId,

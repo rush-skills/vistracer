@@ -106,7 +106,3 @@ Accessibility: keyboard nav for hop selection; high-contrast mode; reduced-motio
 * **Permissions/AV:** Raw sockets blocked → prefer system traceroute binaries.
 * **GPU variance:** Provide fallback to 2D map (MapLibre) if WebGL2 unavailable.
 * **Licenses/updates:** Guide users through GeoLite2 signup and DB refresh; keep a last-known copy.
-
-## 11) Analytics (opt-in)
-
-* Anonymous: app version, OS, render FPS buckets, avg hops resolved, DB age. No targets or IPs.

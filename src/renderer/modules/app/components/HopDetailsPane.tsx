@@ -63,6 +63,27 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = ({ run, selectedHop
                 run.hops.map((hop) => {
                   const isSelected = hop.hopIndex === selectedHopIndex;
                   const hopColor = hopIndexToColor(hop.hopIndex);
+                  const providers = hop.providers ?? [];
+                  const rdapProvider = providers.find(
+                    (provider) => provider.provider === "rdap" && provider.status === "success"
+                  );
+                  const ripeProvider = providers.find(
+                    (provider) => provider.provider === "ripe-stat" && provider.status === "success"
+                  );
+                  const rdapDetails = (rdapProvider?.details ?? {}) as Record<string, unknown>;
+                  const ripeDetails = (ripeProvider?.details ?? {}) as Record<string, unknown>;
+                  const rdapCountry =
+                    typeof rdapDetails.country === "string" ? rdapDetails.country : undefined;
+                  const ripePrefix =
+                    typeof ripeDetails.prefix === "string" ? ripeDetails.prefix : undefined;
+                  const locationLabel = hop.geo
+                    ? `${hop.geo.city ? `${hop.geo.city}, ` : ""}${hop.geo.country ?? ""}`.trim()
+                    : rdapCountry
+                      ? `RDAP: ${rdapCountry}`
+                      : hop.isPrivate
+                        ? "Private"
+                        : "Unknown";
+
                   return (
                     <tr
                       key={hop.hopIndex}
@@ -72,11 +93,11 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = ({ run, selectedHop
                       <td>
                         <div
                           style={{
-                            width: '12px',
-                            height: '12px',
-                            borderRadius: '50%',
+                            width: "12px",
+                            height: "12px",
+                            borderRadius: "50%",
                             backgroundColor: hopColor,
-                            margin: '0 auto'
+                            margin: "0 auto"
                           }}
                         />
                       </td>
@@ -96,19 +117,23 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = ({ run, selectedHop
                         </div>
                       </td>
                       <td>{hop.lossPercent == null ? "–" : `${hop.lossPercent}%`}</td>
+                      <td>{locationLabel || "Unknown"}</td>
                       <td>
-                        {hop.geo ? (
-                          <>
-                            {hop.geo.city ? `${hop.geo.city}, ` : ""}
-                            {hop.geo.country ?? ""}
-                          </>
-                        ) : (
-                          hop.isPrivate ? "Private" : "Unknown"
-                        )}
-                      </td>
-                      <td>
-                        {hop.asn?.asn ? `AS${hop.asn.asn}` : "–"}
-                        {hop.asn?.name && <small>{hop.asn.name}</small>}
+                        <div className="hop-details__asn-cell">
+                          <div>{hop.asn?.asn ? `AS${hop.asn.asn}` : "–"}</div>
+                          {hop.asn?.name && <small>{hop.asn.name}</small>}
+                          {hop.asn?.network && <small>{hop.asn.network}</small>}
+                          {ripePrefix && ripePrefix !== hop.asn?.network && (
+                            <small>RIPE: {ripePrefix}</small>
+                          )}
+                          {hop.peeringDb?.name && <small>PeeringDB: {hop.peeringDb.name}</small>}
+                          {hop.peeringDb?.city && (
+                            <small>
+                              {hop.peeringDb.city}
+                              {hop.peeringDb.country ? `, ${hop.peeringDb.country}` : ""}
+                            </small>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

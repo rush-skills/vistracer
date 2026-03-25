@@ -1,8 +1,16 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { TracerouteProtocol } from "@common/ipc";
+import type {
+  GeoDatabaseMeta,
+  IntegrationSettings,
+  ProviderId,
+  TracerouteProtocol
+} from "@common/ipc";
 import { useRecentRuns } from "@renderer/hooks/useRecentRuns";
-import { useTracerouteStore } from "@renderer/state/tracerouteStore";
+import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
+import { FiSettings } from "react-icons/fi";
+import { IntegrationSettingsModal } from "./IntegrationSettingsModal";
+import logo from "@assets/logo.png";
 import "./TopBar.css";
 
 interface TracerouteFormState {
@@ -29,18 +37,234 @@ const numericConstraints = {
   packetCount: { min: 1, max: 5 }
 } as const;
 
+const integrationDefaults: IntegrationSettings = {
+  teamCymru: { enabled: true },
+  rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
+  ripeStat: { enabled: true, sourceApp: "VisTracer" },
+  peeringDb: { enabled: false }
+};
+
+type IntegrationKey = keyof IntegrationSettings;
+
+const integrationToggleConfig: Array<{
+  key: IntegrationKey;
+  label: string;
+  description: string;
+  providerId: ProviderId;
+}> = [
+  {
+    key: "teamCymru",
+    label: "Team Cymru",
+    description: "IP ↔ ASN mapping",
+    providerId: "team-cymru"
+  },
+  {
+    key: "rdap",
+    label: "RDAP",
+    description: "Registry metadata fallback",
+    providerId: "rdap"
+  },
+  {
+    key: "ripeStat",
+    label: "RIPE Stat",
+    description: "Prefix + holder enrichment",
+    providerId: "ripe-stat"
+  },
+  {
+    key: "peeringDb",
+    label: "PeeringDB",
+    description: "Facility & operator context",
+    providerId: "peeringdb"
+  }
+];
+
+const normalizeIntegrations = (
+  settings?: Partial<IntegrationSettings>
+): IntegrationSettings => ({
+  teamCymru: {
+    enabled: settings?.teamCymru?.enabled ?? integrationDefaults.teamCymru.enabled
+  },
+  rdap: {
+    enabled: settings?.rdap?.enabled ?? integrationDefaults.rdap.enabled,
+    baseUrl: settings?.rdap?.baseUrl ?? integrationDefaults.rdap.baseUrl
+  },
+  ripeStat: {
+    enabled: settings?.ripeStat?.enabled ?? integrationDefaults.ripeStat.enabled,
+    sourceApp: "VisTracer"
+  },
+  peeringDb: {
+    enabled: settings?.peeringDb?.enabled ?? integrationDefaults.peeringDb.enabled,
+    apiKey: settings?.peeringDb?.apiKey
+  }
+});
+
 export const TopBar: React.FC = () => {
   const [form, setForm] = useState<TracerouteFormState>(defaultState);
+  const [integrationSettings, setIntegrationSettings] = useState<IntegrationSettings>(integrationDefaults);
+  const [integrationsLoading, setIntegrationsLoading] = useState(true);
+  const [integrationSaveError, setIntegrationSaveError] = useState<string | undefined>(undefined);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [geoMeta, setGeoMeta] = useState<GeoDatabaseMeta | undefined>(undefined);
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [geoError, setGeoError] = useState<string | undefined>(undefined);
   const status = useTracerouteStore((state) => state.status);
   const error = useTracerouteStore((state) => state.error);
   const startRun = useTracerouteStore((state) => state.startRun);
   const cancelRun = useTracerouteStore((state) => state.cancelRun);
   const pendingRequest = useTracerouteStore((state) => state.pendingRequest);
   const currentRunId = useTracerouteStore((state) => state.currentRunId);
+  const currentRun = useTracerouteStore(selectCurrentRun);
   const queryClient = useQueryClient();
   const { data: recentRuns } = useRecentRuns();
 
   const isRunning = status === "running";
+
+  useEffect(() => {
+    let mounted = true;
+    window.visTracer
+      .getSettings<IntegrationSettings>("integrations")
+      .then((stored) => {
+        if (!mounted) {
+          return;
+        }
+        const merged = normalizeIntegrations(stored ?? undefined);
+        setIntegrationSettings(merged);
+      })
+      .catch((loadError) => {
+        if (!mounted) {
+          return;
+        }
+        const message =
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load integration settings.";
+        setIntegrationSaveError(message);
+      })
+      .finally(() => {
+        if (mounted) {
+          setIntegrationsLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const loadGeoMeta = React.useCallback(async () => {
+    setGeoLoading(true);
+    try {
+      const meta = await window.visTracer.getGeoDatabaseMeta();
+      setGeoMeta(meta);
+      setGeoError(undefined);
+    } catch (metaError) {
+      const message =
+        metaError instanceof Error
+          ? metaError.message
+          : "Failed to load GeoIP database status.";
+      setGeoError(message);
+    } finally {
+      setGeoLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (settingsModalOpen) {
+      void loadGeoMeta();
+    }
+  }, [settingsModalOpen, loadGeoMeta]);
+
+  const providerErrors = useMemo<Partial<Record<ProviderId, string>>>(() => {
+    if (!currentRun) {
+      return {};
+    }
+
+    const errors: Partial<Record<ProviderId, string>> = {};
+
+    for (const hop of currentRun.hops) {
+      if (!hop.providers) {
+        continue;
+      }
+
+      for (const provider of hop.providers) {
+        // Skip if not an error, or if already have an error for this provider
+        if (provider.status !== "error" || errors[provider.provider]) {
+          continue;
+        }
+
+        // Filter out "no data" messages - these are not real errors
+        const message = provider.message ?? "Provider returned an error.";
+        const isNoDataMessage = message.toLowerCase().includes("no data");
+
+        if (!isNoDataMessage) {
+          errors[provider.provider] = message;
+        }
+      }
+    }
+
+    return errors;
+  }, [currentRun]);
+
+  const persistIntegrations = React.useCallback(
+    async (next: IntegrationSettings) => {
+      try {
+        const payload: IntegrationSettings = {
+          ...next,
+          ripeStat: { ...next.ripeStat, sourceApp: "VisTracer" }
+        };
+        await window.visTracer.setSettings("integrations", payload);
+        setIntegrationSaveError(undefined);
+      } catch (persistError) {
+        const message =
+          persistError instanceof Error
+            ? persistError.message
+            : "Failed to update integration settings.";
+        setIntegrationSaveError(message);
+        throw new Error(message);
+      }
+    },
+    []
+  );
+
+  const handleGeoSave = React.useCallback(
+    async (paths: { cityPath?: string; asnPath?: string }) => {
+      setGeoLoading(true);
+      try {
+        await window.visTracer.updateGeoDatabasePaths(paths.cityPath, paths.asnPath);
+        await loadGeoMeta();
+        setGeoError(undefined);
+      } catch (updateError) {
+        const message =
+          updateError instanceof Error
+            ? updateError.message
+            : "Failed to update GeoIP database paths.";
+        setGeoError(message);
+        throw new Error(message);
+      } finally {
+        setGeoLoading(false);
+      }
+    },
+    [loadGeoMeta]
+  );
+
+  const handleIntegrationToggle =
+    (key: IntegrationKey) => (event: React.ChangeEvent<HTMLInputElement>) => {
+      const enabled = event.target.checked;
+      setIntegrationSettings((previous) => {
+        const snapshot = previous;
+        const nextSection = { ...snapshot[key], enabled } as IntegrationSettings[IntegrationKey];
+        const next: IntegrationSettings = {
+          ...snapshot,
+          [key]: nextSection
+        };
+
+        void persistIntegrations(next).catch(() => {
+          setIntegrationSettings(snapshot);
+        });
+
+        return next;
+      });
+    };
 
   const isSubmitEnabled = useMemo(() => {
     if (!form.target.trim()) {
@@ -120,12 +344,9 @@ export const TopBar: React.FC = () => {
 
   return (
     <header className="top-bar">
-      <div className="top-bar__brand">
-        <span className="top-bar__logo">VisTracer</span>
-        <span className="top-bar__tagline">— Visualize hop-by-hop network paths</span>
-      </div>
       <form className="top-bar__form" onSubmit={handleSubmit}>
         <div className="top-bar__input-group">
+          <img src={logo} alt="VisTracer" className="top-bar__logo" />
           <input
             className="top-bar__input"
             type="text"
@@ -166,7 +387,45 @@ export const TopBar: React.FC = () => {
               Clear
             </button>
           )}
+          <button
+            type="button"
+            className="top-bar__settings"
+            onClick={() => setSettingsModalOpen(true)}
+            aria-label="Integration settings"
+          >
+            <FiSettings />
+          </button>
         </div>
+        <div className="top-bar__integrations">
+          {integrationToggleConfig.map((config) => {
+            const section = integrationSettings[config.key];
+            const providerError = providerErrors[config.providerId];
+            return (
+              <label key={config.key} className="top-bar__integration-toggle">
+                <span className="top-bar__integration-header">
+                  <input
+                    type="checkbox"
+                    checked={section.enabled}
+                    onChange={handleIntegrationToggle(config.key)}
+                    disabled={integrationsLoading}
+                  />
+                  <span>{config.label}</span>
+                </span>
+                <small className="top-bar__integration-note">{config.description}</small>
+                {providerError && (
+                  <small className="top-bar__integration-error" role="status">
+                    {providerError}
+                  </small>
+                )}
+              </label>
+            );
+          })}
+        </div>
+        {integrationSaveError && (
+          <div className="top-bar__integration-error top-bar__integration-error--global" role="status">
+            {integrationSaveError}
+          </div>
+        )}
         <div className="top-bar__advanced">
           <label className="top-bar__number">
             Max hops
@@ -239,6 +498,19 @@ export const TopBar: React.FC = () => {
           )}
         </div>
       </form>
+      <IntegrationSettingsModal
+        isOpen={settingsModalOpen}
+        settings={integrationSettings}
+        geoMeta={geoMeta}
+        geoLoading={geoLoading}
+        geoError={geoError}
+        onClose={() => setSettingsModalOpen(false)}
+        onSave={async (updated) => {
+          await persistIntegrations(updated);
+          setIntegrationSettings(updated);
+        }}
+        onGeoSave={handleGeoSave}
+      />
     </header>
   );
 };

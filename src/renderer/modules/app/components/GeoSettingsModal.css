@@ -1,0 +1,230 @@
+.geo-settings-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.geo-settings-modal {
+  background: linear-gradient(135deg, rgba(20, 22, 32, 0.98), rgba(10, 11, 16, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.geo-settings-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.geo-settings-modal__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.geo-settings-modal__close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.5rem;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.geo-settings-modal__close:hover {
+  opacity: 1;
+}
+
+.geo-settings-modal__body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.geo-settings-modal__info {
+  padding: 1rem;
+  background: rgba(70, 130, 180, 0.1);
+  border: 1px solid rgba(70, 130, 180, 0.2);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.geo-settings-modal__info a {
+  color: #6db3f2;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s ease;
+}
+
+.geo-settings-modal__info a:hover {
+  border-bottom-color: #6db3f2;
+}
+
+.geo-settings-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.geo-settings-modal__label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.geo-settings-modal__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.geo-settings-modal__status--success {
+  color: #5FA897;
+  background: rgba(95, 168, 151, 0.15);
+}
+
+.geo-settings-modal__status--warning {
+  color: #ffb84d;
+  background: rgba(255, 184, 77, 0.15);
+}
+
+.geo-settings-modal__status--error {
+  color: #ff5f5f;
+  background: rgba(255, 95, 95, 0.15);
+}
+
+.geo-settings-modal__input-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.geo-settings-modal__input {
+  flex: 1;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: inherit;
+  font-size: 0.9rem;
+  font-family: 'Courier New', monospace;
+  transition: border-color 0.15s ease;
+}
+
+.geo-settings-modal__input:focus {
+  outline: none;
+  border-color: rgba(109, 179, 242, 0.5);
+}
+
+.geo-settings-modal__browse {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.geo-settings-modal__browse:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.geo-settings-modal__error {
+  padding: 0.75rem;
+  background: rgba(255, 95, 95, 0.15);
+  border: 1px solid rgba(255, 95, 95, 0.3);
+  border-radius: 6px;
+  color: #ff5f5f;
+  font-size: 0.85rem;
+}
+
+.geo-settings-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.geo-settings-modal__button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.15s ease;
+}
+
+.geo-settings-modal__button:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.geo-settings-modal__button--primary {
+  background: rgba(109, 179, 242, 0.2);
+  border-color: rgba(109, 179, 242, 0.3);
+  color: #6db3f2;
+}
+
+.geo-settings-modal__button--primary:hover:not([disabled]) {
+  background: rgba(109, 179, 242, 0.3);
+  border-color: rgba(109, 179, 242, 0.5);
+}
+
+.geo-settings-modal__button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
