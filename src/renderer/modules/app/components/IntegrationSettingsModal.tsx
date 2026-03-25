@@ -198,71 +198,9 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
         </header>
         <form className="integration-settings-modal__body" onSubmit={handleSubmit}>
           <p className="integration-settings-modal__intro">
-            Enable optional credentials and endpoints to enrich hops with external network data.
-            Leave any field blank to keep the default.
+            Configure GeoLite2 databases first, then fine-tune optional enrichment providers. Leave
+            any field blank to keep the default.
           </p>
-
-          <div className="integration-settings-modal__field">
-            <label className="integration-settings-modal__label" htmlFor="integration-settings-rdap">
-              RDAP base URL
-            </label>
-            <input
-              id="integration-settings-rdap"
-              className="integration-settings-modal__input"
-              type="url"
-              value={form.rdapBaseUrl}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, rdapBaseUrl: event.target.value }))
-              }
-              placeholder="https://rdap.org/ip"
-            />
-            <small className="integration-settings-modal__hint">
-              VisTracer defaults to https://rdap.org/ip. Override if you operate a private RDAP
-              resolver.
-            </small>
-          </div>
-
-          <div className="integration-settings-modal__field">
-            <label className="integration-settings-modal__label" htmlFor="integration-settings-peeringdb">
-              PeeringDB API key
-            </label>
-            <input
-              id="integration-settings-peeringdb"
-              className="integration-settings-modal__input"
-              type="text"
-              value={form.peeringDbApiKey}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, peeringDbApiKey: event.target.value }))
-              }
-              placeholder="Optional"
-            />
-            <small className="integration-settings-modal__hint">
-              Optional. Adds authentication headers for faster, higher-rate PeeringDB requests.
-            </small>
-          </div>
-
-          <div className="integration-settings-modal__field">
-            <label className="integration-settings-modal__label" htmlFor="integration-settings-ripe">
-              RIPE Stat source app
-            </label>
-            <input
-              id="integration-settings-ripe"
-              className="integration-settings-modal__input"
-              type="text"
-              value="VisTracer"
-              disabled
-              readOnly
-            />
-            <small className="integration-settings-modal__hint">
-              RIPE Stat requests always identify as VisTracer.
-            </small>
-          </div>
-
-          <div className="integration-settings-modal__field integration-settings-modal__field--note">
-            <small className="integration-settings-modal__hint">
-              Team Cymru lookups run over their public whois service and do not require credentials.
-            </small>
-          </div>
 
           <section className="integration-settings-modal__geo">
             <header className="integration-settings-modal__geo-header">
@@ -348,6 +286,68 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
               </div>
             )}
           </section>
+
+          <div className="integration-settings-modal__field">
+            <label className="integration-settings-modal__label" htmlFor="integration-settings-rdap">
+              RDAP base URL
+            </label>
+            <input
+              id="integration-settings-rdap"
+              className="integration-settings-modal__input"
+              type="url"
+              value={form.rdapBaseUrl}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, rdapBaseUrl: event.target.value }))
+              }
+              placeholder="https://rdap.org/ip"
+            />
+            <small className="integration-settings-modal__hint">
+              VisTracer defaults to https://rdap.org/ip. Override if you operate a private RDAP
+              resolver.
+            </small>
+          </div>
+
+          <div className="integration-settings-modal__field">
+            <label className="integration-settings-modal__label" htmlFor="integration-settings-peeringdb">
+              PeeringDB API key
+            </label>
+            <input
+              id="integration-settings-peeringdb"
+              className="integration-settings-modal__input"
+              type="text"
+              value={form.peeringDbApiKey}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, peeringDbApiKey: event.target.value }))
+              }
+              placeholder="Optional"
+            />
+            <small className="integration-settings-modal__hint">
+              Optional. Adds authentication headers for faster, higher-rate PeeringDB requests.
+            </small>
+          </div>
+
+          <div className="integration-settings-modal__field">
+            <label className="integration-settings-modal__label" htmlFor="integration-settings-ripe">
+              RIPE Stat source app
+            </label>
+            <input
+              id="integration-settings-ripe"
+              className="integration-settings-modal__input"
+              type="text"
+              value="VisTracer"
+              disabled
+              readOnly
+            />
+            <small className="integration-settings-modal__hint">
+              RIPE Stat requests always identify as VisTracer.
+            </small>
+          </div>
+
+          <div className="integration-settings-modal__field integration-settings-modal__field--note">
+            <small className="integration-settings-modal__hint">
+              Team Cymru lookups run over their public whois service and do not require credentials.
+            </small>
+          </div>
 
           {error && <div className="integration-settings-modal__error">{error}</div>}
 

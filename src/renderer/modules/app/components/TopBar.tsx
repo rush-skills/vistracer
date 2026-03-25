@@ -8,9 +8,10 @@ import type {
 } from "@common/ipc";
 import { useRecentRuns } from "@renderer/hooks/useRecentRuns";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
-import { FiChevronDown, FiChevronUp, FiSettings } from "react-icons/fi";
+import { FiChevronDown, FiChevronUp, FiHelpCircle, FiSettings } from "react-icons/fi";
 import { IntegrationSettingsModal } from "./IntegrationSettingsModal";
 import logo from "@assets/logo.png";
+import { UI_EVENTS } from "../lib/uiEvents";
 import "./TopBar.css";
 
 interface TracerouteFormState {
@@ -119,6 +120,19 @@ export const TopBar: React.FC = () => {
   const { data: recentRuns } = useRecentRuns();
 
   const isRunning = status === "running";
+
+  useEffect(() => {
+    const handleOpenSettings = () => setSettingsModalOpen(true);
+    const handleExpandIntegrations = () => setIntegrationsExpanded(true);
+
+    window.addEventListener(UI_EVENTS.OPEN_SETTINGS_MODAL, handleOpenSettings);
+    window.addEventListener(UI_EVENTS.EXPAND_INTEGRATIONS_PANEL, handleExpandIntegrations);
+
+    return () => {
+      window.removeEventListener(UI_EVENTS.OPEN_SETTINGS_MODAL, handleOpenSettings);
+      window.removeEventListener(UI_EVENTS.EXPAND_INTEGRATIONS_PANEL, handleExpandIntegrations);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -397,6 +411,14 @@ export const TopBar: React.FC = () => {
               Clear
             </button>
           )}
+          <button
+            type="button"
+            className="top-bar__guide"
+            onClick={() => window.dispatchEvent(new CustomEvent(UI_EVENTS.SHOW_ONBOARDING))}
+            aria-label="Show onboarding guide"
+          >
+            <FiHelpCircle />
+          </button>
           <button
             type="button"
             className="top-bar__settings"

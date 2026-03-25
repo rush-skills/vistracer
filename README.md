@@ -41,7 +41,7 @@ This architecture ensures you get authentic network diagnostics from your actual
 
 ### GeoLite2 Databases (Optional)
 
-VisTracer can provide rich geographic visualization and network details when MaxMind GeoLite2 databases are available. The application **will work without them**, but location and ASN information will be unavailable.
+VisTracer can provide rich geographic visualization and network details when MaxMind GeoLite2 databases are available. The application **will work without them**, but it falls back to public registries, so location and ASN accuracy may drift.
 
 **Quick Setup:**
 1. Create a free MaxMind account at https://www.maxmind.com/en/geolite2/signup

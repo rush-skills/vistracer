@@ -22,6 +22,11 @@ type SettingsSchema = {
   preferences: {
     reducedMotion?: boolean;
     highContrast?: boolean;
+    onboarding?: {
+      skipOnLaunch?: boolean;
+      lastCompletedAt?: number;
+      lastDismissedAt?: number;
+    };
   };
   cache: {
     dnsTtlMs: number;
@@ -81,7 +86,9 @@ const settingsStore = new Store<SettingsSchema>({
   name: "settings",
   defaults: {
     geo: {},
-    preferences: {},
+    preferences: {
+      onboarding: {}
+    },
     cache: {
       dnsTtlMs: 1000 * 60 * 60 * 24, // 24h
       geoTtlMs: 1000 * 60 * 60 * 24 * 7 // 7d
@@ -217,11 +224,14 @@ export async function getGeoDatabaseMeta(): Promise<GeoDatabaseMeta> {
 
   let statusMessage: string | undefined;
   if (!cityExists && !asnExists) {
-    statusMessage = "GeoIP databases not found. Location data will be unavailable.";
+    statusMessage =
+      "GeoIP databases not found. Fallback services will attempt lookups but accuracy may vary.";
   } else if (!cityExists) {
-    statusMessage = "City database not found. Location data will be limited.";
+    statusMessage =
+      "City database not found. Location accuracy will rely on fallback providers and may be limited.";
   } else if (!asnExists) {
-    statusMessage = "ASN database not found. Network information will be unavailable.";
+    statusMessage =
+      "ASN database not found. ASN details will rely on fallback providers and may lag behind.";
   }
 
   return {
