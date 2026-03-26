@@ -157,9 +157,14 @@ The terminator position uses a simplified solar algorithm that provides accuracy
 - Filenames follow the pattern `vistracer-snapshot-YYYY-MM-DDTHH-MM-SS.ext` for stills and `vistracer-route-YYYY-MM-DDTHH-MM-SS.ext` for animations.
 - The export button is available once a traceroute run has completed, and MP4 export is intentionally not supported (WebM/GIF cover animation needs without extra codecs).
 
-<video controls width="640" src="assets/demo.webm">
-  Your browser does not support the video tag. You can download the demo instead.
-</video>
+<details>
+<summary>Demo video (click to expand)</summary>
+
+https://github.com/rush-skills/vistracer/raw/main/assets/demo.webm
+
+</details>
+
+You can also [download the demo directly](assets/demo.webm).
 
 ## Known Gaps & Next Steps
 
