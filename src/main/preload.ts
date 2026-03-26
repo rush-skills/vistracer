@@ -8,6 +8,8 @@ const IPC_CHANNELS = {
   GEO_DB_META: "vistracer:geo:meta",
   GEO_DB_UPDATE_PATHS: "vistracer:geo:update-paths",
   GEO_DB_SELECT_FILE: "vistracer:geo:select-file",
+  GEO_DB_DOWNLOAD: "vistracer:geo:download",
+  GEO_DB_DOWNLOAD_PROGRESS: "vistracer:geo:download-progress",
   RECENT_RUNS: "vistracer:runs:list",
   SNAPSHOT_EXPORT: "vistracer:snapshot:export",
   SETTINGS_GET: "vistracer:settings:get",
@@ -30,6 +32,13 @@ interface TracerouteProgressEvent {
   error?: string;
 }
 
+interface GeoDbDownloadProgress {
+  stage: "downloading" | "extracting" | "complete" | "error";
+  edition: string;
+  percent?: number;
+  error?: string;
+}
+
 interface RendererApi {
   runTraceroute: (request: any) => Promise<TracerouteExecutionResult>;
   cancelTraceroute: (runId: string) => Promise<void>;
@@ -37,6 +46,8 @@ interface RendererApi {
   getGeoDatabaseMeta: () => Promise<any>;
   updateGeoDatabasePaths: (cityPath?: string, asnPath?: string) => Promise<void>;
   selectGeoDbFile: () => Promise<string | undefined>;
+  downloadGeoDatabases: (licenseKey: string) => Promise<{ cityPath: string; asnPath: string }>;
+  subscribeGeoDbDownloadProgress: (listener: (progress: GeoDbDownloadProgress) => void) => () => void;
   exportSnapshot: (options: any) => Promise<any>;
   getSettings: <T = unknown>(key: string) => Promise<T | undefined>;
   setSettings: <T = unknown>(key: string, value: T) => Promise<void>;
@@ -55,6 +66,16 @@ const rendererApi: RendererApi = {
   updateGeoDatabasePaths: (cityPath, asnPath) =>
     ipcRenderer.invoke(IPC_CHANNELS.GEO_DB_UPDATE_PATHS, { cityPath, asnPath }),
   selectGeoDbFile: () => ipcRenderer.invoke(IPC_CHANNELS.GEO_DB_SELECT_FILE),
+  downloadGeoDatabases: (licenseKey) =>
+    ipcRenderer.invoke(IPC_CHANNELS.GEO_DB_DOWNLOAD, { licenseKey }),
+  subscribeGeoDbDownloadProgress: (listener) => {
+    const channel = IPC_CHANNELS.GEO_DB_DOWNLOAD_PROGRESS;
+    const handler = (_event: IpcRendererEvent, data: GeoDbDownloadProgress) => listener(data);
+    ipcRenderer.on(channel, handler);
+    return () => {
+      ipcRenderer.removeListener(channel, handler);
+    };
+  },
   exportSnapshot: (options) => ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_EXPORT, options),
   getSettings: (key) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET, key),
   setSettings: (key, value) => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SET, { key, value }),

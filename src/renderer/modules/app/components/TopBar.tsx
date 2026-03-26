@@ -522,10 +522,19 @@ export const TopBar: React.FC = () => {
           {isRunning && pendingRequest ? (
             <span>
               Running traceroute to <strong>{pendingRequest.target}</strong>…
+              {pendingRequest.target.includes(":") && (
+                <span className="top-bar__protocol-badge top-bar__protocol-badge--v6">IPv6</span>
+              )}
             </span>
           ) : status === "success" && currentRunId ? (
             <span>
               Completed run <code>{currentRunId.slice(0, 8)}</code>
+              {currentRun?.request.target.includes(":") && (
+                <span className="top-bar__protocol-badge top-bar__protocol-badge--v6">IPv6</span>
+              )}
+              {currentRun && !currentRun.request.target.includes(":") && (
+                <span className="top-bar__protocol-badge top-bar__protocol-badge--v4">IPv4</span>
+              )}
             </span>
           ) : status === "error" && error ? (
             <span className="top-bar__status-error">{error}</span>

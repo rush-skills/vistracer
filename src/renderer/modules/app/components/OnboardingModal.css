@@ -218,6 +218,55 @@
   flex-shrink: 0;
 }
 
+.onboarding-modal__auto-download {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.onboarding-modal__auto-download-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.onboarding-modal__auto-download-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.onboarding-modal__license-input {
+  flex: 1;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
+.onboarding-modal__license-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.onboarding-modal__download-status {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.onboarding-modal__download-error {
+  font-size: 0.78rem;
+  color: #ff5f5f;
+}
+
 @media (max-width: 720px) {
   .onboarding-modal__panel {
     width: calc(100vw - 32px);

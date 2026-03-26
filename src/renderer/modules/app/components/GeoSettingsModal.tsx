@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { GeoDatabaseMeta } from "@common/ipc";
+import { GeoDatabaseMeta, GeoDbDownloadProgress } from "@common/ipc";
 import type { VisTracerWindow } from "@common/bridge";
-import { FiX, FiFolder, FiCheckCircle, FiAlertCircle } from "react-icons/fi";
+import { FiX, FiFolder, FiCheckCircle, FiAlertCircle, FiDownloadCloud, FiKey } from "react-icons/fi";
 import "./GeoSettingsModal.css";
 
 interface GeoSettingsModalProps {
@@ -21,11 +21,42 @@ export const GeoSettingsModal: React.FC<GeoSettingsModalProps> = ({
   const [asnPath, setAsnPath] = useState(geoMeta.asnDbPath || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [licenseKey, setLicenseKey] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<GeoDbDownloadProgress | null>(null);
 
   useEffect(() => {
     setCityPath(geoMeta.cityDbPath || "");
     setAsnPath(geoMeta.asnDbPath || "");
   }, [geoMeta]);
+
+  const handleAutoDownload = async () => {
+    if (!licenseKey.trim()) return;
+    setDownloading(true);
+    setError(undefined);
+    setDownloadProgress(null);
+
+    const api = (window as VisTracerWindow).visTracer;
+    const unsubscribe = api.subscribeGeoDbDownloadProgress((progress) => {
+      setDownloadProgress(progress);
+      if (progress.stage === "error") {
+        setError(progress.error);
+      }
+    });
+
+    try {
+      const result = await api.downloadGeoDatabases(licenseKey.trim());
+      setCityPath(result.cityPath);
+      setAsnPath(result.asnPath);
+      // Trigger a refresh via the parent
+      await onUpdate(result.cityPath, result.asnPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setDownloading(false);
+      unsubscribe();
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -100,7 +131,7 @@ export const GeoSettingsModal: React.FC<GeoSettingsModalProps> = ({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                MaxMind's website
+                MaxMind&apos;s website
               </a>
               .
             </p>
@@ -148,6 +179,40 @@ export const GeoSettingsModal: React.FC<GeoSettingsModalProps> = ({
                 <FiFolder /> Browse
               </button>
             </div>
+          </div>
+
+          <div className="geo-settings-modal__divider" />
+
+          <div className="geo-settings-modal__auto-download">
+            <label className="geo-settings-modal__label">
+              <FiKey style={{ marginRight: 4 }} />
+              Auto-download with MaxMind license key
+            </label>
+            <div className="geo-settings-modal__input-group">
+              <input
+                type="password"
+                className="geo-settings-modal__input"
+                placeholder="Enter MaxMind license key"
+                value={licenseKey}
+                onChange={(e) => setLicenseKey(e.target.value)}
+                disabled={downloading}
+              />
+              <button
+                className="geo-settings-modal__browse"
+                onClick={handleAutoDownload}
+                disabled={downloading || !licenseKey.trim()}
+              >
+                <FiDownloadCloud /> {downloading ? "Downloading…" : "Download"}
+              </button>
+            </div>
+            {downloadProgress && downloading && (
+              <small className="geo-settings-modal__download-status">
+                {downloadProgress.stage === "downloading" &&
+                  `Downloading ${downloadProgress.edition}… ${downloadProgress.percent ?? 0}%`}
+                {downloadProgress.stage === "extracting" &&
+                  `Extracting ${downloadProgress.edition}…`}
+              </small>
+            )}
           </div>
 
           {error && <div className="geo-settings-modal__error">{error}</div>}

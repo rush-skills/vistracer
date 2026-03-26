@@ -12,7 +12,7 @@ import {
   TracerouteRun,
   TracerouteSummary
 } from "@common/ipc";
-import { isPrivateIpv4 } from "@common/net";
+import { isPrivateIp, isIpv6 } from "@common/net";
 import { getLogger } from "./logger";
 
 const log = getLogger();
@@ -38,6 +38,7 @@ export class TracerouteError extends Error {
 }
 
 const IP_REGEX = /(\d{1,3}(?:\.\d{1,3}){3})/g;
+const IPV6_REGEX = /([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)/g;
 
 function normalizeRequest(request: TracerouteRequest): TracerouteRequest {
   return {
@@ -50,10 +51,16 @@ function normalizeRequest(request: TracerouteRequest): TracerouteRequest {
   };
 }
 
+function isIpv6Target(target: string): boolean {
+  // Check if the target itself is an IPv6 address
+  return isIpv6(target);
+}
+
 function buildCommand(
   request: TracerouteRequest
 ): { command: string; args: string[]; platform: NodeJS.Platform } {
   const platform = os.platform();
+  const ipv6 = isIpv6Target(request.target);
 
   if (platform === "win32") {
     const args: string[] = [
@@ -61,9 +68,12 @@ function buildCommand(
       "-h",
       String(request.maxHops),
       "-w",
-      String(Math.max(Math.round(request.timeoutMs), 1000)),
-      request.target
+      String(Math.max(Math.round(request.timeoutMs), 1000))
     ];
+    if (ipv6) {
+      args.push("-6");
+    }
+    args.push(request.target);
     return { command: "tracert", args, platform };
   }
 
@@ -77,19 +87,25 @@ function buildCommand(
     String(Math.ceil(request.timeoutMs / 1000))
   ];
 
-  if (request.protocol === "ICMP") {
+  if (!ipv6 && request.protocol === "ICMP") {
     args.unshift("-I");
-  } else if (request.protocol === "TCP") {
-    // Use -P tcp for Unix systems (macOS/Linux compatible)
+  } else if (!ipv6 && request.protocol === "TCP") {
     args.push("-P", "tcp");
   }
 
   args.push(request.target);
 
-  // Use full path to traceroute binary on Unix systems
-  const command = platform === "darwin" || platform === "linux"
-    ? "/usr/sbin/traceroute"
-    : "traceroute";
+  let command: string;
+  if (ipv6) {
+    // Use traceroute6 for IPv6 on Unix
+    command = platform === "darwin" || platform === "linux"
+      ? "/usr/sbin/traceroute6"
+      : "traceroute6";
+  } else {
+    command = platform === "darwin" || platform === "linux"
+      ? "/usr/sbin/traceroute"
+      : "traceroute";
+  }
 
   return { command, args, platform };
 }
@@ -142,22 +158,55 @@ function parseHopLine(line: string, request: TracerouteRequest): ParsedHop | nul
   let ipAddress: string | null = null;
   let hostName: string | undefined;
 
+  // Match IPv4 in parentheses: hostname (1.2.3.4)
   const parenMatch = remainder.match(/([^\s]+)?\s*\((\d{1,3}(?:\.\d{1,3}){3})\)/);
   if (parenMatch) {
     hostName = parenMatch[1];
     ipAddress = parenMatch[2];
   }
 
+  // Match IPv6 in parentheses: hostname (2001:db8::1)
+  if (!ipAddress) {
+    const parenV6Match = remainder.match(/([^\s]+)?\s*\(([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)\)/);
+    if (parenV6Match && parenV6Match[2].includes(":")) {
+      hostName = parenV6Match[1];
+      ipAddress = parenV6Match[2];
+    }
+  }
+
+  // Match IPv4 in brackets: hostname [1.2.3.4] (Windows tracert)
   const bracketMatch = remainder.match(/([^\s]+)?\s*\[(\d{1,3}(?:\.\d{1,3}){3})\]/);
   if (!ipAddress && bracketMatch) {
     hostName = bracketMatch[1];
     ipAddress = bracketMatch[2];
   }
 
+  // Match IPv6 in brackets: hostname [2001:db8::1] (Windows tracert)
+  if (!ipAddress) {
+    const bracketV6Match = remainder.match(/([^\s]+)?\s*\[([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)\]/);
+    if (bracketV6Match && bracketV6Match[2].includes(":")) {
+      hostName = bracketV6Match[1];
+      ipAddress = bracketV6Match[2];
+    }
+  }
+
+  // Fallback: bare IPv4
   if (!ipAddress) {
     const ips = Array.from(remainder.matchAll(IP_REGEX));
     if (ips.length > 0) {
       ipAddress = ips[ips.length - 1][1];
+    }
+  }
+
+  // Fallback: bare IPv6 (e.g. traceroute6 output with -n)
+  if (!ipAddress) {
+    const v6Matches = Array.from(remainder.matchAll(IPV6_REGEX));
+    for (const m of v6Matches) {
+      // Must contain at least two colons to be a plausible IPv6 address
+      if ((m[1].match(/:/g) || []).length >= 2) {
+        ipAddress = m[1];
+        break;
+      }
     }
   }
 
@@ -227,7 +276,7 @@ async function toHopResolution(
               asn: enrichedData.asn,
               providers: enrichedData.providers,
               peeringDb: enrichedData.peeringDb,
-              isPrivate: isPrivateIpv4(parsed.ipAddress),
+              isPrivate: isPrivateIp(parsed.ipAddress),
               isAnycastSuspected: false,
               rawLine: parsed.rawLine
             };
@@ -248,7 +297,7 @@ async function toHopResolution(
     asn: geoLookup?.asn,
     providers: geoLookup?.providers ?? [],
     peeringDb: geoLookup?.peeringDb,
-    isPrivate: isPrivateIpv4(parsed.ipAddress),
+    isPrivate: isPrivateIp(parsed.ipAddress),
     isAnycastSuspected: false,
     rawLine: parsed.rawLine
   };

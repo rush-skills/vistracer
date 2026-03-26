@@ -3,6 +3,10 @@
 
   # VisTracer
 
+  [![CI](https://github.com/rush-skills/vistracer/actions/workflows/ci.yml/badge.svg)](https://github.com/rush-skills/vistracer/actions/workflows/ci.yml)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+  [![Latest Release](https://img.shields.io/github/v/release/rush-skills/vistracer)](https://github.com/rush-skills/vistracer/releases/latest)
+
   Visual traceroute desktop application built with Electron and React. VisTracer executes traceroute locally, enriches hops with GeoIP, ASN, and external registry metadata, and animates hop-to-hop routes on a 3D globe alongside an interactive hop timeline.
 
   ![VisTracer Screenshot](assets/screenshot.png)
@@ -34,7 +38,7 @@ This architecture ensures you get authentic network diagnostics from your actual
 
 ### Prerequisites
 
-- Node.js 18.13+ (LTS recommended)
+- Node.js 22+ (LTS recommended)
 - npm 9+
 - Access to the system `traceroute` (macOS/Linux) or `tracert` (Windows) binary.
 - **GeoLite2 databases** (optional, but recommended - see below)
@@ -166,9 +170,12 @@ The terminator position uses a simplified solar algorithm that provides accuracy
   implemented in this build
 - Windows environments rely on `tracert`; ensure it is available on `PATH` for the Electron runtime
 
-Refer to `PRD.md` for the full product direction and roadmap.
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, coding standards, and PR workflow.
 
 ## Additional Documentation
 
 - [GEOLITE2_SETUP.md](./GEOLITE2_SETUP.md) - Complete guide to downloading and configuring GeoLite2 databases
 - [CLAUDE.md](./CLAUDE.md) - Architecture overview and development guide for contributors
+- [CHANGELOG.md](./CHANGELOG.md) - Release history

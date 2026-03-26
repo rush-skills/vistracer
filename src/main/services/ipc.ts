@@ -21,6 +21,7 @@ import {
 } from "./persistence";
 import { getLogger } from "./logger";
 import { reloadGeoDatabases } from "./geo";
+import { downloadGeoDatabases } from "./geodb-downloader";
 
 const log = getLogger();
 
@@ -170,6 +171,15 @@ export function setupIpcHandlers(): void {
       }
 
       return result.filePaths[0];
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GEO_DB_DOWNLOAD,
+    async (event, payload: { licenseKey: string }): Promise<{ cityPath: string; asnPath: string }> => {
+      return downloadGeoDatabases(payload.licenseKey, (progress) => {
+        event.sender.send(IPC_CHANNELS.GEO_DB_DOWNLOAD_PROGRESS, progress);
+      });
     }
   );
 

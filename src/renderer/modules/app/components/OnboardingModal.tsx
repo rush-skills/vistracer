@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { GeoDatabaseMeta } from "@common/ipc";
+import type { GeoDatabaseMeta, GeoDbDownloadProgress } from "@common/ipc";
 import type { IconType } from "react-icons";
 import {
   FiCamera,
   FiCheckCircle,
   FiDownloadCloud,
   FiGlobe,
+  FiKey,
   FiLayers,
   FiNavigation,
   FiSettings,
@@ -69,6 +70,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   const [geoMeta, setGeoMeta] = useState<GeoDatabaseMeta | null>(null);
   const [geoError, setGeoError] = useState<string | undefined>(undefined);
   const [loadingGeo, setLoadingGeo] = useState(false);
+  const [licenseKey, setLicenseKey] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState<GeoDbDownloadProgress | null>(null);
+  const [downloadError, setDownloadError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!isOpen) {
@@ -104,6 +109,33 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       cancelled = true;
     };
   }, [isOpen]);
+
+  const handleAutoDownload = async () => {
+    if (!licenseKey.trim()) return;
+    setDownloading(true);
+    setDownloadError(undefined);
+    setDownloadProgress(null);
+
+    const unsubscribe = window.visTracer.subscribeGeoDbDownloadProgress((progress) => {
+      setDownloadProgress(progress);
+      if (progress.stage === "error") {
+        setDownloadError(progress.error);
+      }
+    });
+
+    try {
+      await window.visTracer.downloadGeoDatabases(licenseKey.trim());
+      // Refresh geo meta after download
+      const meta = await window.visTracer.getGeoDatabaseMeta();
+      setGeoMeta(meta);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Download failed";
+      setDownloadError(message);
+    } finally {
+      setDownloading(false);
+      unsubscribe();
+    }
+  };
 
   const geoStatusLabel = useMemo(() => {
     if (loadingGeo) {
@@ -205,8 +237,44 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
             </div>
             <button className="onboarding-modal__link" onClick={onConfigureGeo}>
               <FiSettings />
-              Configure GeoLite2
+              Browse to .mmdb files
             </button>
+          </div>
+
+          <div className="onboarding-modal__auto-download">
+            <div className="onboarding-modal__auto-download-header">
+              <FiKey />
+              <span>Or download automatically with a MaxMind license key</span>
+            </div>
+            <div className="onboarding-modal__auto-download-form">
+              <input
+                type="password"
+                className="onboarding-modal__license-input"
+                placeholder="MaxMind license key"
+                value={licenseKey}
+                onChange={(e) => setLicenseKey(e.target.value)}
+                disabled={downloading}
+              />
+              <button
+                className="onboarding-modal__action"
+                onClick={handleAutoDownload}
+                disabled={downloading || !licenseKey.trim()}
+              >
+                <FiDownloadCloud />
+                {downloading ? "Downloading…" : "Download"}
+              </button>
+            </div>
+            {downloadProgress && downloading && (
+              <div className="onboarding-modal__download-status">
+                {downloadProgress.stage === "downloading" &&
+                  `Downloading ${downloadProgress.edition}… ${downloadProgress.percent ?? 0}%`}
+                {downloadProgress.stage === "extracting" &&
+                  `Extracting ${downloadProgress.edition}…`}
+              </div>
+            )}
+            {downloadError && (
+              <div className="onboarding-modal__download-error">{downloadError}</div>
+            )}
           </div>
 
           <div className="onboarding-modal__actions">

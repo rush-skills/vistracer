@@ -1,5 +1,6 @@
 import type {
   GeoDatabaseMeta,
+  GeoDbDownloadProgress,
   RecentRun,
   SnapshotExportOptions,
   SnapshotExportResult,
@@ -15,6 +16,10 @@ export interface RendererApi {
   getGeoDatabaseMeta: () => Promise<GeoDatabaseMeta>;
   updateGeoDatabasePaths: (cityPath?: string, asnPath?: string) => Promise<void>;
   selectGeoDbFile: () => Promise<string | undefined>;
+  downloadGeoDatabases: (licenseKey: string) => Promise<{ cityPath: string; asnPath: string }>;
+  subscribeGeoDbDownloadProgress: (
+    listener: (progress: GeoDbDownloadProgress) => void
+  ) => () => void;
   exportSnapshot: (options: SnapshotExportOptions) => Promise<SnapshotExportResult>;
   getSettings: <T = unknown>(key: string) => Promise<T | undefined>;
   setSettings: <T = unknown>(key: string, value: T) => Promise<void>;

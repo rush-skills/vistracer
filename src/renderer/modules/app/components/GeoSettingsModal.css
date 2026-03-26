@@ -181,6 +181,23 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+.geo-settings-modal__divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 0.25rem 0;
+}
+
+.geo-settings-modal__auto-download {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.geo-settings-modal__download-status {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
 .geo-settings-modal__error {
   padding: 0.75rem;
   background: rgba(255, 95, 95, 0.15);

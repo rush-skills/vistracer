@@ -238,3 +238,25 @@
   color: var(--color-danger);
   font-weight: 600;
 }
+
+.top-bar__protocol-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+}
+
+.top-bar__protocol-badge--v4 {
+  background: rgba(109, 179, 242, 0.15);
+  color: #6db3f2;
+  border: 1px solid rgba(109, 179, 242, 0.25);
+}
+
+.top-bar__protocol-badge--v6 {
+  background: rgba(160, 120, 242, 0.15);
+  color: #a078f2;
+  border: 1px solid rgba(160, 120, 242, 0.25);
+}

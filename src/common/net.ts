@@ -28,3 +28,42 @@ export function isPrivateIpv4(ipAddress: string | null): boolean {
     return false;
   }
 }
+
+export function isIpv6(address: string): boolean {
+  return address.includes(":");
+}
+
+export function isPrivateIpv6(ipAddress: string | null): boolean {
+  if (!ipAddress) {
+    return false;
+  }
+
+  const normalized = ipAddress.toLowerCase();
+
+  // Loopback ::1
+  if (normalized === "::1") {
+    return true;
+  }
+
+  // Link-local fe80::/10
+  if (normalized.startsWith("fe80:") || normalized.startsWith("fe80")) {
+    return true;
+  }
+
+  // Unique local fc00::/7 (fc00:: and fd00::)
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
+    return true;
+  }
+
+  return false;
+}
+
+export function isPrivateIp(ipAddress: string | null): boolean {
+  if (!ipAddress) {
+    return false;
+  }
+  if (isIpv6(ipAddress)) {
+    return isPrivateIpv6(ipAddress);
+  }
+  return isPrivateIpv4(ipAddress);
+}

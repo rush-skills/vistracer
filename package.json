@@ -65,6 +65,14 @@
   },
   "author": "VisTracer Team",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rush-skills/vistracer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rush-skills/vistracer/issues"
+  },
+  "homepage": "https://github.com/rush-skills/vistracer#readme",
   "scripts": {
     "dev": "concurrently -c \"blue,magenta,green\" \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput & tsc-alias -p tsconfig.main.json --watch",
@@ -88,14 +96,10 @@
   "dependencies": {
     "@react-three/drei": "^9.101.3",
     "@react-three/fiber": "^8.15.17",
-    "@reduxjs/toolkit": "^2.2.3",
     "@tanstack/react-query": "^5.29.0",
-    "@visx/geo": "^3.7.0",
     "electron-log": "^5.1.3",
     "electron-store": "^9.0.0",
-    "lz-string": "^1.5.0",
     "maxmind": "^4.3.16",
-    "node-machine-id": "^1.1.12",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.1.0",
@@ -106,7 +110,6 @@
     "@testing-library/jest-dom": "^6.4.3",
     "@testing-library/react": "^14.3.1",
     "@testing-library/user-event": "^14.5.2",
-    "@types/lodash": "^4.17.13",
     "@types/node": "^20.12.7",
     "@types/react": "^18.2.77",
     "@types/react-dom": "^18.2.25",
@@ -133,6 +136,6 @@
     "wait-on": "^7.2.0"
   },
   "engines": {
-    "node": ">=18.13.0"
+    "node": ">=22.0.0"
   }
 }

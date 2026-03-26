@@ -1,7 +1,7 @@
 import maxmind, { CityResponse, AsnResponse, Reader, Response } from "maxmind";
 import { getCachedGeo, getSettingsStore, setCachedGeo } from "./persistence";
 import { enrichWithExternalProviders } from "./integrations";
-import { isPrivateIpv4 } from "@common/net";
+import { isPrivateIp } from "@common/net";
 import type {
   AsnDetails,
   GeoDetails,
@@ -110,7 +110,7 @@ export async function lookupGeo(
   ipAddress: string,
   options?: GeoLookupOptions
 ): Promise<GeoLookupResult | undefined> {
-  if (!ipAddress || isPrivateIpv4(ipAddress)) {
+  if (!ipAddress || isPrivateIp(ipAddress)) {
     const providers = PROVIDER_ORDER.map<ProviderStatus>((provider) => ({
       provider,
       status: "skipped",

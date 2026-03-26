@@ -154,6 +154,13 @@ export interface IntegrationSettings {
   peeringDb: PeeringDbSettings;
 }
 
+export interface GeoDbDownloadProgress {
+  stage: "downloading" | "extracting" | "complete" | "error";
+  edition: string;
+  percent?: number;
+  error?: string;
+}
+
 export const IPC_CHANNELS = {
   TRACEROUTE_RUN: "vistracer:traceroute:run",
   TRACEROUTE_CANCEL: "vistracer:traceroute:cancel",
@@ -161,6 +168,8 @@ export const IPC_CHANNELS = {
   GEO_DB_META: "vistracer:geo:meta",
   GEO_DB_UPDATE_PATHS: "vistracer:geo:update-paths",
   GEO_DB_SELECT_FILE: "vistracer:geo:select-file",
+  GEO_DB_DOWNLOAD: "vistracer:geo:download",
+  GEO_DB_DOWNLOAD_PROGRESS: "vistracer:geo:download-progress",
   RECENT_RUNS: "vistracer:runs:list",
   SNAPSHOT_EXPORT: "vistracer:snapshot:export",
   SETTINGS_GET: "vistracer:settings:get",
