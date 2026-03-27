@@ -211,7 +211,7 @@ const captureGif = async (
 ): Promise<Blob> => {
   const gif = createGif({ workers: 4, quality: 20, repeat: 0, background: "#000" });
   const store = useTracerouteStore.getState();
-  const { setSelectedHop, setCaptureActive } = store;
+  const { setSelectedHop } = store;
 
   const original = store.selectedHopIndex;
 
