@@ -6,7 +6,7 @@ on:
 
 jobs:
   ci:
-    name: Node ${{ matrix.node-version }}
+    name: Lint, typecheck & test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
 
     strategy:
@@ -35,3 +35,52 @@ jobs:
 
       - name: Test
         run: npm run test
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: ci
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            script: package:mac
+            pattern: "release/**/*.dmg"
+
+          - name: Windows
+            os: windows-latest
+            script: package:win
+            pattern: "release/**/*.exe"
+
+          - name: Linux
+            os: ubuntu-latest
+            script: package:linux
+            pattern: |
+              release/**/*.AppImage
+              release/**/*.deb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build & package
+        run: npm run ${{ matrix.script }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vistracer-${{ matrix.name }}
+          path: ${{ matrix.pattern }}
+          if-no-files-found: warn
