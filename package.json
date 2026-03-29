@@ -63,7 +63,10 @@
       "artifactName": "VisTracer-${version}-linux.${ext}"
     }
   },
-  "author": "VisTracer Team",
+  "author": {
+    "name": "VisTracer Team",
+    "email": "vistracer@rush-skills.dev"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
