@@ -17,18 +17,18 @@ const IPC_CHANNELS = {
   TELEMETRY_EVENT: "vistracer:telemetry:event"
 } as const;
 
-// Type definitions inline
+// Type definitions inline — keep in sync with src/common/ipc.ts and src/common/bridge.ts
 interface TracerouteExecutionResult {
   runId: string;
-  run: any;
+  run: Record<string, unknown>;
 }
 
 interface TracerouteProgressEvent {
   runId: string;
-  hop?: any;
+  hop?: Record<string, unknown>;
   completed: boolean;
-  summary?: any;
-  hops?: any[];
+  summary?: Record<string, unknown>;
+  hops?: Record<string, unknown>[];
   error?: string;
 }
 
@@ -40,15 +40,15 @@ interface GeoDbDownloadProgress {
 }
 
 interface RendererApi {
-  runTraceroute: (request: any) => Promise<TracerouteExecutionResult>;
+  runTraceroute: (request: Record<string, unknown>) => Promise<TracerouteExecutionResult>;
   cancelTraceroute: (runId: string) => Promise<void>;
-  getRecentRuns: () => Promise<any[]>;
-  getGeoDatabaseMeta: () => Promise<any>;
+  getRecentRuns: () => Promise<Record<string, unknown>[]>;
+  getGeoDatabaseMeta: () => Promise<Record<string, unknown>>;
   updateGeoDatabasePaths: (cityPath?: string, asnPath?: string) => Promise<void>;
   selectGeoDbFile: () => Promise<string | undefined>;
   downloadGeoDatabases: (licenseKey: string) => Promise<{ cityPath: string; asnPath: string }>;
   subscribeGeoDbDownloadProgress: (listener: (progress: GeoDbDownloadProgress) => void) => () => void;
-  exportSnapshot: (options: any) => Promise<any>;
+  exportSnapshot: (options: Record<string, unknown>) => Promise<Record<string, unknown>>;
   getSettings: <T = unknown>(key: string) => Promise<T | undefined>;
   setSettings: <T = unknown>(key: string, value: T) => Promise<void>;
   subscribeTracerouteProgress: (

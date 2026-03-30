@@ -73,7 +73,7 @@ type CacheSchema = {
   runs: TracerouteRun[];
 };
 
-type StoreAdapter<T extends Record<string, any>> = {
+type StoreAdapter<T extends Record<string, unknown>> = {
   get<K extends keyof T>(key: K): T[K];
   get<R = unknown>(key: string, defaultValue?: R): R;
   set<K extends keyof T>(key: K, value: T[K]): void;

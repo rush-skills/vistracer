@@ -26,10 +26,12 @@ const CountryBorders: React.FC = () => {
     // Load GeoJSON for country borders
     fetch('./world.geojson')
       .then(res => res.json())
-      .then((geojson: any) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- GeoJSON shape varies; full typing not worth the complexity
+      .then((geojson: { features?: Array<{ geometry: any }> }) => {
         const lines: THREE.Vector3[][] = [];
 
-        geojson.features?.forEach((feature: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- GeoJSON feature geometry is polymorphic
+        geojson.features?.forEach((feature: { geometry: any }) => {
           const geometry = feature.geometry;
           if (!geometry) return;
 
