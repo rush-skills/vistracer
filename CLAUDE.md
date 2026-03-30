@@ -29,7 +29,7 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run all tests (62 tests across 5 files)
+npm run test           # Run all tests (78 tests across 8 files)
 npm run test:watch     # Run tests in watch mode
 ```
 
@@ -41,7 +41,7 @@ npm run test:watch     # Run tests in watch mode
 - **Release** (`.github/workflows/release.yml`): Triggered by `v*` tag push. Runs CI checks, builds all platforms, creates a GitHub Release with artifacts attached.
 - Actions use `checkout@v6`, `setup-node@v6`, `upload-artifact@v7`, `download-artifact@v8` (Node 24 compatible).
 
-To create a release: `git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0`
+To create a release: `git tag -a v0.3.0 -m "v0.3.0" && git push origin v0.3.0`
 
 ## Project Architecture
 
@@ -188,7 +188,10 @@ Tests use Vitest with separate projects for different environments:
 - **Setup file**: `vitest.setup.ts` (renderer project only)
 
 Test files:
-- `src/main/services/__tests__/traceroute.test.ts` — 23 tests: `parseHopLine` (Unix/Windows/IPv6 formats, timeouts), `parseLatencyValues`, `buildCommand`
+- `src/main/services/__tests__/traceroute.test.ts` — 26 tests: `parseHopLine` (Unix/Windows/IPv6 formats, timeouts), `parseLatencyValues`, `buildCommand` (cross-platform with mocked `os.platform()`)
+- `src/main/services/__tests__/dns.test.ts` — 5 tests: cache hit/miss, DNS failure handling, `forceRefresh` bypass
+- `src/main/services/__tests__/persistence.test.ts` — 5 tests: DNS/geo cache round-trip, TTL expiry, error-status stripping
+- `src/main/services/__tests__/geodb-downloader.test.ts` — 3 tests: tar.gz extraction, missing file error, nested directory handling
 - `src/common/__tests__/net.test.ts` — 18 tests: `isPrivateIpv4`, `isPrivateIpv6`, `isIpv6`, `isPrivateIp`
 - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 9 tests: `handleProgress`, `setSelectedHop`, `cancelRun`
 - `src/renderer/lib/__tests__/globe.test.ts` — 7 tests: `latencyToColor`, `buildArcDescriptors`, `latLngToVector3`
@@ -207,7 +210,7 @@ Test files:
 
 ## Known Limitations
 
-- Scheduled GeoLite2 refresh not implemented (auto-download is one-time via license key)
+- Scheduled GeoLite2 refresh not implemented (auto-download via license key is one-time; use manual re-download for updates)
 - Provider rate-limit handling and retry UX for external enrichment APIs not yet implemented
 - MP4 export intentionally not supported (WebM/GIF cover animation needs without extra codecs)
 - Advanced heuristics (anycast detection, jitter visualization, comparison view) planned but not implemented

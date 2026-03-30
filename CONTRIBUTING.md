@@ -62,7 +62,7 @@ npm run test
 npm run test:watch
 ```
 
-All new features and bug fixes should include a corresponding test. Tests run in a jsdom environment; use mocks for Electron APIs and Node.js built-ins that are unavailable in that environment.
+All new features and bug fixes should include a corresponding test. Renderer tests run in a jsdom environment. Main-process tests run in a Node environment but require mocking `electron` and `electron-store` via `vi.mock()` (see existing test files for the pattern using `vi.hoisted()` to avoid hoisting issues).
 
 ## Building for Production
 

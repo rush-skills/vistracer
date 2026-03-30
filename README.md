@@ -7,6 +7,8 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
   [![Latest Release](https://img.shields.io/github/v/release/rush-skills/vistracer)](https://github.com/rush-skills/vistracer/releases/latest)
 
+  **[vistracer.anks.in](https://vistracer.anks.in)**
+
   Visual traceroute desktop application built with Electron and React. VisTracer executes traceroute locally, enriches hops with GeoIP, ASN, and external registry metadata, and animates hop-to-hop routes on a 3D globe alongside an interactive hop timeline.
 
   ![VisTracer Screenshot](assets/screenshot.png)
@@ -171,7 +173,7 @@ The terminator position uses a simplified solar algorithm that provides accuracy
 
 ## Known Gaps & Next Steps
 
-- Automatic GeoLite2 download and scheduled refresh (paths must still be supplied manually)
+- Scheduled GeoLite2 refresh (auto-download via license key works; periodic refresh is not yet automated)
 - Provider rate-limit handling and retry UX for external enrichment APIs
 - MP4 export remains out of scope because Electron's built-in encoders focus on WebM; use WebM or GIF instead.
 - Advanced heuristics (anycast detection, jitter visualisation, comparison view) are planned but not

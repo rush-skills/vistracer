@@ -1,0 +1,229 @@
+---
+import Layout from '../layouts/Layout.astro';
+
+const features = [
+  {
+    icon: '&#x1F310;',
+    title: '3D Globe Visualization',
+    desc: 'Watch your traceroute hops light up on an interactive Three.js globe with great-circle arcs, real-time day/night cycle, and country borders.',
+  },
+  {
+    icon: '&#x26A1;',
+    title: 'Real-Time Streaming',
+    desc: 'Hop data appears in the UI as it is parsed from the native traceroute process. No waiting for the full run to finish.',
+  },
+  {
+    icon: '&#x1F30D;',
+    title: 'GeoIP & ASN Enrichment',
+    desc: 'Local MaxMind GeoLite2 databases provide city, country, and ASN context for every hop, with persistent caching.',
+  },
+  {
+    icon: '&#x1F517;',
+    title: 'Multi-Provider Enrichment',
+    desc: 'Cross-check with Team Cymru, RDAP, RIPE Stat, and PeeringDB to fill metadata gaps and validate GeoIP output.',
+  },
+  {
+    icon: '&#x1F4F7;',
+    title: 'Export & Share',
+    desc: 'Capture still images (PNG/JPG/WebP) or animated routes (WebM/GIF) with per-hop tooltips showing ASN and location.',
+  },
+  {
+    icon: '&#x1F6E1;&#xFE0F;',
+    title: 'Cross-Platform',
+    desc: 'Native Electron app for macOS, Windows, and Linux. Supports ICMP, UDP, and TCP protocols with full IPv4 and IPv6.',
+  },
+];
+
+const platforms = [
+  { name: 'macOS', format: '.dmg', icon: '&#x1F34E;' },
+  { name: 'Windows', format: '.exe', icon: '&#x1FA9F;' },
+  { name: 'Linux', format: '.AppImage / .deb', icon: '&#x1F427;' },
+];
+---
+
+<Layout title="VisTracer - Visual Traceroute on a 3D Globe">
+  <!-- Nav -->
+  <nav class="fixed top-0 z-50 w-full border-b border-[var(--color-border)] bg-[var(--color-bg)]/80 backdrop-blur-xl">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <a href="/" class="flex items-center gap-3">
+        <img src="/images/logo.png" alt="VisTracer" class="h-8 w-8" />
+        <span class="text-lg font-bold tracking-tight">VisTracer</span>
+      </a>
+      <div class="hidden items-center gap-8 text-sm sm:flex">
+        <a href="#features" class="text-[var(--color-text-dim)] transition hover:text-[var(--color-teal)]">Features</a>
+        <a href="#demo" class="text-[var(--color-text-dim)] transition hover:text-[var(--color-teal)]">Demo</a>
+        <a href="#download" class="text-[var(--color-text-dim)] transition hover:text-[var(--color-teal)]">Download</a>
+        <a
+          href="https://github.com/rush-skills/vistracer"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-[var(--color-text-dim)] transition hover:text-[var(--color-teal)]"
+        >
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 pt-20 text-center">
+    <!-- Glow background -->
+    <div class="pointer-events-none absolute inset-0 overflow-hidden">
+      <div class="absolute left-1/2 top-1/3 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--color-teal)] opacity-[0.04] blur-[120px]"></div>
+      <div class="absolute right-1/4 top-2/3 h-[400px] w-[400px] rounded-full bg-[var(--color-gold)] opacity-[0.03] blur-[100px]"></div>
+    </div>
+
+    <div class="relative z-10">
+      <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-card)] px-4 py-1.5 text-xs font-medium text-[var(--color-text-dim)]">
+        <span class="inline-block h-2 w-2 rounded-full bg-[var(--color-teal)] animate-pulse"></span>
+        v0.2.0 &mdash; Quality &amp; reliability release
+      </div>
+
+      <h1 class="mx-auto max-w-3xl text-5xl font-extrabold leading-tight tracking-tight sm:text-6xl lg:text-7xl">
+        Trace the route.<br />
+        <span class="bg-gradient-to-r from-[var(--color-teal)] to-[var(--color-gold)] bg-clip-text text-transparent">See the world.</span>
+      </h1>
+
+      <p class="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-text-dim)]">
+        Run traceroute from your own network. Enrich every hop with GeoIP, ASN, and registry metadata. Animate the path across a 3D globe in real time.
+      </p>
+
+      <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
+        <a
+          href="#download"
+          class="inline-flex items-center gap-2 rounded-xl bg-[var(--color-teal)] px-6 py-3 text-sm font-semibold text-[var(--color-bg)] transition hover:brightness-110"
+        >
+          Download for free
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M12 5v14m0 0l-6-6m6 6l6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a
+          href="https://github.com/rush-skills/vistracer"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-card)] px-6 py-3 text-sm font-semibold transition hover:bg-[var(--color-bg-card-hover)]"
+        >
+          View on GitHub
+          <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Hero screenshot -->
+    <div class="relative z-10 mt-16 w-full max-w-5xl">
+      <div class="overflow-hidden rounded-2xl border border-[var(--color-border)] shadow-2xl shadow-black/40">
+        <img
+          src="/images/screenshot.png"
+          alt="VisTracer application showing a traceroute to anks.in on a 3D globe"
+          class="w-full"
+          loading="eager"
+        />
+      </div>
+      <!-- Reflection glow -->
+      <div class="pointer-events-none absolute -bottom-20 left-1/2 h-40 w-3/4 -translate-x-1/2 rounded-full bg-[var(--color-teal)] opacity-[0.06] blur-[80px]"></div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" class="mx-auto max-w-6xl px-6 py-28">
+    <div class="text-center">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Everything you need to diagnose your route</h2>
+      <p class="mx-auto mt-4 max-w-2xl text-[var(--color-text-dim)]">
+        VisTracer runs traceroute from your machine and enriches every hop with geolocation, ASN data, and registry metadata.
+      </p>
+    </div>
+
+    <div class="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {features.map((f) => (
+        <div class="group rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-6 transition hover:border-[var(--color-teal)]/20 hover:bg-[var(--color-bg-card-hover)]">
+          <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-teal)]/10 text-2xl" set:html={f.icon} />
+          <h3 class="text-base font-semibold">{f.title}</h3>
+          <p class="mt-2 text-sm leading-relaxed text-[var(--color-text-dim)]">{f.desc}</p>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <!-- Demo -->
+  <section id="demo" class="mx-auto max-w-5xl px-6 py-28">
+    <div class="text-center">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">See it in action</h2>
+      <p class="mx-auto mt-4 max-w-xl text-[var(--color-text-dim)]">
+        Watch hops resolve in real time as the traceroute runs. The globe animates to each new hop.
+      </p>
+    </div>
+    <div class="mt-12 overflow-hidden rounded-2xl border border-[var(--color-border)] shadow-2xl shadow-black/40">
+      <img
+        src="/images/demo.gif"
+        alt="Animated demo of VisTracer running a traceroute with hop-by-hop globe animation"
+        class="w-full"
+        loading="lazy"
+      />
+    </div>
+  </section>
+
+  <!-- Download -->
+  <section id="download" class="mx-auto max-w-4xl px-6 py-28">
+    <div class="rounded-3xl border border-[var(--color-border)] bg-[var(--color-bg-card)] p-10 text-center sm:p-16">
+      <h2 class="text-3xl font-bold tracking-tight sm:text-4xl">Download VisTracer</h2>
+      <p class="mx-auto mt-4 max-w-lg text-[var(--color-text-dim)]">
+        Free and open source. Pre-built binaries for every major platform.
+      </p>
+
+      <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
+        {platforms.map((p) => (
+          <a
+            href="https://github.com/rush-skills/vistracer/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="group flex min-w-[180px] flex-col items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg)] px-6 py-5 transition hover:border-[var(--color-teal)]/30 hover:bg-[var(--color-bg-card-hover)]"
+          >
+            <span class="text-3xl" set:html={p.icon} />
+            <span class="font-semibold">{p.name}</span>
+            <span class="text-xs text-[var(--color-text-dim)]">{p.format}</span>
+          </a>
+        ))}
+      </div>
+
+      <p class="mt-8 text-xs text-[var(--color-text-dim)]">
+        Requires no account. Just download, install, and run a traceroute.
+      </p>
+    </div>
+  </section>
+
+  <!-- Tech Stack -->
+  <section class="mx-auto max-w-6xl px-6 pb-28">
+    <div class="text-center">
+      <h2 class="text-2xl font-bold tracking-tight sm:text-3xl">Built with</h2>
+    </div>
+    <div class="mt-10 flex flex-wrap items-center justify-center gap-x-10 gap-y-4 text-sm text-[var(--color-text-dim)]">
+      <span>Electron</span>
+      <span class="text-[var(--color-border)]">|</span>
+      <span>React</span>
+      <span class="text-[var(--color-border)]">|</span>
+      <span>Three.js</span>
+      <span class="text-[var(--color-border)]">|</span>
+      <span>TypeScript</span>
+      <span class="text-[var(--color-border)]">|</span>
+      <span>Zustand</span>
+      <span class="text-[var(--color-border)]">|</span>
+      <span>Vite</span>
+      <span class="text-[var(--color-border)]">|</span>
+      <span>MaxMind GeoLite2</span>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="border-t border-[var(--color-border)] py-10">
+    <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 text-xs text-[var(--color-text-dim)] sm:flex-row">
+      <div class="flex items-center gap-2">
+        <img src="/images/logo.png" alt="" class="h-5 w-5" />
+        <span>VisTracer &mdash; MIT License</span>
+      </div>
+      <div class="flex gap-6">
+        <a href="https://github.com/rush-skills/vistracer" target="_blank" rel="noopener noreferrer" class="transition hover:text-[var(--color-teal)]">GitHub</a>
+        <a href="https://github.com/rush-skills/vistracer/releases" target="_blank" rel="noopener noreferrer" class="transition hover:text-[var(--color-teal)]">Releases</a>
+        <a href="https://github.com/rush-skills/vistracer/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer" class="transition hover:text-[var(--color-teal)]">Changelog</a>
+      </div>
+    </div>
+  </footer>
+</Layout>

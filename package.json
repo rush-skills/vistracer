@@ -1,6 +1,6 @@
 {
   "name": "vistracer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Electron-based visual traceroute application rendering hop paths on a 3D globe.",
   "private": true,
   "main": "dist/main/src/main/main.js",
@@ -75,7 +75,7 @@
   "bugs": {
     "url": "https://github.com/rush-skills/vistracer/issues"
   },
-  "homepage": "https://github.com/rush-skills/vistracer#readme",
+  "homepage": "https://vistracer.anks.in",
   "scripts": {
     "dev": "concurrently -c \"blue,magenta,green\" \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput & tsc-alias -p tsconfig.main.json --watch",
