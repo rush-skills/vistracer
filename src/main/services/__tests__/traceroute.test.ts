@@ -1,142 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import os from "node:os";
+import type { TracerouteRequest } from "@common/ipc";
 
-// We test the pure functions by importing them directly.
-// parseHopLine and buildCommand are not exported, so we re-implement minimal
-// versions here based on the module's own regexes to keep tests focused.
-// Instead, we import the module and use a workaround to access internals.
-
-// Since parseHopLine/buildCommand are not exported, we'll test them via
-// a small extraction. For now, test the exported surface and the parsing logic
-// by pulling the relevant functions out.
-
-// --- Inline copies of pure helpers for unit testing ---
-// These mirror src/main/services/traceroute.ts exactly.
-
-interface ParsedHop {
-  hopIndex: number;
-  ipAddress: string | null;
-  hostName?: string;
-  rtts: number[];
-  lostCount: number;
-  rawLine: string;
-}
-
-interface TracerouteRequest {
-  target: string;
-  protocol: "ICMP" | "UDP" | "TCP";
-  maxHops: number;
-  timeoutMs: number;
-  packetCount: number;
-  forceFresh: boolean;
-}
-
-const IP_REGEX = /(\d{1,3}(?:\.\d{1,3}){3})/g;
-const IPV6_REGEX = /([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)/g;
-
-function parseLatencyValues(remainder: string): number[] {
-  const matches = Array.from(remainder.matchAll(/(<\d+|\d+(?:\.\d+)?)\s*ms/gi));
-  return matches.map((match) => {
-    const raw = match[1];
-    if (raw.startsWith("<")) {
-      return Number.parseFloat(raw.slice(1)) || 1;
-    }
-    return Number.parseFloat(raw);
-  });
-}
-
-function parseHopLine(line: string, request: TracerouteRequest): ParsedHop | null {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const hopMatch = trimmed.match(/^(\d+)\s+(.*)$/);
-  if (!hopMatch) {
-    return null;
-  }
-
-  const hopIndex = Number.parseInt(hopMatch[1], 10);
-  const remainder = hopMatch[2];
-
-  if (remainder.includes("Request timed out") || remainder.split(" ").every((token) => token === "*")) {
-    return {
-      hopIndex,
-      ipAddress: null,
-      hostName: undefined,
-      rtts: [],
-      lostCount: request.packetCount,
-      rawLine: line
-    };
-  }
-
-  let ipAddress: string | null = null;
-  let hostName: string | undefined;
-
-  // Match IPv4 in parentheses
-  const parenMatch = remainder.match(/([^\s]+)?\s*\((\d{1,3}(?:\.\d{1,3}){3})\)/);
-  if (parenMatch) {
-    hostName = parenMatch[1];
-    ipAddress = parenMatch[2];
-  }
-
-  // Match IPv6 in parentheses
-  if (!ipAddress) {
-    const parenV6Match = remainder.match(/([^\s]+)?\s*\(([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)\)/);
-    if (parenV6Match && parenV6Match[2].includes(":")) {
-      hostName = parenV6Match[1];
-      ipAddress = parenV6Match[2];
-    }
-  }
-
-  // Match IPv4 in brackets (Windows)
-  const bracketMatch = remainder.match(/([^\s]+)?\s*\[(\d{1,3}(?:\.\d{1,3}){3})\]/);
-  if (!ipAddress && bracketMatch) {
-    hostName = bracketMatch[1];
-    ipAddress = bracketMatch[2];
-  }
-
-  // Match IPv6 in brackets (Windows)
-  if (!ipAddress) {
-    const bracketV6Match = remainder.match(/([^\s]+)?\s*\[([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)\]/);
-    if (bracketV6Match && bracketV6Match[2].includes(":")) {
-      hostName = bracketV6Match[1];
-      ipAddress = bracketV6Match[2];
-    }
-  }
-
-  // Fallback: bare IPv4
-  if (!ipAddress) {
-    const ips = Array.from(remainder.matchAll(IP_REGEX));
-    if (ips.length > 0) {
-      ipAddress = ips[ips.length - 1][1];
-    }
-  }
-
-  // Fallback: bare IPv6
-  if (!ipAddress) {
-    const v6Matches = Array.from(remainder.matchAll(IPV6_REGEX));
-    for (const m of v6Matches) {
-      if ((m[1].match(/:/g) || []).length >= 2) {
-        ipAddress = m[1];
-        break;
-      }
-    }
-  }
-
-  const rtts = parseLatencyValues(remainder);
-  const lostCount = Math.max(request.packetCount - rtts.length, 0);
-
+// Mock electron and electron-store before importing traceroute (which transitively imports them)
+vi.mock("electron", () => ({
+  app: { getPath: () => "/tmp", getAppPath: () => "/tmp", isPackaged: false }
+}));
+vi.mock("electron-store", () => {
   return {
-    hopIndex,
-    ipAddress,
-    hostName,
-    rtts,
-    lostCount,
-    rawLine: line
+    default: class {
+      #data = new Map();
+      get(key: string, def?: unknown) { return this.#data.get(key) ?? def; }
+      set(key: string, val: unknown) { this.#data.set(key, val); }
+      delete(key: string) { this.#data.delete(key); }
+    }
   };
-}
+});
 
-// --- Tests ---
+import { parseHopLine, buildCommand, parseLatencyValues } from "../traceroute";
 
 const defaultRequest: TracerouteRequest = {
   target: "8.8.8.8",
@@ -271,27 +152,68 @@ describe("parseLatencyValues", () => {
 });
 
 describe("buildCommand", () => {
-  // Since buildCommand uses os.platform() internally and isn't exported,
-  // we test the expected argument patterns for Unix platforms
-  it("constructs expected argument patterns for ICMP", () => {
-    // Verify the expected args structure for ICMP on Unix
-    const expectedArgs = ["-I", "-n", "-m", "30", "-q", "3", "-w", "4", "8.8.8.8"];
-    // -I for ICMP is unshifted to the front
-    expect(expectedArgs[0]).toBe("-I");
-    expect(expectedArgs).toContain("-n");
-    expect(expectedArgs).toContain("8.8.8.8");
+  const platformSpy = vi.spyOn(os, "platform");
+
+  beforeEach(() => {
+    platformSpy.mockReset();
   });
 
-  it("constructs expected argument patterns for TCP", () => {
-    const expectedArgs = ["-n", "-m", "30", "-q", "3", "-w", "4", "-P", "tcp", "8.8.8.8"];
-    expect(expectedArgs).toContain("-P");
-    expect(expectedArgs).toContain("tcp");
+  it("uses ICMP flag on darwin", () => {
+    platformSpy.mockReturnValue("darwin");
+    const result = buildCommand(defaultRequest);
+
+    expect(result.command).toBe("/usr/sbin/traceroute");
+    expect(result.args).toContain("-I");
+    expect(result.args).toContain("-n");
+    expect(result.args).toContain("8.8.8.8");
+    expect(result.platform).toBe("darwin");
   });
 
-  it("constructs expected argument patterns for UDP (default, no protocol flag)", () => {
-    const expectedArgs = ["-n", "-m", "30", "-q", "3", "-w", "4", "8.8.8.8"];
-    expect(expectedArgs).not.toContain("-I");
-    expect(expectedArgs).not.toContain("-P");
+  it("uses TCP flag on linux", () => {
+    platformSpy.mockReturnValue("linux");
+    const tcpRequest: TracerouteRequest = { ...defaultRequest, protocol: "TCP" };
+    const result = buildCommand(tcpRequest);
+
+    expect(result.command).toBe("/usr/sbin/traceroute");
+    expect(result.args).toContain("-P");
+    expect(result.args).toContain("tcp");
+    expect(result.args).not.toContain("-I");
+  });
+
+  it("uses tracert on win32 with -d flag", () => {
+    platformSpy.mockReturnValue("win32");
+    const result = buildCommand(defaultRequest);
+
+    expect(result.command).toBe("tracert");
+    expect(result.args).toContain("-d");
+    expect(result.platform).toBe("win32");
+  });
+
+  it("uses traceroute6 for IPv6 on darwin", () => {
+    platformSpy.mockReturnValue("darwin");
+    const ipv6Request: TracerouteRequest = { ...defaultRequest, target: "2001:4860:4860::8888" };
+    const result = buildCommand(ipv6Request);
+
+    expect(result.command).toBe("/usr/sbin/traceroute6");
+    expect(result.args).not.toContain("-I");
+  });
+
+  it("uses tracert with -6 flag for IPv6 on win32", () => {
+    platformSpy.mockReturnValue("win32");
+    const ipv6Request: TracerouteRequest = { ...defaultRequest, target: "2001:4860:4860::8888" };
+    const result = buildCommand(ipv6Request);
+
+    expect(result.command).toBe("tracert");
+    expect(result.args).toContain("-6");
+  });
+
+  it("does not add protocol flags for UDP on Unix", () => {
+    platformSpy.mockReturnValue("linux");
+    const udpRequest: TracerouteRequest = { ...defaultRequest, protocol: "UDP" };
+    const result = buildCommand(udpRequest);
+
+    expect(result.args).not.toContain("-I");
+    expect(result.args).not.toContain("-P");
   });
 });
 

@@ -1,20 +1,15 @@
 import { app } from "electron";
 import path from "node:path";
 import fs from "node:fs/promises";
+import https from "node:https";
 import { createWriteStream } from "node:fs";
 import { createGunzip } from "node:zlib";
 import { getLogger } from "./logger";
 import { getSettingsStore } from "./persistence";
 import { reloadGeoDatabases } from "./geo";
+import type { GeoDbDownloadProgress } from "@common/ipc";
 
 const log = getLogger();
-
-export interface GeoDbDownloadProgress {
-  stage: "downloading" | "extracting" | "complete" | "error";
-  edition: string;
-  percent?: number;
-  error?: string;
-}
 
 type ProgressCallback = (progress: GeoDbDownloadProgress) => void;
 
@@ -32,61 +27,102 @@ function getDatabaseDir(): string {
   return path.join(app.getPath("userData"), "databases");
 }
 
+function downloadFile(
+  url: string,
+  destPath: string,
+  onPercent: (percent: number) => void,
+  maxRedirects = 5
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const doRequest = (requestUrl: string, redirectsLeft: number) => {
+      const parsed = new URL(requestUrl);
+      log.info(`[geodb] HTTPS GET ${parsed.hostname}${parsed.pathname}${parsed.search.replace(/license_key=[^&]+/, "license_key=***")}`);
+
+      const req = https.request(
+        {
+          hostname: parsed.hostname,
+          port: 443,
+          path: parsed.pathname + parsed.search,
+          method: "GET",
+          headers: {
+            "User-Agent": "VisTracer/0.1 (GeoIP database downloader)"
+          }
+        },
+        (res) => {
+          log.info(`[geodb] HTTP ${res.statusCode}`);
+          // Follow redirects (301, 302, 303, 307, 308)
+          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume(); // Drain redirect response body to free the socket
+            if (redirectsLeft <= 0) {
+              reject(new Error("Too many redirects"));
+              return;
+            }
+            doRequest(res.headers.location, redirectsLeft - 1);
+            return;
+          }
+
+          if (!res.statusCode || res.statusCode >= 400) {
+            let body = "";
+            res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+            res.on("end", () => {
+              log.error(`[geodb] Download error: ${res.statusCode} ${body}`);
+              reject(new Error(`MaxMind download failed (${res.statusCode}): ${body || res.statusMessage}`));
+            });
+            return;
+          }
+
+          const contentLength = Number(res.headers["content-length"] || 0);
+          let downloaded = 0;
+          const fileStream = createWriteStream(destPath);
+
+          res.on("data", (chunk: Buffer) => {
+            fileStream.write(chunk);
+            downloaded += chunk.length;
+            if (contentLength > 0) {
+              onPercent(Math.round((downloaded / contentLength) * 100));
+            }
+          });
+
+          res.on("end", () => {
+            fileStream.end();
+            fileStream.on("finish", resolve);
+            fileStream.on("error", reject);
+          });
+
+          res.on("error", (err) => {
+            fileStream.destroy();
+            reject(err);
+          });
+        }
+      );
+
+      req.on("error", reject);
+      req.end();
+    };
+
+    doRequest(url, maxRedirects);
+  });
+}
+
 async function downloadAndExtract(
   edition: Edition,
   licenseKey: string,
   onProgress: ProgressCallback
 ): Promise<string> {
   const url = buildDownloadUrl(edition, licenseKey);
+  log.info(`[geodb] Downloading ${edition} from ${url.replace(/license_key=[^&]+/, "license_key=***")}`);
   const dbDir = getDatabaseDir();
   await fs.mkdir(dbDir, { recursive: true });
 
   onProgress({ stage: "downloading", edition, percent: 0 });
 
-  const response = await fetch(url);
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(
-      `MaxMind download failed (${response.status}): ${text || response.statusText}`
-    );
-  }
-
-  // Download to a temp tar.gz file
+  // Use Node's https module instead of the global fetch (which Electron overrides
+  // with Chromium's network stack). Electron's fetch may reject valid license keys
+  // due to cross-origin redirect handling differences.
   const tarGzPath = path.join(dbDir, `${edition}.tar.gz`);
-  const body = response.body;
-  if (!body) {
-    throw new Error("Empty response body from MaxMind");
-  }
-
-  const fileStream = createWriteStream(tarGzPath);
-  const contentLength = Number(response.headers.get("content-length") || 0);
-  let downloaded = 0;
-
-  const reader = body.getReader();
-  try {
-    let done = false;
-    while (!done) {
-      const result = await reader.read();
-      done = result.done;
-      const value = result.value;
-      if (done || !value) break;
-      fileStream.write(value);
-      downloaded += value.byteLength;
-      if (contentLength > 0) {
-        onProgress({
-          stage: "downloading",
-          edition,
-          percent: Math.round((downloaded / contentLength) * 100)
-        });
-      }
-    }
-  } finally {
-    fileStream.end();
-    await new Promise<void>((resolve, reject) => {
-      fileStream.on("finish", resolve);
-      fileStream.on("error", reject);
-    });
-  }
+  await downloadFile(url, tarGzPath, (percent) => {
+    onProgress({ stage: "downloading", edition, percent });
+  });
 
   onProgress({ stage: "extracting", edition });
 
@@ -102,7 +138,7 @@ async function downloadAndExtract(
   return mmdbPath;
 }
 
-async function extractMmdbFromTarGz(
+export async function extractMmdbFromTarGz(
   tarGzPath: string,
   edition: string,
   outputPath: string

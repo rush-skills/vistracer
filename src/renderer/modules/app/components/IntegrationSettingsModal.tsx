@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { GeoDatabaseMeta, IntegrationSettings } from "@common/ipc";
 import type { VisTracerWindow } from "@common/bridge";
 import { FiAlertCircle, FiCheckCircle, FiFolder } from "react-icons/fi";
+import { useModalA11y } from "@renderer/hooks/useModalA11y";
 import "./IntegrationSettingsModal.css";
 
 interface IntegrationSettingsModalProps {
@@ -42,6 +43,7 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
   const [saving, setSaving] = useState(false);
   const [cityPath, setCityPath] = useState("");
   const [asnPath, setAsnPath] = useState("");
+  const modalRef = useModalA11y(isOpen, onClose);
 
   useEffect(() => {
     if (!isOpen) {
@@ -177,11 +179,13 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
   const modal = (
     <div className="integration-settings-modal-overlay" onClick={onClose}>
       <div
+        ref={modalRef}
         className="integration-settings-modal"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="integration-settings-modal__title"
+        tabIndex={-1}
       >
         <header className="integration-settings-modal__header">
           <h2 id="integration-settings-modal__title" className="integration-settings-modal__title">

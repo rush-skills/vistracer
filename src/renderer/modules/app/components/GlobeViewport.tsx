@@ -206,6 +206,13 @@ const CameraController: React.FC<{ run?: TracerouteRun; selectedHopIndex?: numbe
     }
   }, [selectedHopIndex, run]);
 
+  // Reusable objects to avoid per-frame allocations
+  const startQuatRef = useRef(new THREE.Quaternion());
+  const endQuatRef = useRef(new THREE.Quaternion());
+  const currentQuatRef = useRef(new THREE.Quaternion());
+  const tempVecRef = useRef(new THREE.Vector3());
+  const forwardRef = useRef(new THREE.Vector3(0, 0, 1));
+
   // Animate camera on each frame using spherical interpolation
   useFrame((_, delta) => {
     if (targetPositionRef.current && animationProgressRef.current < 1) {
@@ -219,29 +226,23 @@ const CameraController: React.FC<{ run?: TracerouteRun; selectedHopIndex?: numbe
         : 1 - Math.pow(-2 * animationProgressRef.current + 2, 2) / 2;
 
       // Spherical interpolation: normalize both positions, slerp, then scale to maintain distance
-      const startNormalized = initialCameraPositionRef.current.clone().normalize();
-      const endNormalized = targetPositionRef.current.clone().normalize();
       const distance = initialCameraPositionRef.current.length();
 
-      // Use quaternion-based slerp for smooth rotation on the sphere
-      const startQuat = new THREE.Quaternion().setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1),
-        startNormalized
-      );
-      const endQuat = new THREE.Quaternion().setFromUnitVectors(
-        new THREE.Vector3(0, 0, 1),
-        endNormalized
-      );
+      const startNormalized = tempVecRef.current.copy(initialCameraPositionRef.current).normalize();
+      startQuatRef.current.setFromUnitVectors(forwardRef.current, startNormalized);
 
-      const currentQuat = new THREE.Quaternion().slerpQuaternions(
-        startQuat,
-        endQuat,
+      const endNormalized = tempVecRef.current.copy(targetPositionRef.current).normalize();
+      endQuatRef.current.setFromUnitVectors(forwardRef.current, endNormalized);
+
+      currentQuatRef.current.slerpQuaternions(
+        startQuatRef.current,
+        endQuatRef.current,
         easeProgress
       );
 
       // Convert back to position
-      const newDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(currentQuat);
-      camera.position.copy(newDirection.multiplyScalar(distance));
+      tempVecRef.current.set(0, 0, 1).applyQuaternion(currentQuatRef.current);
+      camera.position.copy(tempVecRef.current.multiplyScalar(distance));
 
       // Keep camera looking at center (the Earth)
       camera.lookAt(0, 0, 0);
@@ -265,13 +266,10 @@ const Earth: React.FC = () => {
   React.useEffect(() => {
     const textureLoader = new THREE.TextureLoader();
 
-    console.log('Loading Earth textures...');
-
     // Load day texture
     textureLoader.load(
       './earthmap10k.jpg',
       (texture) => {
-        console.log('Day texture loaded successfully');
         texture.anisotropy = Math.min(16, gl.capabilities.getMaxAnisotropy());
         texture.minFilter = THREE.LinearMipmapLinearFilter;
         texture.magFilter = THREE.LinearFilter;
@@ -287,7 +285,6 @@ const Earth: React.FC = () => {
     textureLoader.load(
       './earthlights10k.jpg',
       (texture) => {
-        console.log('Night texture loaded successfully');
         texture.anisotropy = Math.min(16, gl.capabilities.getMaxAnisotropy());
         texture.minFilter = THREE.LinearMipmapLinearFilter;
         texture.magFilter = THREE.LinearFilter;
@@ -361,7 +358,6 @@ const Earth: React.FC = () => {
       };
 
       materialRef.current.needsUpdate = true;
-      console.log('Applied day/night textures with custom shader');
 
       // Mark textures as ready and make mesh visible
       setTexturesReady(true);
@@ -467,7 +463,7 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
   const captureActive = useTracerouteStore((state) => state.captureActive);
 
   return (
-    <section className="globe-viewport">
+    <section className="globe-viewport" aria-label="3D globe showing traceroute path">
       <Canvas
         camera={{ position: [0, 0, 14], fov: 50, near: 0.1, far: 1000 }}
         gl={{ preserveDrawingBuffer: true }}
@@ -493,25 +489,6 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
           enabled={!captureActive}
         />
       </Canvas>
-      {/* {!run && (
-        <div style={{
-          position: 'absolute',
-          bottom: '2rem',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          textAlign: 'center',
-          pointerEvents: 'none'
-        }}>
-          <p style={{
-            fontSize: '0.95rem',
-            opacity: 0.6,
-            margin: 0,
-            maxWidth: '260px'
-          }}>
-            Run a traceroute to animate the globe
-          </p>
-        </div>
-      )} */}
       {run && !hasRenderableHops && (
         <div style={{
           position: 'absolute',

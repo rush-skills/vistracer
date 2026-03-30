@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { GeoDatabaseMeta, GeoDbDownloadProgress } from "@common/ipc";
 import type { VisTracerWindow } from "@common/bridge";
 import { FiX, FiFolder, FiCheckCircle, FiAlertCircle, FiDownloadCloud, FiKey } from "react-icons/fi";
+import { useModalA11y } from "@renderer/hooks/useModalA11y";
 import "./GeoSettingsModal.css";
 
 interface GeoSettingsModalProps {
@@ -24,6 +25,7 @@ export const GeoSettingsModal: React.FC<GeoSettingsModalProps> = ({
   const [licenseKey, setLicenseKey] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<GeoDbDownloadProgress | null>(null);
+  const modalRef = useModalA11y(isOpen, onClose);
 
   useEffect(() => {
     setCityPath(geoMeta.cityDbPath || "");
@@ -113,10 +115,18 @@ export const GeoSettingsModal: React.FC<GeoSettingsModalProps> = ({
 
   return (
     <div className="geo-settings-modal-overlay" onClick={onClose}>
-      <div className="geo-settings-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className="geo-settings-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="geo-settings-modal__title"
+        tabIndex={-1}
+      >
         <div className="geo-settings-modal__header">
-          <h2 className="geo-settings-modal__title">Configure GeoIP Databases</h2>
-          <button className="geo-settings-modal__close" onClick={onClose}>
+          <h2 id="geo-settings-modal__title" className="geo-settings-modal__title">Configure GeoIP Databases</h2>
+          <button className="geo-settings-modal__close" onClick={onClose} aria-label="Close">
             <FiX />
           </button>
         </div>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { GeoDatabaseMeta, GeoDbDownloadProgress } from "@common/ipc";
 import type { IconType } from "react-icons";
+import { useModalA11y } from "@renderer/hooks/useModalA11y";
 import {
   FiCamera,
   FiCheckCircle,
@@ -74,6 +75,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<GeoDbDownloadProgress | null>(null);
   const [downloadError, setDownloadError] = useState<string | undefined>(undefined);
+  const modalRef = useModalA11y(isOpen, onDismiss);
 
   useEffect(() => {
     if (!isOpen) {
@@ -191,8 +193,10 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       onClick={onDismiss}
     >
       <div
+        ref={modalRef}
         className="onboarding-modal__panel"
         role="document"
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <button

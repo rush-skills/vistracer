@@ -224,30 +224,33 @@ const captureGif = async (
   const frameInterval = 1000 / fps;
   const frameDelay = Math.max(60, Math.round(frameInterval));
 
-  for (const hop of hops) {
-    if (hop.geo) {
-      setSelectedHop(hop.hopIndex);
-      await waitNextFrame();
-    } else {
-      setSelectedHop(undefined);
-      await waitNextFrame();
+  try {
+    for (const hop of hops) {
+      if (hop.geo) {
+        setSelectedHop(hop.hopIndex);
+        await waitNextFrame();
+      } else {
+        setSelectedHop(undefined);
+        await waitNextFrame();
+      }
+      const endTime = performance.now() + Math.max(frameInterval, dwellSeconds * 1000);
+      while (performance.now() < endTime) {
+        drawOverlay(overlayCtx, canvas, hop);
+        gif.addFrame(overlayCtx.canvas, {
+          copy: true,
+          delay: frameDelay
+        });
+        await wait(frameInterval);
+      }
     }
-    const endTime = performance.now() + Math.max(frameInterval, dwellSeconds * 1000);
-    while (performance.now() < endTime) {
-      drawOverlay(overlayCtx, canvas, hop);
-      gif.addFrame(overlayCtx.canvas, {
-        copy: true,
-        delay: frameDelay
-      });
-      await wait(frameInterval);
-    }
+
+    gif.render();
+
+    const blob = await blobPromise;
+    return blob;
+  } finally {
+    setSelectedHop(original);
   }
-
-  gif.render();
-
-  const blob = await blobPromise;
-  setSelectedHop(original);
-  return blob;
 };
 
 const captureWebm = async (
@@ -297,26 +300,29 @@ const captureWebm = async (
 
   recorder.start(Math.round(interval));
 
-  for (const hop of hops) {
-    if (hop.geo) {
-      setSelectedHop(hop.hopIndex);
-      await waitNextFrame();
-    } else {
-      setSelectedHop(undefined);
-      await waitNextFrame();
+  try {
+    for (const hop of hops) {
+      if (hop.geo) {
+        setSelectedHop(hop.hopIndex);
+        await waitNextFrame();
+      } else {
+        setSelectedHop(undefined);
+        await waitNextFrame();
+      }
+      const endTime = performance.now() + dwellSeconds * 1000;
+      while (performance.now() < endTime) {
+        drawOverlay(overlayCtx, canvas, hop);
+        await wait(interval);
+      }
     }
-    const endTime = performance.now() + dwellSeconds * 1000;
-    while (performance.now() < endTime) {
-      drawOverlay(overlayCtx, canvas, hop);
-      await wait(interval);
-    }
-  }
 
-  recorder.stop();
-  stream.getTracks().forEach((track) => track.stop());
-  const blob = await recordingPromise;
-  setSelectedHop(original);
-  return blob;
+    recorder.stop();
+    const blob = await recordingPromise;
+    return blob;
+  } finally {
+    stream.getTracks().forEach((track) => track.stop());
+    setSelectedHop(original);
+  }
 };
 
 export const runExport = async (options: ExportOptions, run: TracerouteRun): Promise<{ filename: string }> => {

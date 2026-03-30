@@ -56,7 +56,7 @@ function isIpv6Target(target: string): boolean {
   return isIpv6(target);
 }
 
-function buildCommand(
+export function buildCommand(
   request: TracerouteRequest
 ): { command: string; args: string[]; platform: NodeJS.Platform } {
   const platform = os.platform();
@@ -119,7 +119,7 @@ interface ParsedHop {
   rawLine: string;
 }
 
-function parseLatencyValues(remainder: string): number[] {
+export function parseLatencyValues(remainder: string): number[] {
   const matches = Array.from(remainder.matchAll(/(<\d+|\d+(?:\.\d+)?)\s*ms/gi));
   return matches.map((match) => {
     const raw = match[1];
@@ -130,7 +130,7 @@ function parseLatencyValues(remainder: string): number[] {
   });
 }
 
-function parseHopLine(line: string, request: TracerouteRequest): ParsedHop | null {
+export function parseHopLine(line: string, request: TracerouteRequest): ParsedHop | null {
   const trimmed = line.trim();
   if (!trimmed) {
     return null;

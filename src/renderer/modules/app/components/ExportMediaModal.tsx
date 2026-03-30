@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useModalA11y } from "@renderer/hooks/useModalA11y";
 import "./ExportMediaModal.css";
 
 type ExportFormat = "png" | "jpg" | "webp" | "webm" | "gif";
@@ -22,6 +23,7 @@ export const ExportMediaModal: React.FC<ExportMediaModalProps> = ({
 }) => {
   const [format, setFormat] = useState<ExportFormat>(defaultFormat);
   const [dwellSeconds, setDwellSeconds] = useState(dwellDefault);
+  const modalRef = useModalA11y(isOpen, onCancel);
 
   useEffect(() => {
     if (isOpen) {
@@ -68,11 +70,13 @@ export const ExportMediaModal: React.FC<ExportMediaModalProps> = ({
   return (
     <div className="export-modal-overlay" onClick={onCancel}>
       <div
+        ref={modalRef}
         className="export-modal"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="export-modal__title"
+        tabIndex={-1}
       >
         <header className="export-modal__header">
           <h2 id="export-modal__title">Export route</h2>
