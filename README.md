@@ -12,6 +12,16 @@
   ![VisTracer Screenshot](assets/screenshot.png)
 </div>
 
+## Download
+
+Pre-built binaries are available on the [Releases](https://github.com/rush-skills/vistracer/releases/latest) page:
+
+| Platform | Format |
+|----------|--------|
+| macOS    | `.dmg` |
+| Windows  | `.exe` (NSIS installer) |
+| Linux    | `.AppImage`, `.deb` |
+
 ## Why Electron?
 
 VisTracer is built as an Electron desktop application rather than a web app because **traceroute requires native system access**. Web browsers cannot execute system commands like `traceroute` or `tracert` for security reasons. By using Electron, VisTracer can:
