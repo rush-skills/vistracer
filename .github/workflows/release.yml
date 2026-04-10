@@ -116,21 +116,6 @@ jobs:
       - name: Build Tauri app
         run: npx tauri build
 
-      - name: Ad-hoc sign macOS app
-        if: runner.os == 'macOS'
-        run: |
-          codesign --force --deep --sign - "src-tauri/target/release/bundle/macos/VisTracer.app"
-          # Rebuild DMG with the signed app
-          DMG_PATH=$(find src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
-          if [ -n "$DMG_PATH" ]; then
-            DMG_DIR=$(dirname "$DMG_PATH")
-            DMG_NAME=$(basename "$DMG_PATH")
-            TEMP_DIR=$(mktemp -d)
-            hdiutil create -volname "VisTracer" -srcfolder "src-tauri/target/release/bundle/macos/VisTracer.app" -ov -format UDZO "$TEMP_DIR/$DMG_NAME"
-            mv "$TEMP_DIR/$DMG_NAME" "$DMG_PATH"
-            rm -rf "$TEMP_DIR"
-          fi
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:

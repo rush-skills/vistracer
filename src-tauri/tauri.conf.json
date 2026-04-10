@@ -41,6 +41,18 @@
       "../assets/world.geojson",
       "../assets/logo.png"
     ],
+    "macOS": {
+      "dmg": {
+        "appPosition": {
+          "x": 180,
+          "y": 220
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 220
+        }
+      }
+    },
     "linux": {
       "deb": {
         "depends": ["traceroute"]
