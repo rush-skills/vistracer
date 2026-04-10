@@ -1,68 +1,9 @@
 {
   "name": "vistracer",
   "version": "0.2.0",
-  "description": "Electron-based visual traceroute application rendering hop paths on a 3D globe.",
+  "description": "Tauri-based visual traceroute application rendering hop paths on a 3D globe.",
   "private": true,
-  "main": "dist/main/src/main/main.js",
-  "build": {
-    "appId": "com.vistracer.app",
-    "productName": "VisTracer",
-    "directories": {
-      "output": "release",
-      "buildResources": "assets"
-    },
-    "files": [
-      "dist/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "assets",
-        "to": "assets",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.utilities",
-      "icon": "assets/icons/VisTracer.icns",
-      "target": [
-        "dmg"
-      ],
-      "artifactName": "VisTracer-${version}-mac.${ext}"
-    },
-    "dmg": {
-      "sign": false
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "assets/icons/VisTracer.ico",
-      "artifactName": "VisTracer-${version}-win.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
-    },
-    "linux": {
-      "category": "Utility",
-      "icon": "assets/icons/VisTracer.png",
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "artifactName": "VisTracer-${version}-linux.${ext}"
-    }
-  },
+  "type": "module",
   "author": {
     "name": "VisTracer Team",
     "email": "vistracer@rush-skills.dev"
@@ -77,32 +18,27 @@
   },
   "homepage": "https://vistracer.anks.in",
   "scripts": {
-    "dev": "concurrently -c \"blue,magenta,green\" \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
-    "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput & tsc-alias -p tsconfig.main.json --watch",
+    "dev": "vite --config vite.config.ts",
     "dev:renderer": "vite --config vite.config.ts",
-    "dev:electron": "wait-on dist/main/src/main/main.js && cross-env NODE_ENV=development electron .",
-    "build": "npm run build:clean && npm run build:main && npm run build:renderer",
-    "build:clean": "rimraf dist",
-    "build:main": "tsc -p tsconfig.main.json && tsc-alias -p tsconfig.main.json",
+    "build": "npm run build:renderer",
     "build:renderer": "tsc -p tsconfig.renderer.json && vite build --config vite.config.ts",
-    "bundle": "npm run build && electron-builder --dir --publish never",
-    "package": "npm run build && electron-builder --mac dmg --win nsis --linux AppImage deb --publish never",
-    "package:mac": "npm run build && electron-builder --mac dmg --publish never",
-    "package:win": "npm run build && electron-builder --win nsis --publish never",
-    "package:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
-    "start": "cross-env NODE_ENV=production electron .",
+    "tauri": "cargo tauri",
+    "tauri:dev": "cargo tauri dev",
+    "tauri:build": "cargo tauri build",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "vitest run",
     "test:watch": "vitest watch",
-    "typecheck": "tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.main.json --noEmit"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "typecheck": "tsc -p tsconfig.renderer.json --noEmit"
   },
   "dependencies": {
     "@react-three/drei": "^9.101.3",
     "@react-three/fiber": "^8.15.17",
     "@tanstack/react-query": "^5.29.0",
-    "electron-log": "^5.1.3",
-    "electron-store": "^9.0.0",
-    "maxmind": "^4.3.16",
+    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.2.0",
+    "@tauri-apps/plugin-fs": "^2.2.0",
+    "@tauri-apps/plugin-shell": "^2.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.1.0",
@@ -119,24 +55,17 @@
     "@typescript-eslint/eslint-plugin": "^7.7.0",
     "@typescript-eslint/parser": "^7.7.0",
     "@vitejs/plugin-react": "^4.2.1",
-    "concurrently": "^8.2.2",
-    "cross-env": "^7.0.3",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
-    "electron": "^38.4.0",
     "eslint-plugin-react": "^7.34.1",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "electron-builder": "^25.1.8",
     "jsdom": "^24.1.3",
     "prettier": "^3.2.5",
     "rimraf": "^5.0.5",
-    "tsc-alias": "^1.8.8",
-    "tslib": "^2.6.2",
     "typescript": "^5.4.5",
     "vite": "^7.1.12",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.2.4",
-    "wait-on": "^7.2.0"
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=22.0.0"

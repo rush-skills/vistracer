@@ -14,12 +14,11 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: [path.resolve(__dirname, "vitest.setup.ts")],
-    // Main-process and common tests run under Node; renderer tests use jsdom (default)
     projects: [
       {
         test: {
-          name: "node",
-          include: ["src/main/**/*.test.ts", "src/common/**/*.test.ts"],
+          name: "common",
+          include: ["src/common/**/*.test.ts"],
           environment: "node",
           globals: true
         },

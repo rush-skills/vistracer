@@ -3,10 +3,13 @@ import react from "@vitejs/plugin-react";
 import tsconfigPaths from "vite-tsconfig-paths";
 import path from "node:path";
 
+// https://v2.tauri.app/start/frontend/vite/
+const host = process.env.TAURI_DEV_HOST;
+
 export default defineConfig({
   root: path.resolve(__dirname, "src", "renderer"),
   publicDir: path.resolve(__dirname, "assets"),
-  base: './', // Use relative paths for Electron file:// protocol
+  base: "./",
   plugins: [
     react(),
     tsconfigPaths({
@@ -24,9 +27,21 @@ export default defineConfig({
     outDir: path.resolve(__dirname, "dist", "renderer"),
     emptyOutDir: true,
     sourcemap: true,
-    assetsInlineLimit: 0, // Don't inline large assets like earth textures
+    assetsInlineLimit: 0,
+    // Tauri uses Chromium on Windows and WebKit on macOS/Linux
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari14"
   },
+  // Vite options tailored for Tauri development
+  clearScreen: false,
   server: {
-    port: 5173
-  }
+    port: 5173,
+    strictPort: true,
+    host: host || false,
+    hmr: host ? { protocol: "ws", host, port: 5174 } : undefined,
+    watch: {
+      // Tell vite to ignore watching `src-tauri`
+      ignored: ["**/src-tauri/**"]
+    }
+  },
+  envPrefix: ["VITE_", "TAURI_ENV_*"]
 });

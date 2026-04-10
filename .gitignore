@@ -11,3 +11,7 @@ src/**/*.js
 src/**/*.js.map
 !src/**/*.d.ts
 *.mmdb
+
+# Tauri
+src-tauri/target
+src-tauri/gen

@@ -20,7 +20,15 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Install dependencies
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+
+      - name: Install npm dependencies
         run: npm ci
 
       - name: Lint
@@ -29,8 +37,15 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-      - name: Test
+      - name: TypeScript tests
         run: npm run test
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
 
   build:
     name: Build ${{ matrix.name }}
@@ -43,15 +58,12 @@ jobs:
         include:
           - name: macOS
             os: macos-latest
-            script: package:mac
 
           - name: Windows
             os: windows-latest
-            script: package:win
 
           - name: Linux
             os: ubuntu-latest
-            script: package:linux
 
     steps:
       - name: Checkout
@@ -63,18 +75,44 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Install dependencies
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+
+      - name: Install npm dependencies
         run: npm ci
 
-      - name: Build package
-        run: npm run ${{ matrix.script }}
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Tauri app
+        run: npx tauri build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.name }}
-          path: release/
-          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+          if-no-files-found: warn
 
   release:
     name: Create GitHub Release
@@ -99,7 +137,8 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/*.dmg
-            artifacts/*.exe
-            artifacts/*.AppImage
-            artifacts/*.deb
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb

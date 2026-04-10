@@ -1,6 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+// Initialize Tauri bridge (registers window.visTracer)
+import "@common/bridge";
 import { App } from "./modules/app/App";
 import "./styles/global.css";
 
