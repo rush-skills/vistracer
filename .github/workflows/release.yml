@@ -53,6 +53,9 @@ jobs:
       - name: E2E tests
         run: npm run test:e2e
 
+      - name: Build frontend
+        run: npm run build
+
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test
