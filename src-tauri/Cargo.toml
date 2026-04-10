@@ -1,6 +1,6 @@
 [package]
 name = "vistracer"
-version = "0.2.0"
+version = "1.0.0"
 description = "Visual traceroute desktop application"
 authors = ["VisTracer Team"]
 license = "MIT"

@@ -9,7 +9,7 @@
 
   **[vistracer.anks.in](https://vistracer.anks.in)**
 
-  Visual traceroute desktop application built with Electron and React. VisTracer executes traceroute locally, enriches hops with GeoIP, ASN, and external registry metadata, and animates hop-to-hop routes on a 3D globe alongside an interactive hop timeline.
+  Visual traceroute desktop application built with Tauri v2 and React. VisTracer executes traceroute locally, enriches hops with GeoIP, ASN, and external registry metadata, and animates hop-to-hop routes on a 3D globe alongside an interactive hop timeline.
 
   ![VisTracer Screenshot](assets/screenshot.png)
 </div>
@@ -24,9 +24,9 @@ Pre-built binaries are available on the [Releases](https://github.com/rush-skill
 | Windows  | `.exe` (NSIS installer) |
 | Linux    | `.AppImage`, `.deb` |
 
-## Why Electron?
+## Why a Desktop App?
 
-VisTracer is built as an Electron desktop application rather than a web app because **traceroute requires native system access**. Web browsers cannot execute system commands like `traceroute` or `tracert` for security reasons. By using Electron, VisTracer can:
+VisTracer is built as a native desktop application (Tauri v2 + Rust) rather than a web app because **traceroute requires native system access**. Web browsers cannot execute system commands like `traceroute` or `tracert` for security reasons. As a Tauri app, VisTracer can:
 
 - Spawn native traceroute/tracert processes directly on your local machine
 - Access system binaries with proper permissions (ICMP requires elevated privileges)
@@ -37,7 +37,7 @@ This architecture ensures you get authentic network diagnostics from your actual
 
 ## Core Capabilities
 
-- Cross-platform Electron shell with type-safe IPC between the main process and React renderer.
+- Cross-platform Tauri v2 shell with Rust backend and type-safe IPC to the React frontend.
 - Native traceroute execution (ICMP/UDP/TCP) via system binaries with cancellation support.
 - Streaming progress updates: hop data appears in the UI as traceroute output is parsed.
 - GeoIP/ASN enrichment via local MaxMind GeoLite2 databases with persistent caching.
@@ -79,7 +79,7 @@ In addition to GeoLite2, VisTracer can cross-check hop metadata using several pu
 | **RIPE Stat** | Prefix + ASN holder context | identifies as `VisTracer` |
 | **PeeringDB** | Facility/operator details for known ASNs | optional API key for higher rate limits |
 
-Use the **Integrations** toggles above the advanced traceroute options to enable or disable each provider. The settings modal exposes credential fields for the services that support them. VisTracer logs every lookup in the Electron console/log file so it is easy to verify which providers responded for a given hop.
+Use the **Integrations** toggles above the advanced traceroute options to enable or disable each provider. The settings modal exposes credential fields for the services that support them. VisTracer logs every lookup in the application log so it is easy to verify which providers responded for a given hop.
 
 ### Install Dependencies
 
@@ -89,33 +89,30 @@ npm install
 
 ### Development Workflow
 
-Run the Electron + Vite development environment:
+Run the Tauri + Vite development environment:
 
 ```bash
-npm run dev
+npm run tauri:dev
 ```
 
-The command compiles the Electron main process with `tsc`, starts Vite for the renderer, and launches
-Electron once the build products are ready. Renderer changes benefit from fast-refresh.
+The command starts the Vite dev server for the frontend and compiles/launches the Rust backend.
+Frontend changes benefit from hot-reload; Rust changes trigger an automatic recompile.
 
 ### Production Build
 
 ```bash
 npm run build
-npm run start   # launches Electron against the production bundles
 ```
 
 ### Desktop Packages
 
-Electron-based installers can now be generated with `electron-builder`. Every packaging command runs the production build first and drops artifacts in `release/`.
+Tauri bundles native installers for each platform:
 
 ```bash
-npm run package       # mac dmg + win nsis (.exe) + linux AppImage + deb
-npm run package:mac   # macOS dmg (contains the .app bundle)
-npm run package:win   # Windows NSIS installer (.exe)
-npm run package:linux # Linux AppImage + Debian package
-npm run bundle        # produces an unpacked dir for testing (no installer)
+npm run tauri:build   # builds frontend + Rust backend and produces platform installer
 ```
+
+Build artifacts are placed in `src-tauri/target/release/bundle/`.
 
 > **Cross-building tip:** Creating Windows installers from macOS/Linux (or vice versa) requires the platform-specific toolchain (`xcode-select --install` on macOS, `wine`/`mono` for Windows targets, `fpm` for Debian packages). For the most reliable output, run the matching command on that operating system or inside a CI runner/VM that provides the necessary dependencies.
 
@@ -131,10 +128,11 @@ npm run test        # Vitest + Testing Library (renderer-focused)
 
 ```
 src/
-  main/        Electron main process, IPC handlers, traceroute + geo services
   renderer/    React application (modules, state store, Three.js globe, hooks)
-  common/      Shared TypeScript contracts between main and renderer
-assets/        Static assets (reserved)
+  common/      Shared TypeScript contracts (bridge, IPC types, net utils)
+src-tauri/
+  src/         Rust backend (commands, persistence, traceroute, geo, DNS)
+assets/        Static assets (globe textures, GeoJSON, logo)
 ```
 
 ## GeoLite2 Database Management
@@ -175,10 +173,10 @@ The terminator position uses a simplified solar algorithm that provides accuracy
 
 - Scheduled GeoLite2 refresh (auto-download via license key works; periodic refresh is not yet automated)
 - Provider rate-limit handling and retry UX for external enrichment APIs
-- MP4 export remains out of scope because Electron's built-in encoders focus on WebM; use WebM or GIF instead.
+- MP4 export remains out of scope; use WebM or GIF instead.
 - Advanced heuristics (anycast detection, jitter visualisation, comparison view) are planned but not
   implemented in this build
-- Windows environments rely on `tracert`; ensure it is available on `PATH` for the Electron runtime
+- Windows environments rely on `tracert`; ensure it is available on `PATH`
 
 ## Contributing
 

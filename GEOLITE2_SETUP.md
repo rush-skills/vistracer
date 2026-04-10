@@ -14,7 +14,7 @@ VisTracer uses MaxMind's GeoLite2 databases to provide location and network info
 1. Download the databases from MaxMind (see below)
 2. Place the `.mmdb` files in the `assets/` directory:
    ```
-   vistracer-codex/
+   vistracer/
    └── assets/
        ├── GeoLite2-City.mmdb
        └── GeoLite2-ASN.mmdb
@@ -83,8 +83,8 @@ tar -xzf GeoLite2-City.tar.gz
 tar -xzf GeoLite2-ASN.tar.gz
 
 # Move to VisTracer assets directory (adjust path as needed)
-cp GeoLite2-City_*/GeoLite2-City.mmdb /path/to/vistracer-codex/assets/
-cp GeoLite2-ASN_*/GeoLite2-ASN.mmdb /path/to/vistracer-codex/assets/
+cp GeoLite2-City_*/GeoLite2-City.mmdb /path/to/vistracer/assets/
+cp GeoLite2-ASN_*/GeoLite2-ASN.mmdb /path/to/vistracer/assets/
 ```
 
 #### Via Command Line (Windows PowerShell)
@@ -175,7 +175,7 @@ The databases are memory-mapped and should be fast, but:
 
 - All geo lookups happen **locally** on your machine
 - No data is sent to MaxMind or any external service
-- Lookups are cached to electron-store for performance
+- Lookups are cached in-memory for performance
 
 ### Accuracy
 

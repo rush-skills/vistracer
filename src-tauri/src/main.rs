@@ -11,7 +11,8 @@ use commands::geo::{
 };
 use commands::geodb_downloader::download_geo_databases;
 use commands::persistence::{
-    configure_geo_database_defaults, ensure_app_data_dirs, AppStore, SharedStore,
+    configure_geo_database_defaults, ensure_app_data_dirs, save_persisted_settings, AppStore,
+    SharedStore,
 };
 use commands::traceroute::{cancel_traceroute, create_active_runs, run_traceroute, ActiveRuns};
 use std::path::PathBuf;
@@ -127,6 +128,7 @@ async fn update_geo_database_paths(
         guard.geo.city_db_path = city_path;
         guard.geo.asn_db_path = asn_path;
         guard.geo.last_updated = Some(chrono::Utc::now().timestamp_millis() as f64);
+        save_persisted_settings(&state.app_data_dir, &guard);
     }
     reload_geo_databases(&state.geo_readers, &state.store);
     Ok(())
@@ -221,6 +223,7 @@ async fn set_settings(
         }
     }
 
+    save_persisted_settings(&state.app_data_dir, &guard);
     Ok(())
 }
 
@@ -259,8 +262,9 @@ fn main() {
 
             // Configure geo database defaults synchronously on setup
             {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(configure_geo_database_defaults(&store, &assets_dir));
+                let rt = tokio::runtime::Runtime::new()
+                    .expect("Failed to create tokio runtime for setup");
+                rt.block_on(configure_geo_database_defaults(&store, &assets_dir, &app_data_dir));
             }
 
             ensure_readers(&readers, &store);

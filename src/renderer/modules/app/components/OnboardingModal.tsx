@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { GeoDatabaseMeta, GeoDbDownloadProgress } from "@common/ipc";
 import type { IconType } from "react-icons";
 import { useModalA11y } from "@renderer/hooks/useModalA11y";
@@ -75,6 +76,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<GeoDbDownloadProgress | null>(null);
   const [downloadError, setDownloadError] = useState<string | undefined>(undefined);
+  const queryClient = useQueryClient();
   const modalRef = useModalA11y(isOpen, onDismiss);
 
   useEffect(() => {
@@ -130,6 +132,8 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       // Refresh geo meta after download
       const meta = await window.visTracer.getGeoDatabaseMeta();
       setGeoMeta(meta);
+      // Invalidate the React Query cache so FooterBar picks up the new status
+      void queryClient.invalidateQueries({ queryKey: ["geo-database-meta"] });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Download failed";
       setDownloadError(message);

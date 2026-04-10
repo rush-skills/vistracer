@@ -19,11 +19,11 @@ cd vistracer
 # Install dependencies
 npm install
 
-# Start the development environment (main process compiler + Vite dev server + Electron)
-npm run dev
+# Start the development environment (Vite dev server + Tauri Rust backend)
+npm run tauri:dev
 ```
 
-The `dev` script runs three processes concurrently: the TypeScript compiler for the main process, the Vite dev server for the renderer, and Electron itself. Changes to the renderer reload automatically via HMR; changes to the main process require restarting `npm run dev`.
+The `tauri:dev` script starts the Vite dev server for the frontend and compiles/launches the Rust backend. Frontend changes reload automatically via HMR; Rust changes trigger an automatic recompile.
 
 ## Project Architecture
 
@@ -48,7 +48,7 @@ Key conventions:
 - TypeScript strict mode is enabled — avoid `any` and non-null assertions unless genuinely necessary.
 - Shared types between the main and renderer processes live in `src/common/`. Do not import renderer code from the main process or vice versa outside of `src/common/`.
 - Path aliases (`@common/`, `@renderer/`, `@assets/`) are configured in `tsconfig.base.json`; use them instead of deep relative imports.
-- Keep IPC channel additions in `src/common/ipc.ts` and update `src/common/bridge.ts` and `src/main/preload.ts` together.
+- Keep IPC type definitions in `src/common/ipc.ts`, update `src/common/bridge.ts`, and ensure they match the `#[tauri::command]` handlers in `src-tauri/src/`.
 
 ## Testing
 
@@ -62,16 +62,16 @@ npm run test
 npm run test:watch
 ```
 
-All new features and bug fixes should include a corresponding test. Renderer tests run in a jsdom environment. Main-process tests run in a Node environment but require mocking `electron` and `electron-store` via `vi.mock()` (see existing test files for the pattern using `vi.hoisted()` to avoid hoisting issues).
+All new features and bug fixes should include a corresponding test. Renderer tests run in a jsdom environment. Rust backend tests use `cargo test` in the `src-tauri/` directory.
 
 ## Building for Production
 
 ```bash
-npm run build
-npm run start   # Launch the production build locally
+npm run build           # Frontend only
+npm run tauri:build     # Full production build with native installer
 ```
 
-Electron Forge is used for packaging. Do not commit built artifacts.
+Tauri CLI is used for packaging. Do not commit built artifacts.
 
 ## Pull Request Workflow
 

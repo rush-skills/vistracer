@@ -211,12 +211,13 @@ pub async fn download_geo_databases(
         .to_string_lossy()
         .to_string();
 
-    // Update settings
+    // Update settings and persist to disk
     {
         let mut guard = store.lock().unwrap();
         guard.geo.city_db_path = Some(city_path.clone());
         guard.geo.asn_db_path = Some(asn_path.clone());
         guard.geo.last_updated = Some(chrono::Utc::now().timestamp_millis() as f64);
+        super::persistence::save_persisted_settings(app_data_dir, &guard);
     }
 
     reload_geo_databases(readers, store);

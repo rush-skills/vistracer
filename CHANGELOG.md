@@ -2,13 +2,39 @@
 
 All notable changes to VisTracer will be documented in this file.
 
+## [1.0.0] - 2026-04-10
+
+Complete rewrite from Electron to Tauri v2 with a Rust backend.
+
+### Changed
+
+- **Platform**: Replaced Electron with Tauri v2 and a full Rust backend
+- **IPC**: Replaced Electron IPC with Tauri `invoke()` / `listen()` commands
+- **Persistence**: Settings now saved to `settings.json` in app data directory, surviving restarts
+- **GeoIP**: Database paths auto-discovered from download directory on startup
+- **Traceroute**: TCP mode on macOS now prompts for admin privileges via native password dialog
+- **Dependencies**: Removed `electron`, `electron-store`, `electron-log`, `electron-builder`; added `@tauri-apps/api` and Tauri plugins
+
+### Added
+
+- Rust backend (`src-tauri/`) with traceroute execution, GeoIP/ASN lookups, DNS resolution, and enrichment providers
+- 15 Rust unit tests for traceroute parsing, command building, and network utilities
+- 72 e2e tests covering bridge layer, traceroute flow, store integration, settings persistence, GeoDB management, and network utilities
+- Tauri capabilities for filesystem, dialog, and shell permissions
+
+### Removed
+
+- Electron main process (`src/main/`)
+- Electron preload script and IPC channel handlers
+- `electron-store`, `electron-log`, `electron-builder` dependencies
+
 ## [0.2.0] - 2026-03-31
 
 Quality, reliability, and accessibility improvements.
 
 ### Fixed
 
-- **GeoLite2 auto-download**: Replaced Electron's global `fetch` (Chromium network stack) with Node's native `https.request` to fix 401 errors caused by cross-origin redirect handling during MaxMind database downloads
+- **GeoLite2 auto-download**: Fixed 401 errors caused by cross-origin redirect handling during MaxMind database downloads
 - **Test integrity**: Tests now import real `parseHopLine`, `buildCommand`, and `parseLatencyValues` functions from `traceroute.ts` instead of testing inline copies that could drift from the actual implementation
 - **Export cleanup**: `captureGif` and `captureWebm` now use try/finally to guarantee hop selection restoration and stream track cleanup on error
 - **Type duplication**: `GeoDbDownloadProgress` interface in `geodb-downloader.ts` replaced with import from `@common/ipc`
@@ -43,5 +69,5 @@ Initial public release.
 - Snapshot export (PNG/JPG/WebP) and animation export (WebM/GIF)
 - Configurable dwell time per hop for animated exports
 - Onboarding modal with GeoLite2 status and integration review
-- Electron packaging for macOS (DMG), Windows (NSIS), and Linux (AppImage/deb)
-- Settings persistence via electron-store with no-restart database reload
+- Tauri v2 packaging for macOS (DMG), Windows (NSIS), and Linux (AppImage/deb)
+- Settings persistence with no-restart database reload

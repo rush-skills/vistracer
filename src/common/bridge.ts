@@ -69,8 +69,7 @@ function createTauriApi(): RendererApi {
     },
 
     exportSnapshot: () => {
-      // Snapshot export in Tauri uses the renderer-side canvas capture
-      // rather than Electron's webContents.capturePage()
+      // Snapshot export uses renderer-side canvas capture
       return Promise.resolve({
         success: false,
         error: "Snapshot export is handled client-side in Tauri builds."

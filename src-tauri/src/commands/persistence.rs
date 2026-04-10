@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::types::*;
@@ -35,7 +35,7 @@ pub struct OnboardingPreferences {
     pub last_dismissed_at: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Preferences {
     #[serde(rename = "reducedMotion")]
     pub reduced_motion: Option<bool>,
@@ -155,8 +155,8 @@ pub struct GeoCacheEntry {
 }
 
 /// In-memory store for settings, cache, and runs.
-/// This replaces electron-store with a simple in-memory HashMap
-/// that persists to the tauri-plugin-store on changes.
+/// Backed by a simple in-memory HashMap that persists
+/// to the tauri-plugin-store on changes.
 pub struct AppStore {
     pub geo: GeoSettings,
     pub preferences: Preferences,
@@ -256,6 +256,51 @@ impl AppStore {
     }
 }
 
+/// Subset of AppStore that gets persisted to disk as JSON.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PersistedSettings {
+    #[serde(default)]
+    pub geo: GeoSettings,
+    #[serde(default)]
+    pub preferences: Preferences,
+    #[serde(default)]
+    pub integrations: IntegrationSettings,
+}
+
+fn settings_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("settings.json")
+}
+
+pub fn load_persisted_settings(app_data_dir: &Path) -> PersistedSettings {
+    let path = settings_path(app_data_dir);
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => {
+            serde_json::from_str(&contents).unwrap_or_else(|e| {
+                log::warn!("Failed to parse settings.json, using defaults: {}", e);
+                PersistedSettings::default()
+            })
+        }
+        Err(_) => PersistedSettings::default(),
+    }
+}
+
+pub fn save_persisted_settings(app_data_dir: &Path, store: &AppStore) {
+    let settings = PersistedSettings {
+        geo: store.geo.clone(),
+        preferences: store.preferences.clone(),
+        integrations: store.integrations.clone(),
+    };
+    let path = settings_path(app_data_dir);
+    match serde_json::to_string_pretty(&settings) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                log::error!("Failed to write settings.json: {}", e);
+            }
+        }
+        Err(e) => log::error!("Failed to serialize settings: {}", e),
+    }
+}
+
 pub type SharedStore = Mutex<AppStore>;
 
 pub fn ensure_app_data_dirs(app_data_dir: &PathBuf) {
@@ -271,39 +316,75 @@ pub fn ensure_app_data_dirs(app_data_dir: &PathBuf) {
     }
 }
 
-pub async fn configure_geo_database_defaults(store: &SharedStore, assets_dir: &PathBuf) {
-    let city_asset_path = assets_dir.join("GeoLite2-City.mmdb");
-    let asn_asset_path = assets_dir.join("GeoLite2-ASN.mmdb");
+pub async fn configure_geo_database_defaults(
+    store: &SharedStore,
+    assets_dir: &PathBuf,
+    app_data_dir: &Path,
+) {
+    // 1. Load any previously persisted settings from disk
+    let persisted = load_persisted_settings(app_data_dir);
 
     let mut guard = store.lock().unwrap();
+    guard.preferences = persisted.preferences;
+    guard.integrations = persisted.integrations;
+    guard.geo = persisted.geo;
+
+    // 2. Validate that persisted geo paths still exist on disk
+    if let Some(ref p) = guard.geo.city_db_path {
+        if !Path::new(p).exists() {
+            guard.geo.city_db_path = None;
+        }
+    }
+    if let Some(ref p) = guard.geo.asn_db_path {
+        if !Path::new(p).exists() {
+            guard.geo.asn_db_path = None;
+        }
+    }
+
+    // 3. If no valid paths yet, check the auto-download directory
+    let db_dir = app_data_dir.join("databases");
+    if guard.geo.city_db_path.is_none() {
+        let candidate = db_dir.join("GeoLite2-City.mmdb");
+        if candidate.exists() {
+            guard.geo.city_db_path = Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    if guard.geo.asn_db_path.is_none() {
+        let candidate = db_dir.join("GeoLite2-ASN.mmdb");
+        if candidate.exists() {
+            guard.geo.asn_db_path = Some(candidate.to_string_lossy().to_string());
+        }
+    }
+
+    // 4. Fall back to bundled assets directory
+    if guard.geo.city_db_path.is_none() {
+        let candidate = assets_dir.join("GeoLite2-City.mmdb");
+        if candidate.exists() {
+            guard.geo.city_db_path = Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    if guard.geo.asn_db_path.is_none() {
+        let candidate = assets_dir.join("GeoLite2-ASN.mmdb");
+        if candidate.exists() {
+            guard.geo.asn_db_path = Some(candidate.to_string_lossy().to_string());
+        }
+    }
+
+    // Update last_updated timestamp from file metadata if available
     let mut updated = guard.geo.last_updated;
-
-    if city_asset_path.exists() {
-        guard.geo.city_db_path = Some(city_asset_path.to_string_lossy().to_string());
-        if let Ok(meta) = std::fs::metadata(&city_asset_path) {
-            if let Ok(modified) = meta.modified() {
-                let ms = modified
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as f64;
-                updated = Some(updated.map_or(ms, |u: f64| u.max(ms)));
+    for path_opt in [&guard.geo.city_db_path, &guard.geo.asn_db_path] {
+        if let Some(p) = path_opt {
+            if let Ok(meta) = std::fs::metadata(p) {
+                if let Ok(modified) = meta.modified() {
+                    let ms = modified
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as f64;
+                    updated = Some(updated.map_or(ms, |u: f64| u.max(ms)));
+                }
             }
         }
     }
-
-    if asn_asset_path.exists() {
-        guard.geo.asn_db_path = Some(asn_asset_path.to_string_lossy().to_string());
-        if let Ok(meta) = std::fs::metadata(&asn_asset_path) {
-            if let Ok(modified) = meta.modified() {
-                let ms = modified
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as f64;
-                updated = Some(updated.map_or(ms, |u: f64| u.max(ms)));
-            }
-        }
-    }
-
     guard.geo.last_updated = updated;
 
     log::info!(

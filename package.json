@@ -1,6 +1,6 @@
 {
   "name": "vistracer",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Tauri-based visual traceroute application rendering hop paths on a 3D globe.",
   "private": true,
   "type": "module",
@@ -46,6 +46,7 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@testing-library/jest-dom": "^6.4.3",
     "@testing-library/react": "^14.3.1",
     "@testing-library/user-event": "^14.5.2",

@@ -331,18 +331,53 @@ pub async fn run_traceroute(
         },
     );
 
-    let mut child = Command::new(&command)
-        .args(&args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn traceroute: {}", e))?;
+    let needs_elevation = cfg!(target_os = "macos") && normalized.protocol == "TCP";
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or("Failed to capture stdout")?;
+    // For elevated (TCP on macOS): osascript writes to a temp file, we tail it.
+    // For normal: direct pipe from child stdout.
+    let tmp_output_path = if needs_elevation {
+        Some(std::env::temp_dir().join(format!("vistracer-{}.out", run_id)))
+    } else {
+        None
+    };
+
+    let child = if needs_elevation {
+        let output_path = tmp_output_path.as_ref().unwrap();
+        // Create the output file so tail can start reading immediately
+        std::fs::File::create(output_path)
+            .map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+        // TCP traceroute on macOS requires root (pcap_activate needs privileges).
+        // Use osascript to show the native admin password prompt.
+        // Redirect output to a temp file so we can stream-read it.
+        let shell_cmd = std::iter::once(command.clone())
+            .chain(args.iter().cloned())
+            .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let escaped_path = output_path.to_string_lossy().replace('\'', "'\\''");
+        let full_cmd = format!("{} > '{}' 2>&1; echo __VT_EXIT_$?__ >> '{}'",
+            shell_cmd, escaped_path, escaped_path);
+        Command::new("osascript")
+            .arg("-e")
+            .arg(format!(
+                "do shell script \"{}\" with administrator privileges",
+                full_cmd.replace('\\', "\\\\").replace('"', "\\\"")
+            ))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn traceroute with elevation: {}", e))?
+    } else {
+        Command::new(&command)
+            .args(&args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("Failed to spawn traceroute: {}", e))?
+    };
 
     // Store the child for cancellation
     {
@@ -351,6 +386,132 @@ pub async fn run_traceroute(
     }
 
     let mut hop_map: HashMap<u32, HopResolution> = HashMap::new();
+
+    if let Some(ref output_path) = tmp_output_path {
+        // Elevated mode: tail the temp file written by the osascript process.
+        // We poll the file for new lines until we see the sentinel or the process exits.
+        let file = tokio::fs::File::open(output_path).await
+            .map_err(|e| format!("Failed to open temp output: {}", e))?;
+        let mut reader = BufReader::new(file);
+        let mut line_buf = String::new();
+        let mut elevated_exit_code: Option<i32> = None;
+
+        loop {
+            line_buf.clear();
+            match reader.read_line(&mut line_buf).await {
+                Ok(0) => {
+                    // No data yet — check if the osascript process has exited
+                    let process_done = {
+                        let runs = active_runs.lock().unwrap();
+                        !runs.contains_key(&run_id)
+                    };
+                    if process_done {
+                        // Read any remaining data
+                        loop {
+                            line_buf.clear();
+                            match reader.read_line(&mut line_buf).await {
+                                Ok(0) => break,
+                                Ok(_) => {
+                                    let line = line_buf.trim_end();
+                                    if let Some(code_str) = line.strip_prefix("__VT_EXIT_").and_then(|s| s.strip_suffix("__")) {
+                                        elevated_exit_code = code_str.parse().ok();
+                                    } else if let Some(parsed) = parse_hop_line(line, normalized.packet_count) {
+                                        let hop = to_hop_resolution(&parsed, &normalized, store, readers).await;
+                                        hop_map.insert(hop.hop_index, hop.clone());
+                                        let _ = app.emit("vistracer:traceroute:progress", TracerouteProgressEvent {
+                                            run_id: run_id.clone(), hop: Some(hop), completed: false,
+                                            summary: None, hops: None, error: None,
+                                        });
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        break;
+                    }
+                    // Poll interval
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+                Ok(_) => {
+                    let line = line_buf.trim_end().to_string();
+                    if let Some(code_str) = line.strip_prefix("__VT_EXIT_").and_then(|s| s.strip_suffix("__")) {
+                        elevated_exit_code = code_str.parse().ok();
+                        break;
+                    }
+                    if let Some(parsed) = parse_hop_line(&line, normalized.packet_count) {
+                        let hop = to_hop_resolution(&parsed, &normalized, store, readers).await;
+                        hop_map.insert(hop.hop_index, hop.clone());
+                        let _ = app.emit("vistracer:traceroute:progress", TracerouteProgressEvent {
+                            run_id: run_id.clone(), hop: Some(hop), completed: false,
+                            summary: None, hops: None, error: None,
+                        });
+                    }
+                }
+                Err(e) => {
+                    log::error!("Error reading traceroute output: {}", e);
+                    break;
+                }
+            }
+        }
+
+        // Clean up temp file
+        let _ = tokio::fs::remove_file(output_path).await;
+
+        // Wait for osascript to exit
+        let exit_result = {
+            let mut runs = active_runs.lock().unwrap();
+            runs.remove(&run_id)
+        };
+        if let Some(mut child) = exit_result {
+            let _ = child.wait().await;
+        }
+
+        // Use the elevated traceroute's exit code
+        let exit_code = elevated_exit_code.unwrap_or(0);
+
+        let mut hop_list: Vec<HopResolution> = hop_map.into_values().collect();
+        hop_list.sort_by_key(|h| h.hop_index);
+
+        let error = if exit_code != 0 {
+            Some(format!("Traceroute exited with code {}", exit_code))
+        } else {
+            None
+        };
+
+        let summary = TracerouteSummary {
+            target: normalized.target.clone(),
+            started_at,
+            completed_at: Some(chrono::Utc::now().timestamp_millis() as f64),
+            hop_count: hop_list.len() as u32,
+            protocols_tried: vec![normalized.protocol.clone()],
+            error: error.clone(),
+        };
+
+        let run = TracerouteRun {
+            request: normalized,
+            summary: summary.clone(),
+            hops: hop_list.clone(),
+        };
+
+        {
+            let mut guard = store.lock().unwrap();
+            guard.add_completed_run(run.clone());
+        }
+
+        let _ = app.emit("vistracer:traceroute:progress", TracerouteProgressEvent {
+            run_id: run_id.clone(), hop: None, completed: true,
+            summary: Some(summary), hops: Some(hop_list), error,
+        });
+
+        return Ok(TracerouteExecutionResult { run_id, run });
+    }
+
+    // Normal (non-elevated) mode: read directly from child stdout
+    let stdout = {
+        let mut runs = active_runs.lock().unwrap();
+        runs.get_mut(&run_id).and_then(|c| c.stdout.take())
+    }.ok_or("Failed to capture stdout")?;
+
     let mut reader = BufReader::new(stdout);
     let mut line_buf = String::new();
 

@@ -43,7 +43,7 @@ cd src-tauri && cargo test   # 15 tests
 - **CI** (`.github/workflows/ci.yml`): Runs on every push/PR. Lint, typecheck, test (TS + Rust), then builds Tauri platform artifacts in parallel.
 - **Release** (`.github/workflows/release.yml`): Triggered by `v*` tag push. Runs CI checks, builds all platforms, creates a GitHub Release with artifacts attached.
 
-To create a release: `git tag -a v0.3.0 -m "v0.3.0" && git push origin v0.3.0`
+To create a release: `git tag -a v1.1.0 -m "v1.1.0" && git push origin v1.1.0`
 
 ## Project Architecture
 
