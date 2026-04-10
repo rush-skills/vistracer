@@ -167,11 +167,14 @@ jobs:
           generate_release_notes: true
           body: |
             ## macOS note
-            If macOS shows "VisTracer is damaged and can't be opened", run this in Terminal:
+            The app is not notarized with Apple. On first launch:
+            1. **Right-click** (or Control+click) VisTracer.app → click **Open**
+            2. In the dialog, click **Open** again
+
+            If you still see a warning, run this in Terminal first:
             ```
-            xattr -cr /Applications/VisTracer.app
+            xattr -cr VisTracer.app
             ```
-            Then open the app normally. This happens because the app is not notarized with Apple. The ad-hoc signature is valid.
           files: |
             artifacts/**/*.dmg
             artifacts/**/*.exe

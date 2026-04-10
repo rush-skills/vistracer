@@ -191,9 +191,10 @@ const platforms = [
         on the releases page.
       </p>
       <p class="mt-3 text-xs text-[var(--color-text-dim)]">
-        <strong>macOS:</strong> If you see &ldquo;VisTracer is damaged&rdquo;, run
-        <code class="rounded bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-teal)]">xattr -cr /Applications/VisTracer.app</code>
-        in Terminal, then open normally.
+        <strong>macOS:</strong> The app is not notarized with Apple. On first launch, <strong>right-click</strong> (or Control+click) VisTracer &rarr; click <strong>Open</strong> &rarr; then click <strong>Open</strong> again in the dialog.
+        Alternatively, run
+        <code class="rounded bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-teal)]">xattr -cr VisTracer.app</code>
+        in Terminal before opening.
       </p>
     </div>
   </section>
