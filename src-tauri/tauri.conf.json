@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nicedoc/tauri/dev/packages/api/schema.json",
   "productName": "VisTracer",
   "version": "1.0.0",
-  "identifier": "com.vistracer.app",
+  "identifier": "in.anks.vistracer",
   "build": {
     "frontendDist": "../dist/renderer",
     "devUrl": "http://localhost:5173",
