@@ -81,7 +81,8 @@ In addition to GeoLite2, VisTracer looks up each public hop address in these reg
 | **Team Cymru** | Origin ASN, BGP prefix, registry, AS name (whois over TCP port 43) | none | on |
 | **RDAP** (default `https://rdap.org/ip`) | Network name, registrant org, CIDR, country | optional custom base URL | on |
 | **RIPEstat** | Announced prefix and origin ASNs from live BGP data | identifies as `VisTracer` | on |
-| **PeeringDB** | Network type, peering policy, IXP and facility counts per ASN; the exchange (IX) peering LAN list that places hops at an exchange | optional API key (higher rate limit) | off |
+| **PeeringDB** | Network type, peering policy, IXP and facility counts per ASN | optional API key (higher rate limit) | off |
+| **Internet exchanges** | PeeringDB's public exchange list, used to place hops at an exchange. Nothing about your route is sent. | none (uses the PeeringDB key if one is saved) | on |
 
 - Turn each provider on or off in **Integration settings** (gear icon) or with the quick toggles under the target field. The settings also hold the RDAP base URL and the PeeringDB API key.
 - Only public hop addresses are sent. Private, CGNAT, link-local and documentation addresses never leave your machine.
@@ -104,7 +105,7 @@ GeoLite2 often puts a router at its operator's head office or in the middle of a
 - **Speed of light.** Light in fibre covers about 200 km per millisecond one way, so a hop's round-trip time limits how far it can be from you. A location that the RTT makes impossible is never drawn; one that fits gets a tighter or wider radius. Locations are never moved by RTT alone.
 - **Anycast.** Public DNS resolvers, the DNS root servers and some CDN networks answer from the nearest of many sites. These hops show an "anycast" tag and a notice, and get no point on the globe.
 - **Confidence.** Each drawn hop has a ring on the globe with its radius in km: solid for high confidence, dashed and fainter for medium and low. The hop details show the source, confidence, radius, the RTT check, the IXP or host name that matched, and the other candidates.
-- The IX list needs PeeringDB to be on. It is downloaded at most once a day and kept in the provider cache.
+- Exchange matching has its own switch (**Internet exchanges**, on by default), separate from PeeringDB. It downloads PeeringDB's public exchange list at most once a day and sends nothing about your route.
 
 Data sources and licenses: [src-tauri/data/README.md](./src-tauri/data/README.md) (OurAirports, public domain). Rules and known limits: [docs/architecture.md#hop-locations](./docs/architecture.md#hop-locations).
 

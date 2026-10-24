@@ -42,6 +42,6 @@ coordinates; a unit test fails when a code is missing.
 ## Data fetched at run time
 
 The PeeringDB IX list (`ixpfx`, `ixlan`, `ix`, `ixfac`, `fac`) is not
-bundled. When PeeringDB is on, the app downloads it at most once a day and
-keeps it in the provider cache (`$APPCACHE/enrichment-cache.json`). See
-`docs/architecture.md`.
+bundled. When exchange matching is on (the default), the app downloads it at
+most once a day and keeps it in the provider cache
+(`$APPCACHE/enrichment-cache.json`). See `docs/architecture.md`.

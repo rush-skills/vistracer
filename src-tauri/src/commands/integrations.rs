@@ -749,9 +749,11 @@ impl EnrichmentService {
         settings: &IntegrationSettings,
     ) -> ProviderOutcome<IxpHit> {
         let provider = ProviderId::PeeringDbIx;
-        if !settings.peering_db.enabled {
+        if !settings.ix_matching.enabled {
             return ProviderOutcome::skipped(provider, DISABLED_MESSAGE);
         }
+        // Independent of the PeeringDB switch: the list download sends no hop
+        // data. A saved PeeringDB key still lifts the anonymous rate limit.
         let load = match self.ix.index(settings.peering_db.api_key.as_deref()).await {
             Ok(load) => load,
             Err(IxUnavailable::Busy) => {
@@ -1446,6 +1448,7 @@ mod tests {
         settings.team_cymru.enabled = false;
         settings.ripe_stat.enabled = false;
         settings.peering_db.enabled = false;
+        settings.ix_matching.enabled = false;
         settings
     }
 
@@ -1739,6 +1742,60 @@ mod tests {
         );
     }
 
+    fn fac_fixture() -> Response {
+        let path = format!(
+            "{}/fixtures/providers/peeringdb-ix/fac.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        (200, vec![], std::fs::read_to_string(path).unwrap())
+    }
+
+    #[tokio::test]
+    async fn exchange_matching_works_with_peeringdb_off() {
+        let mut routes = ix_routes(fac_fixture());
+        routes.push(("/api/net", vec![(200, vec![], PEERINGDB.to_string())]));
+        let (http, hits) = mock_http(routes).await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+        let mut settings = ix_only(http);
+        settings.peering_db.enabled = false;
+        settings.peering_db.api_key = None;
+        assert!(settings.ix_matching.enabled, "on by default");
+
+        let result = service
+            .enrich(ip("80.81.194.152"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(
+            result.ixp.as_ref().map(|hit| hit.info.name.as_str()),
+            Some("DE-CIX Frankfurt")
+        );
+        assert_eq!(
+            status(&result, ProviderId::PeeringDb).message.as_deref(),
+            Some(DISABLED_MESSAGE)
+        );
+        assert_eq!(ix_hits(&hits), [1, 1, 1, 1, 1]);
+        assert_eq!(hits.count("/api/net"), 0, "no per-ASN lookup");
+        assert!(!hits.requests("/api/ixpfx")[0].contains("authorization"));
+    }
+
+    #[tokio::test]
+    async fn exchange_matching_switch_off_downloads_nothing() {
+        let (http, hits) = mock_http(ix_routes(fac_fixture())).await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+        let mut settings = ix_only(http);
+        settings.ix_matching.enabled = false;
+
+        let result = service
+            .enrich(ip("80.81.194.152"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(result.ixp, None);
+        let ix = status(&result, ProviderId::PeeringDbIx);
+        assert_eq!(ix.status, ProviderState::Skipped);
+        assert_eq!(ix.message.as_deref(), Some(DISABLED_MESSAGE));
+        assert_eq!(ix_hits(&hits), [0, 0, 0, 0, 0]);
+    }
+
     #[tokio::test]
     async fn waiting_for_the_ix_download_is_not_a_failure() {
         let (http, hits) = mock_http(vec![]).await;
@@ -1809,6 +1866,7 @@ mod tests {
         disabled.rdap.enabled = false;
         disabled.ripe_stat.enabled = false;
         disabled.peering_db.enabled = false;
+        disabled.ix_matching.enabled = false;
         let result = service
             .enrich(ip("8.8.8.8"), no_geolite(), &disabled, false)
             .await;

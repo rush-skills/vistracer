@@ -25,6 +25,7 @@ export interface IntegrationSettingsFormState {
   ripeStatEnabled: boolean;
   peeringDbEnabled: boolean;
   peeringDbApiKey: string;
+  ixMatchingEnabled: boolean;
 }
 
 const defaultFormState: IntegrationSettingsFormState = {
@@ -33,7 +34,8 @@ const defaultFormState: IntegrationSettingsFormState = {
   rdapBaseUrl: "",
   ripeStatEnabled: true,
   peeringDbEnabled: false,
-  peeringDbApiKey: ""
+  peeringDbApiKey: "",
+  ixMatchingEnabled: true
 };
 
 const formFromSettings = (settings: IntegrationSettings): IntegrationSettingsFormState => ({
@@ -42,7 +44,8 @@ const formFromSettings = (settings: IntegrationSettings): IntegrationSettingsFor
   rdapBaseUrl: settings.rdap.baseUrl ?? "",
   ripeStatEnabled: settings.ripeStat.enabled,
   peeringDbEnabled: settings.peeringDb.enabled,
-  peeringDbApiKey: settings.peeringDb.apiKey ?? ""
+  peeringDbApiKey: settings.peeringDb.apiKey ?? "",
+  ixMatchingEnabled: settings.ixMatching?.enabled ?? true
 });
 
 /**
@@ -72,7 +75,8 @@ export const buildIntegrationSettings = (
       teamCymru: { enabled: form.teamCymruEnabled },
       rdap: { enabled: form.rdapEnabled, baseUrl: baseUrl.replace(/\/+$/, "") },
       ripeStat: { enabled: form.ripeStatEnabled, sourceApp: "VisTracer" },
-      peeringDb: { enabled: form.peeringDbEnabled, apiKey: apiKey || undefined }
+      peeringDb: { enabled: form.peeringDbEnabled, apiKey: apiKey || undefined },
+      ixMatching: { enabled: form.ixMatchingEnabled }
     }
   };
 };
@@ -477,9 +481,7 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
                 PeeringDB
               </label>
               <small className="integration-settings-modal__hint">
-                Network type, peering policy, exchange and facility counts for each ASN. Also
-                places hops on an exchange (IX) peering LAN at that exchange; the IX list is
-                downloaded at most once a day.
+                Network type, peering policy, exchange and facility counts for each ASN.
               </small>
               <label className="integration-settings-modal__label" htmlFor="integration-settings-peeringdb">
                 PeeringDB API key
@@ -497,8 +499,26 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
                 disabled={!form.peeringDbEnabled}
               />
               <small className="integration-settings-modal__hint">
-                Optional. Anonymous requests work but have a lower rate limit. The key is stored in
-                the app settings file on this computer.
+                Optional. Anonymous requests work but have a lower rate limit. The key is also used
+                for the exchange list download and is stored in the app settings file on this
+                computer.
+              </small>
+            </div>
+
+            <div className="integration-settings-modal__provider">
+              <label className="integration-settings-modal__toggle">
+                <input
+                  type="checkbox"
+                  checked={form.ixMatchingEnabled}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, ixMatchingEnabled: event.target.checked }))
+                  }
+                />
+                Internet exchanges
+              </label>
+              <small className="integration-settings-modal__hint">
+                Match hops to internet exchanges. Downloads PeeringDB&apos;s public exchange list
+                once a day; nothing about your route is sent.
               </small>
             </div>
           </section>

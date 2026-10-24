@@ -17,6 +17,7 @@ All notable changes to VisTracer will be documented in this file.
 - Speed-of-light check: locations that the measured RTT makes impossible are not drawn; radii are tightened or widened
 - Anycast detection for public DNS resolvers, DNS root servers and anycast CDN networks; anycast hops are marked and not drawn at a fake point
 - Uncertainty rings on the globe, true to scale and styled by confidence; Location section in the hop details with source, confidence, radius, RTT check, IXP, host name hint and other candidates
+- "Internet exchanges" switch in Integration settings and the quick toggles: places hops at internet exchanges using PeeringDB's public exchange list. On by default (also for existing settings) and separate from the PeeringDB switch; nothing about your route is sent
 
 ### Changed
 

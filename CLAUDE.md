@@ -28,12 +28,12 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (69 tests across 8 files)
+npm run test           # Run unit + component tests (73 tests across 9 files)
 npm run test:e2e       # Run e2e tests (72 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
 # Rust
-cd src-tauri && cargo test                                # 137 tests (+1 ignored real-traceroute smoke test)
+cd src-tauri && cargo test                                # 140 tests (+1 ignored real-traceroute smoke test)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -173,7 +173,7 @@ GeoLite2 databases can be configured two ways:
 - **RIPE Stat**: Prefix and ASN holder context
 - **PeeringDB**: Network type, policy, IXP/facility counts for known ASNs (optional API key, `Authorization: Api-Key`)
 
-- **PeeringDB IX list** (`peeringdb-ix`, on with PeeringDB): five list requests 2 s apart in a background task, cached 24 h in the provider cache and written to disk when the download ends; a list up to 7 days old is served at once while a refresh runs; lookups wait (max 25 s, else `skipped`) only when there is no list; not refetched by "Force fresh" (PeeringDB allows one identical large anonymous request per hour); 15 min backoff after a failure
+- **PeeringDB IX list** (`peeringdb-ix`, own switch `ixMatching`, on by default and independent of the PeeringDB switch; old settings files load with it on): five list requests 2 s apart in a background task, cached 24 h in the provider cache and written to disk when the download ends; a list up to 7 days old is served at once while a refresh runs; lookups wait (max 25 s, else `skipped`) only when there is no list; not refetched by "Force fresh" (PeeringDB allows one identical large anonymous request per hour); 15 min backoff after a failure
 
 Each call: cache (7 days; RDAP keyed by base URL) → wait up to 25 s for a provider slot (else `skipped`, not a failure) → cache and circuit-breaker check → `with_retry` (429/5xx/timeouts, backoff + jitter). Failures become `status: "error"`, count toward the breaker (3 in a row pause the provider for 60 s) and never drop GeoLite2 data. Only publicly routable addresses are sent. Parsers are tested against real responses in `src-tauri/fixtures/providers/`.
 
@@ -185,14 +185,15 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 69 tests across 8 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 73 tests across 9 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 9 tests: store behavior
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
   - `src/renderer/lib/__tests__/globe.test.ts` — 11 tests: arcs, confidence rings (radius on the sphere, styles), utilities
   - `src/renderer/lib/__tests__/sun-calculation.test.ts` — 5 tests: solar position
   - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 11 tests: multipath, PeeringDB, provider failures, location fields, anycast, empty states
-  - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 6 tests: provider toggles, key, URL validation
+  - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 7 tests: provider toggles, exchange matching switch, key, URL validation
+  - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
 
@@ -206,14 +207,14 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 137 tests in `src-tauri/src/` (plus one ignored smoke test, `smoke_real_traceroute`, that runs real traceroutes through the real pipeline) covering:
+- 140 tests in `src-tauri/src/` (plus one ignored smoke test, `smoke_real_traceroute`, that runs real traceroutes through the real pipeline) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
   - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
-  - Settings validation, updater key detection
-  - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh, concurrent cache writes
+  - Settings validation (including `ixMatching` defaults for old settings files), updater key detection
+  - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh, exchange matching with PeeringDB off and switched off, concurrent cache writes
 
 ## Key Implementation Details
 

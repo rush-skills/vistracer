@@ -258,6 +258,15 @@ export interface PeeringDbSettings {
   apiKey?: string;
 }
 
+/**
+ * Placing hops at internet exchanges. Separate from `peeringDb`: it downloads
+ * PeeringDB's public exchange list and sends nothing about the route. On by
+ * default, also for settings saved before it existed.
+ */
+export interface IxMatchingSettings {
+  enabled: boolean;
+}
+
 /** Mirrors `DEFAULT_RDAP_BASE_URL` in src-tauri/src/commands/persistence.rs. */
 export const DEFAULT_RDAP_BASE_URL = "https://rdap.org/ip";
 
@@ -266,6 +275,7 @@ export interface IntegrationSettings {
   rdap: RdapSettings;
   ripeStat: RipeStatSettings;
   peeringDb: PeeringDbSettings;
+  ixMatching: IxMatchingSettings;
 }
 
 export interface AppInfo {

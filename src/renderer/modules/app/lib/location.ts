@@ -1,7 +1,7 @@
 import type { HintRule, HopResolution, LocationSource, RttCheck } from "@common/ipc";
 
 export const SOURCE_LABELS: Record<LocationSource, string> = {
-  ixp: "PeeringDB IXP",
+  ixp: "Internet exchange",
   "hostname-hint": "Host name",
   "geolite-city": "GeoLite2 city",
   "geolite-country": "GeoLite2 country"

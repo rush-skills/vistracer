@@ -40,6 +40,7 @@ describe("Settings Persistence", () => {
         rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
         ripeStat: { enabled: true, sourceApp: "VisTracer" },
         peeringDb: { enabled: false },
+        ixMatching: { enabled: true },
       };
       mockInvoke.mockResolvedValueOnce(defaults);
 
@@ -57,6 +58,7 @@ describe("Settings Persistence", () => {
         rdap: { enabled: true, baseUrl: "https://custom-rdap.example.com/ip" },
         ripeStat: { enabled: false, sourceApp: "VisTracer" },
         peeringDb: { enabled: true, apiKey: "test-key-123" },
+        ixMatching: { enabled: false },
       };
 
       await api.setSettings("integrations", updated);
@@ -73,6 +75,7 @@ describe("Settings Persistence", () => {
         rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
         ripeStat: { enabled: true, sourceApp: "VisTracer" },
         peeringDb: { enabled: false },
+        ixMatching: { enabled: true },
       };
 
       // Read
@@ -95,6 +98,7 @@ describe("Settings Persistence", () => {
         value: expect.objectContaining({
           teamCymru: { enabled: true },
           peeringDb: { enabled: true, apiKey: "my-key" },
+          ixMatching: { enabled: true },
         }),
       });
     });

@@ -97,7 +97,7 @@ responses in `src-tauri/fixtures/providers/`) and the merge.
 | RDAP | IP | network name and handle, registrant org, CIDR, country, registry | on |
 | RIPEstat | IP | announced prefix, origin ASNs and holders | on |
 | PeeringDB | ASN | network type, scope, peering policy, IXP and facility counts | off |
-| PeeringDB IX list | IP (local match) | IX peering LAN that contains the address, IX position | with PeeringDB |
+| PeeringDB IX list | IP (local match; only the public list is downloaded) | IX peering LAN that contains the address, IX position | on (own switch, `ixMatching`) |
 
 Rules:
 
@@ -253,10 +253,15 @@ GeoLite2 places it at the US centroid about 13,000 km away.
 
 ### PeeringDB IX list
 
-When PeeringDB is on, `commands/ix_list.rs` downloads five lists (`ixpfx`,
-`ixlan`, `ix`, `ixfac`, `fac`, with `fields=` to keep them small) one at a
-time, with the API key when set, the PeeringDB slot, retries, and 2 s
-between requests as PeeringDB asks. The joined dataset (on 2026-10-24:
+Exchange matching has its own switch (`integrations.ixMatching`, "Internet
+exchanges" in the settings), on by default and separate from the PeeringDB
+switch, which only controls the per-ASN lookups that send hop data. Settings
+files saved before the switch existed load with it on. When it is on,
+`commands/ix_list.rs` downloads five lists (`ixpfx`, `ixlan`, `ix`, `ixfac`,
+`fac`, with `fields=` to keep them small) one at a time, with the saved
+PeeringDB API key when there is one, the PeeringDB slot, retries, and 2 s
+between requests as PeeringDB asks. The download sends nothing about the
+user's route; matching happens on the user's machine. The joined dataset (on 2026-10-24:
 1,332 exchanges and 2,658 prefixes, about 340 KB of JSON) is kept in the
 provider cache for 24 h and written to disk as soon as the download ends.
 
@@ -288,7 +293,6 @@ provider cache for 24 h and written to disk as soon as the download ends.
   anywhere within 15,000 km, so far hops are rarely filtered.
 - Host name hints depend on naming schemes that carriers can change. The
   curated tables cover the large carriers only.
-- IX placement needs PeeringDB, which is off by default.
 
 ## Settings and storage
 

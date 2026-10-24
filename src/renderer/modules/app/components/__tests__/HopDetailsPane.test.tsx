@@ -343,7 +343,7 @@ describe("HopDetailsPane", () => {
 
     expect(within(row("80.81.192.96")).getByText("DE-CIX Frankfurt")).toBeTruthy();
     expect(row("80.81.192.96").textContent).toContain("high ±111 km");
-    expect(within(row("80.81.192.96")).getByTitle("Source: PeeringDB IXP")).toBeTruthy();
+    expect(within(row("80.81.192.96")).getByTitle("Source: Internet exchange")).toBeTruthy();
     expect(row("154.54.56.85").textContent).toContain("London, GB");
     expect(within(row("8.8.8.8")).getByText("Anycast (Google Public DNS)")).toBeTruthy();
     expect(within(row("8.8.8.8")).getByText("anycast")).toBeTruthy();
@@ -354,7 +354,7 @@ describe("HopDetailsPane", () => {
     render(<HopDetailsPane run={run} selectedHopIndex={4} status="success" />);
     const location = locationOf(4);
     expect(fact(location, "Place")).toBe("DE-CIX Frankfurt");
-    expect(fact(location, "Source")).toBe("PeeringDB IXP");
+    expect(fact(location, "Source")).toBe("Internet exchange");
     expect(fact(location, "Confidence")).toBe("high");
     expect(fact(location, "Radius")).toBe("±111 km");
     expect(fact(location, "RTT check")).toBe(
