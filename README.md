@@ -46,7 +46,8 @@ This architecture ensures you get authentic network diagnostics from your actual
 - GeoIP/ASN enrichment via local MaxMind GeoLite2 databases.
 - Enrichment through Team Cymru, RDAP, RIPEstat and PeeringDB, with retry/backoff, per-provider rate limits and a 7-day cache. A failed provider never hides the GeoLite2 data.
 - Hop locations from several sources (PeeringDB exchange LANs, router host names, GeoLite2), checked against the speed of light, with an honest confidence and radius per hop. Anycast addresses are marked and not drawn at a fake point.
-- 3D globe (Three.js) visualising hop arcs, coloured by latency bands, plus per-hop markers and an uncertainty ring true to scale.
+- 3D globe (CesiumJS) with NASA Blue Marble and Black Marble imagery bundled for offline use, raised great-circle arcs coloured by latency bands, per-hop markers and an uncertainty ring true to scale. Hover and selection stay in step with the hop table.
+- Battery-friendly rendering: the globe draws only when something changes, and stops completely when idle, hidden or minimized.
 - Detailed hop table with RTT stats, packet loss, location and ASN metadata (including PeeringDB facility context when available).
 - Snapshot and animation exports saved directly to your downloads folder (PNG/JPG/WebP for stills, WebM/GIF for animated routes).
 
@@ -107,7 +108,7 @@ GeoLite2 often puts a router at its operator's head office or in the middle of a
 - **Confidence.** Each drawn hop has a ring on the globe with its radius in km: solid for high confidence, dashed and fainter for medium and low. The hop details show the source, confidence, radius, the RTT check, the IXP or host name that matched, and the other candidates.
 - Exchange matching has its own switch (**Internet exchanges**, on by default), separate from PeeringDB. It downloads PeeringDB's public exchange list at most once a day and sends nothing about your route.
 
-Data sources and licenses: [src-tauri/data/README.md](./src-tauri/data/README.md) (OurAirports, public domain). Rules and known limits: [docs/architecture.md#hop-locations](./docs/architecture.md#hop-locations).
+Data sources and licenses: [src-tauri/data/README.md](./src-tauri/data/README.md) (OurAirports, public domain) and [docs/third-party-data.md](./docs/third-party-data.md). Rules and known limits: [docs/architecture.md#hop-locations](./docs/architecture.md#hop-locations).
 
 ### Linux: ICMP and TCP need raw sockets
 
@@ -169,11 +170,12 @@ cd src-tauri && cargo clippy --all-targets -- -D warnings
 
 ```
 src/
-  renderer/    React application (modules, state store, Three.js globe, hooks)
+  renderer/    React application (modules, state store, CesiumJS globe, hooks)
+    public/    Files loaded by URL: bundled globe imagery, country borders
   common/      Shared TypeScript contracts (bridge, IPC types, net utils)
 src-tauri/
   src/         Rust backend (commands, persistence, traceroute, geo, DNS)
-assets/        Static assets (globe textures, GeoJSON, logo)
+assets/        Logo, app icons and README media (not shipped in the app, except the logo)
 ```
 
 ## GeoLite2 Database Management
@@ -188,16 +190,14 @@ For detailed instructions on downloading, installing, and updating databases, se
 
 **Note**: The application works without databases but provides limited information (no geographic coordinates, city names, or ASN details).
 
-## Dynamic Day/Night Visualization
+## Globe imagery and day/night
 
-The 3D globe features a **real-time day/night terminator** that accurately reflects which parts of Earth are currently in darkness based on UTC time. This visualization:
+- **Offline first.** NASA Blue Marble (day) and Black Marble 2016 (night lights) ship with the app at five zoom levels (6.5 MB, about 5 km per pixel at the closest). The globe looks right with no network.
+- **Detail when you zoom in.** Closer than that, VisTracer loads Blue Marble tiles (down to about 600 m per pixel) from NASA GIBS (`gibs.earthdata.nasa.gov`, no account or key). The backend fetches them and keeps them in a 500 MB cache in the app cache folder; **Integration settings → Globe imagery** shows its size and clears it. Offline, the globe magnifies the bundled tiles and says that detailed imagery is unavailable. The requests tell NASA which areas you zoom into, nothing about your route.
+- **Day and night.** The sun is placed from the current time (CesiumJS solar model). Far out, the dark side shows city lights; zoomed in, the globe is fully lit so you can see the ground under a hop.
+- **Battery.** The globe renders a frame only when the view or the data changes, runs no animation loop at all when idle, pauses while the window is hidden or minimized, and caps the frame rate at 60 (30 on battery where the webview reports it). The terminator moves every 10 minutes while idle.
 
-- Updates every second to show the actual position of the sun
-- Calculates solar position using declination (seasonal north-south variation ±23.5°) and hour angle (east-west rotation based on time)
-- Smoothly blends between the day texture and city lights texture on the dark side
-- Accurately represents seasonal variations (solstices and equinoxes) and time of day
-
-The terminator position uses a simplified solar algorithm that provides accuracy within a few degrees—perfect for visualization. The shader compares each surface point's normal with the calculated sun direction to determine illumination.
+Data sources and licenses: [docs/third-party-data.md](./docs/third-party-data.md).
 
 ## Snapshot & Media Export
 
@@ -226,7 +226,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, coding standards
 ## Additional Documentation
 
 - [GEOLITE2_SETUP.md](./GEOLITE2_SETUP.md) - Complete guide to downloading and configuring GeoLite2 databases
-- [docs/architecture.md](./docs/architecture.md) - Hop pipeline, enrichment, storage and security
+- [docs/architecture.md](./docs/architecture.md) - Hop pipeline, enrichment, globe, tile cache, storage and security
+- [docs/third-party-data.md](./docs/third-party-data.md) - Bundled code and data, imagery sources and licenses
 - [docs/releasing.md](./docs/releasing.md) - Update signing key setup and the release workflow
 - [CLAUDE.md](./CLAUDE.md) - Architecture overview and development guide for contributors
 - [CHANGELOG.md](./CHANGELOG.md) - Release history

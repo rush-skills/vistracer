@@ -347,6 +347,157 @@ download ends.
 - Host name hints depend on naming schemes that carriers can change. The
   curated tables cover the large carriers only.
 
+## Globe
+
+The globe is CesiumJS, used directly (no wrapper library). React state goes
+through pure functions to a scene description; one adapter module draws it
+with Cesium primitives. A render governor decides when Cesium draws. Imagery
+comes from tiles bundled with the app and, when zoomed in, from NASA GIBS
+through a tile cache in Rust.
+
+```mermaid
+flowchart LR
+    subgraph renderer["Renderer (React)"]
+        store[("tracerouteStore<br/>run, selectedHopIndex,<br/>hoveredHopIndex")]
+        pane["HopDetailsPane<br/>row hover, click"]
+        viewport["GlobeViewport.tsx"]
+        mapping["lib/globe.ts (pure)<br/>buildGlobeScene: markers, arcs,<br/>rings, anycast reach, labels<br/>nextCameraFocus, flyHeight"]
+        adapter["globe/cesiumGlobe.ts<br/>(only module that imports Cesium)"]
+        governor["lib/renderGovernor.ts<br/>wake, idle sleep, fps cap,<br/>hidden or minimized pause"]
+        imagery["lib/imagery.ts<br/>layer config, night fade"]
+    end
+    subgraph cesium["CesiumJS"]
+        widget["CesiumWidget<br/>requestRenderMode, own render loop off"]
+        prims["PolylineCollection, PointPrimitiveCollection,<br/>LabelCollection"]
+        layers["Imagery layers<br/>1 Black Marble (bundled, night)<br/>2 Blue Marble (bundled, day)<br/>3 Blue Marble (online, level 5+)"]
+    end
+    subgraph rust["Rust backend"]
+        scheme["vistiles URI scheme handler"]
+        tiles["TileService<br/>parse, allowlist, single flight,<br/>3-failure pause"]
+        disk[("TileStore $APPCACHE/tiles<br/>500 MB, LRU")]
+        http["HttpFetcher<br/>redirects only to allowed hosts"]
+    end
+    gibs["NASA GIBS WMTS<br/>gibs.earthdata.nasa.gov"]
+    bundled[("./imagery/ tiles<br/>levels 0-4, 6.5 MB")]
+
+    store --> viewport
+    pane <-->|hover, select| store
+    viewport --> mapping --> adapter
+    adapter -->|"pick: hover, click"| store
+    adapter --> widget --> prims
+    widget --> layers
+    governor -->|"tick: resize + render"| widget
+    adapter -->|"wake: data, input, resize,<br/>Cesium requestRender"| governor
+    imagery --> adapter
+    layers -->|levels 0-4| bundled
+    layers -->|"level 5+: vistiles://localhost/blue-marble/z/y/x.jpg"| scheme
+    scheme --> tiles --> disk
+    tiles -->|miss| http --> gibs
+```
+
+### Scene mapping
+
+`buildGlobeScene(hops, selected, hovered)` in `src/renderer/lib/globe.ts`
+turns hops into plain objects in degrees and metres. The adapter only
+converts them to Cesium types. Tests cover the mapping without WebGL.
+
+| Item | Rule |
+| --- | --- |
+| Marker | One per hop with `location.best`. Size and outline by emphasis: normal, hovered, selected (drawn last, on top). |
+| Arc | Great circle between consecutive located hops, raised in the middle (sine profile, peak 12 % of the distance, 2 km to 1,500 km). Colour by the first hop's latency band. Hops less than 1 km apart get no arc. |
+| Confidence ring | Circle on the sphere at the estimate's radius in km, segments at most 50 km long. Solid for high confidence, dashed and fainter for medium and low; a `conflict` verdict uses the low style. No ring above 5,000 km. |
+| Anycast reach | An anycast hop has no marker, ring or arc. When its RTT bound and reference hop are known, a dotted circle around the reference hop's estimate shows where the answering site can be ("within 740 km of hop 2"). |
+| Label | The selected and the hovered hop: "6 · DE-CIX Frankfurt". |
+| Country borders | Natural Earth 1:110m, drawn once from `world.geojson`. |
+
+Camera (`nextCameraFocus`): it flies to a newly selected hop, else to the
+newest hop that got a location during the run; enrichment updates of the
+same hops do not move it. Flights keep the user's zoom unless the hop's ring
+would not fit (`flyHeight`). With `prefers-reduced-motion` the camera jumps.
+
+Picking: the arcs end at the markers and are drawn after them, so a pick that
+hits an arc looks underneath (`drillPick`, 4 deep) for a marker, ring or
+reach. Hovering is checked at most every 50 ms and never while dragging.
+
+### Render governor
+
+Cesium runs with `requestRenderMode`, so it draws a frame only when
+something changed. `RenderGovernor` also owns the `requestAnimationFrame`
+loop that asks Cesium for those frames:
+
+- The loop runs only after a wake: scene data, pointer down, drag, wheel,
+  resize, the 10-minute sun update, or any Cesium `scene.requestRender()`
+  (tile loads, worker results). It sleeps after 20 ticks that drew nothing.
+  While tiles load, Cesium draws every tick, so the loop stays awake until
+  they are in.
+- At most 60 ticks per second; 30 on battery where the webview reports it
+  (`navigator.getBattery`, Chromium only).
+- No ticks while the page is hidden (Page Visibility) or the window is
+  minimized (Tauri `onResized` + `isMinimized`, for webviews that do not
+  report minimized windows as hidden).
+- Costs that add nothing are off: star box, sun and moon, ground atmosphere,
+  fog, FXAA, HDR, shadows, order-independent translucency. The canvas uses
+  the screen's pixel density up to 2x, and MSAA only below 1.5x.
+
+An idle globe therefore runs no animation frames at all. Measured in Chrome
+on the production build (`.claude-runs/ui-check/check.mjs`, not committed):
+0 animation-frame callbacks and 0 WebGL draw calls in each 5 s idle window;
+a 20-step drag ran 64 callbacks and then stopped again.
+
+### Imagery and day/night
+
+| Layer | Tiling | Levels | Shown |
+| --- | --- | --- | --- |
+| Black Marble 2016, bundled | geographic, 256 px JPEG | 0–4 | dark side, far out |
+| Blue Marble, bundled | geographic, 256 px JPEG | 0–4 | day side; dark side close up |
+| Blue Marble, online | Web Mercator (GIBS `GoogleMapsCompatible_Level8`) | 5–8 | as the bundled day layer, from terrain level 5 |
+
+Cesium places the sun from the clock (set to the wall clock on every drawn
+frame and every 10 minutes), lights the globe, and fades the lighting out as
+the camera comes closer than about 10,000 km to the Earth's centre. Cesium
+picks day or night layers by sun direction only, so a close view of the dark
+side would show blurred night tiles under full lighting.
+`nightImageryShare` fades the night layer out on the same distance scale,
+so close views show the day imagery (and its online tiles) on both sides.
+The night layer is brightened 3x because Cesium darkens the dark side to
+30 %.
+
+With no network, the bundled levels are magnified when zoomed in further,
+and the globe shows "Detailed imagery is unavailable (offline?)" for 30 s
+after a failed tile. Outside the desktop app (a plain browser) there is no
+`vistiles` scheme, so only bundled imagery is used.
+
+### Tile cache
+
+`src-tauri/src/commands/tile_cache.rs`, served through the asynchronous
+`vistiles` URI scheme (`vistiles://localhost/...` on macOS and Linux,
+`http://vistiles.localhost/...` on Windows).
+
+- The renderer names a layer and a tile: `/{layer}/{z}/{y}/{x}.{ext}`. The
+  layer must be in `TILE_LAYERS`, the numbers decimal and in range, the
+  extension the layer's. The request host must be the scheme's own. The
+  upstream URL is built in Rust from constants and the parsed numbers, and
+  its host must be in `ALLOWED_UPSTREAM_HOSTS`; redirects are followed only
+  to those hosts. The scheme is not a proxy.
+- Cache: `$APPCACHE/tiles/{layer}/{z}/{y}/{x}.jpg`, at most 500 MB
+  (decimal). An in-memory index (built by scanning the folder on first use,
+  in file write order) tracks sizes and last use; past the cap the least
+  recently used tiles are deleted down to 90 %. Writes go through a unique
+  temporary file and a rename (`src-tauri/src/atomic_file.rs`, shared with
+  the provider cache), so two writers of one tile, or two app instances,
+  never leave a torn file. A crash leaves at most `*.tmp` files, which the
+  next scan deletes.
+- One download per tile at a time; concurrent requests for the tile wait
+  and then read the cache.
+- Only a 200 response with the layer's content type and image signature
+  (JPEG `FF D8 FF`), up to 2 MB, is stored. 404, other statuses, error pages
+  and network errors are passed on and never cached.
+- After 3 failed upstream requests in a row (network, timeout, 5xx, 429),
+  tile requests fail at once for 30 s instead of each waiting for a timeout.
+- **Integration settings → Globe imagery** shows the cache size and clears
+  it (`get_tile_cache_info`, `clear_tile_cache`). Clearing moves the folder
+  aside and deletes it.
+
 ## Settings and storage
 
 | What | Where |
@@ -354,6 +505,7 @@ download ends.
 | Settings (GeoIP paths, preferences, integrations, PeeringDB key) | `$APPDATA/settings.json` |
 | GeoLite2 downloads | `$APPDATA/databases/` |
 | Provider cache, including the PeeringDB IX list | `$APPCACHE/enrichment-cache.json` |
+| Globe tiles downloaded from NASA GIBS (500 MB, least recently used first out) | `$APPCACHE/tiles/` |
 | Airport table for host name hints | compiled in (`src-tauri/data/airports.csv`, see `src-tauri/data/README.md`) |
 | Reverse DNS cache, recent runs | memory only |
 
@@ -364,8 +516,22 @@ the RDAP base URL must be `http(s)`, the PeeringDB key must not contain spaces.
 
 - **CSP** (`tauri.conf.json` → `app.security.csp`): scripts, styles, images and
   fonts from the app only, `connect-src` for the Tauri IPC, `blob:` workers for
-  the GIF encoder. The renderer does not call any remote host; providers run in
-  Rust. `devCsp` adds `'unsafe-inline'` and the Vite dev server for HMR.
+  the GIF encoder (Cesium's workers load from the app). The renderer does not
+  call any remote host; providers and map tiles are fetched in Rust.
+  `devCsp` adds `'unsafe-inline'` and the Vite dev server for HMR. Additions
+  for the globe:
+  - `img-src` and `connect-src`: `vistiles:` and `http://vistiles.localhost`,
+    the tile cache scheme on macOS/Linux and on Windows. Cesium loads tiles
+    as images or through XHR, depending on the webview.
+  - `connect-src`: `data:`. Cesium checks `createImageBitmap` support by
+    fetching a 1-pixel `data:` PNG; without it, tile decoding falls back to
+    the main thread.
+  - Not added: `'wasm-unsafe-eval'` (the only WebAssembly Cesium would load
+    at start is `meshoptimizer`, which is replaced by a stub) and
+    `'unsafe-inline'` for styles. Cesium still tries three inline styles (an
+    `image-rendering` support probe, the credit display's `<style>` element
+    and the hidden default credit's HTML); the CSP blocks them and the
+    console shows four violations, with no visible effect.
 - **Capabilities** (`capabilities/default.json`): file system access only under
   `$APPDATA`, `$APPCACHE` and `$DOWNLOAD` (read, write, exists, mkdir; no
   remove or rename). Paths picked in a dialog are added at run time by the

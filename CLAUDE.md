@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-VisTracer is a Tauri v2-based visual traceroute desktop application that executes traceroute locally, enriches hop data with GeoIP/ASN metadata, and animates hop-by-hop routes on a 3D globe using Three.js. The application provides cross-platform support for macOS, Windows, and Linux, including both IPv4 and IPv6 targets.
+VisTracer is a Tauri v2-based visual traceroute desktop application that executes traceroute locally, enriches hop data with GeoIP/ASN metadata, and animates hop-by-hop routes on a 3D globe using CesiumJS. The application provides cross-platform support for macOS, Windows, and Linux, including both IPv4 and IPv6 targets.
 
 ## Development Commands
 
@@ -28,12 +28,12 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (75 tests across 9 files)
-npm run test:e2e       # Run e2e tests (72 tests across 6 files)
+npm run test           # Run unit + component tests (105 tests across 12 files)
+npm run test:e2e       # Run e2e tests (74 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
 # Rust
-cd src-tauri && cargo test                                # 144 tests (+1 ignored real-traceroute smoke test)
+cd src-tauri && cargo test                                # 161 tests (+2 ignored network smoke tests)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -57,12 +57,13 @@ VisTracer follows Tauri's architecture with a Rust backend and web frontend:
   - Manages GeoIP/ASN lookups via MaxMind databases (`maxminddb` crate)
   - Handles IPC via Tauri commands, persistence, DNS resolution, and logging
   - Auto-downloads GeoLite2 databases via MaxMind license key
+  - Serves globe imagery tiles from NASA GIBS through a disk cache (`vistiles` URI scheme)
   - External enrichment providers (Team Cymru, RDAP, RIPE Stat, PeeringDB, PeeringDB IX list)
   - Hop location estimates (`geoloc/`): IX LAN, host name hint, GeoLite2; speed-of-light check; anycast
   - Entry point: `src-tauri/src/main.rs`
 
 - **Frontend** (`src/renderer/`): React application in WebView
-  - Three.js-based 3D globe visualization
+  - CesiumJS 3D globe (`modules/app/components/globe/cesiumGlobe.ts` is the only module that imports Cesium)
   - Zustand state management (`src/renderer/state/tracerouteStore.ts`)
   - React Query for async data (`@tanstack/react-query`)
   - UI components in `src/renderer/modules/app/components/`
@@ -92,6 +93,7 @@ Key Tauri Commands:
 - `get_settings` / `set_settings`: Read/write application settings
 - `emit_telemetry`: Log telemetry events
 - `get_app_info`: App version and whether the updater public key is configured
+- `get_tile_cache_info` / `clear_tile_cache`: size of the globe tile cache, and emptying it
 
 Key Events (Tauri emit/listen):
 - `vistracer:traceroute:progress`: Streamed hop progress events
@@ -99,7 +101,8 @@ Key Events (Tauri emit/listen):
 
 ### Rust Backend Structure (`src-tauri/src/`)
 
-- `main.rs`: Tauri app setup, command registration, state management
+- `main.rs`: Tauri app setup, command registration, state management, `vistiles` URI scheme
+- `atomic_file.rs`: `write_atomic` (unique temp file + rename), shared by the provider cache and the tile cache
 - `types.rs`: Shared data types (serialized to/from frontend)
 - `net.rs`: Private IP detection (mirrors `src/common/net.ts`) and `is_publicly_routable` (gate for provider lookups)
 - `commands/traceroute.rs`: Run orchestration: spawn, reader task, `select!` loop, lookup tasks, cancel, Linux UDP fallback
@@ -114,6 +117,7 @@ Key Events (Tauri emit/listen):
 - `commands/dns.rs`: Reverse DNS on the blocking pool with timeout and caching
 - `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup
 - `commands/app_info.rs`: App version and updater key state
+- `commands/tile_cache.rs`: globe tile cache: allowlisted GIBS layers, URI parsing, `$APPCACHE/tiles` with a 500 MB LRU cap, single-flight downloads, 3-failure pause, redirect allowlist
 - `commands/geodb_downloader.rs`: MaxMind database auto-download
 - `commands/persistence.rs`: In-memory store for settings, DNS cache, runs; settings validation
 - `geoloc/estimate.rs`: per-run location of every hop: candidates, RTT bound, reference hop, anycast, precedence
@@ -136,12 +140,15 @@ Full description and mermaid diagram: [docs/architecture.md](./docs/architecture
 
 ### Globe Visualization
 
-The 3D globe (`src/renderer/lib/globe.ts`) uses Three.js via React Three Fiber:
+CesiumJS globe, details and diagram in [docs/architecture.md#globe](./docs/architecture.md#globe):
 
-- **Coordinate transformation**: `latLngToVector3` converts lat/lng to 3D Cartesian
-- **Great-circle arcs**: `interpolateGreatCircle` generates smooth paths between hops
-- **Arc coloring**: Each hop uses a distinct color from `hopIndexToColor` (20-color palette)
-- **Day/night terminator**: Real-time solar position calculation with shader blending
+- **Scene mapping** (`src/renderer/lib/globe.ts`, pure): `buildGlobeScene` turns hops into markers, raised great-circle arcs, confidence rings (km, styled by confidence), anycast reach circles and labels; `nextCameraFocus` / `flyHeight` decide camera flights. No Cesium import, tested in jsdom.
+- **Adapter** (`modules/app/components/globe/cesiumGlobe.ts`): the only Cesium import. `CesiumWidget` with every ion default off (`baseLayer: false`, ellipsoid terrain, no sky box), primitives (not entities), picking for hover/click. `GlobeViewport.tsx` loads it lazily behind the `GlobeController` interface (`globe/controller.ts`); tests mock that module.
+- **Render governor** (`src/renderer/lib/renderGovernor.ts`): owns the rAF loop. `requestRenderMode`, wake on data/input/resize/`scene.requestRender()`, sleep after 20 idle ticks, 60 fps cap (30 on battery), paused when hidden or minimized.
+- **Imagery** (`src/renderer/lib/imagery.ts`): bundled Blue Marble + Black Marble tiles (levels 0–4) in `src/renderer/public/imagery/` (built by `scripts/build-globe-imagery.mjs`); online Blue Marble levels 5–8 via `vistiles://` → Rust tile cache → NASA GIBS. Night imagery fades out with Cesium's lighting fade when zooming in.
+- **Arc colouring**: latency bands (`latencyToColor`); markers and rings use `hopIndexToColor` (20-colour palette, shared with the hop table).
+- **Day/night**: Cesium's sun from the clock (wall clock on each drawn frame, and every 10 minutes while idle).
+- **Vite**: `vite.config.ts` serves/copies Cesium's `Workers/`, IAU2006 tables, terrain heights and images to `/cesium/`, and aliases `meshoptimizer` to a stub (its WebAssembly would break the CSP).
 
 ### State Management
 
@@ -150,6 +157,7 @@ Zustand store (`src/renderer/state/tracerouteStore.ts`) manages:
 - `currentRunId`: Active run being displayed
 - `status`: Current execution state (`idle` | `running` | `success` | `error`)
 - `selectedHopIndex`: Hop selected for detail view
+- `hoveredHopIndex`: Hop under the pointer on the globe or in the hop table (kept in step both ways)
 
 ### GeoIP Database Management
 
@@ -185,20 +193,23 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 75 tests across 9 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 105 tests across 12 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
-  - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 9 tests: store behavior
+  - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 10 tests: store behavior, hovered hop
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
-  - `src/renderer/lib/__tests__/globe.test.ts` — 12 tests: arcs, confidence rings (radius on the sphere, styles, conflict style), utilities
-  - `src/renderer/lib/__tests__/sun-calculation.test.ts` — 5 tests: solar position
-  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 12 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states
-  - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 7 tests: provider toggles, exchange matching switch, key, URL validation
+  - `src/renderer/lib/__tests__/globe.test.ts` — 22 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders
+  - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 7 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible, dispose, render quality
+  - `src/renderer/lib/__tests__/imagery.test.ts` — 5 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade
+  - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 5 tests: scene and fly-to through a mocked `GlobeController`, hover/select sync, input lock during export, WebGL failure message, imagery notice
+  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 14 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, hover sync, scroll to selection
+  - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 10 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing
+  - `src/renderer/modules/app/lib/__tests__/tileCache.test.ts` — 2 tests: cache size text
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
 
-- **E2E tests** (`vitest.e2e.config.ts`): 72 tests across 6 files
-  - `tests/e2e/bridge.test.ts` — 17 tests: Tauri bridge invoke/listen integration
+- **E2E tests** (`vitest.e2e.config.ts`): 74 tests across 6 files
+  - `tests/e2e/bridge.test.ts` — 19 tests: Tauri bridge invoke/listen integration, tile cache commands
   - `tests/e2e/traceroute-flow.test.ts` — 7 tests: full traceroute lifecycle
   - `tests/e2e/store-integration.test.ts` — 15 tests: Zustand store with API
   - `tests/e2e/settings-persistence.test.ts` — 10 tests: settings round-trip
@@ -207,7 +218,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 144 tests in `src-tauri/src/` (plus one ignored smoke test, `smoke_real_traceroute`, that runs real traceroutes through the real pipeline) covering:
+- 161 tests in `src-tauri/src/` (plus two ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
@@ -215,6 +226,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
   - Settings validation (including `ixMatching` defaults for old settings files), updater key detection
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
+  - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers, clear, single flight for one tile, concurrent writes of many tiles, failure pause, `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
 
 ## Key Implementation Details
 
@@ -223,9 +235,9 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 - **IPv6 detection**: `is_ipv6()` checks for colon-separated addresses (in both TS and Rust)
 - **Private IP handling**: `is_private_ip()` detects RFC1918 + link-local/ULA addresses (UI label); `is_publicly_routable()` decides what may be sent to providers
 - **Cancellation**: Active runs tracked in `Arc<Mutex<HashMap>>`, cancel sends kill signal
-- **Snapshot export**: Client-side canvas capture (no server-side `capturePage`)
-- **State persistence**: In-memory `AppStore` with `Mutex` for thread-safe access; settings in `$APPDATA/settings.json`, provider cache in `$APPCACHE/enrichment-cache.json`
-- **CSP**: strict policy in `tauri.conf.json` (`script-src 'self'`); never inject inline scripts (gif.js loads as a `?url` asset)
+- **Snapshot export**: Client-side canvas capture (no server-side `capturePage`); the Cesium canvas keeps `preserveDrawingBuffer` for it
+- **State persistence**: In-memory `AppStore` with `Mutex` for thread-safe access; settings in `$APPDATA/settings.json`, provider cache in `$APPCACHE/enrichment-cache.json`, globe tiles in `$APPCACHE/tiles/`
+- **CSP**: strict policy in `tauri.conf.json` (`script-src 'self'`); never inject inline scripts (gif.js loads as a `?url` asset). The tile scheme (`vistiles:`, `http://vistiles.localhost`) is allowed in `img-src`/`connect-src`; no `'wasm-unsafe-eval'` (see `meshoptimizerStub.ts`)
 - **Updater**: `plugins.updater.pubkey` is a placeholder until the signing key is set up; `get_app_info` reports `updaterConfigured`
 
 ## Build & Package
@@ -260,6 +272,6 @@ npm run tauri:build
 - `@tauri-apps/api`: Tauri IPC bridge
 - `@tauri-apps/plugin-updater` / `@tauri-apps/plugin-process`: update check, install, relaunch
 - `react` / `react-dom`: UI framework
-- `three` / `@react-three/fiber` / `@react-three/drei`: 3D globe
+- `cesium` (~1.146, Apache-2.0): 3D globe; licenses of bundled data in [docs/third-party-data.md](./docs/third-party-data.md)
 - `zustand`: State management
 - `@tanstack/react-query`: Async data fetching
