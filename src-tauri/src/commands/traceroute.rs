@@ -729,7 +729,7 @@ mod tests {
                  sleep 0.1\n\
                  echo ' 3  192.0.2.9  3.0 ms'",
             );
-            let lookup = FakeLookup::new("192.0.2.1", Duration::from_millis(1500));
+            let lookup = FakeLookup::new("192.0.2.1", Duration::from_secs(3));
             let runs = create_active_runs();
             let mut state = RunState::new(1);
             let start = Instant::now();
@@ -742,29 +742,29 @@ mod tests {
             assert_eq!(outcome.hop_lines, 3);
             assert!(!outcome.cancelled);
 
+            // Order of events, not wall-clock bounds: a loaded CI machine can
+            // spawn the script slowly, but hop 3 must still reach the UI
+            // before hop 1's slow lookup finishes.
             let events = events.lock().unwrap();
-            let first_seen = |index: u32| {
-                events
-                    .iter()
-                    .find(|(_, hop)| hop.hop_index == index)
-                    .map(|(at, _)| *at)
-                    .unwrap()
-            };
+            let hop3_first = events
+                .iter()
+                .position(|(_, hop)| hop.hop_index == 3)
+                .unwrap();
             let hop1_done = events
                 .iter()
-                .find(|(_, hop)| hop.hop_index == 1 && hop.lookup_state == LookupState::Complete)
-                .map(|(at, _)| *at)
+                .position(|(_, hop)| {
+                    hop.hop_index == 1 && hop.lookup_state == LookupState::Complete
+                })
                 .unwrap();
             assert!(
-                first_seen(3) < Duration::from_millis(1000),
-                "hop 3 at {:?}",
-                first_seen(3)
+                hop3_first < hop1_done,
+                "hop 3 emitted after hop 1 resolved: {:?}",
+                events
+                    .iter()
+                    .map(|(at, hop)| (hop.hop_index, hop.lookup_state, *at))
+                    .collect::<Vec<_>>()
             );
-            assert!(
-                hop1_done >= Duration::from_millis(1400),
-                "hop 1 done at {hop1_done:?}"
-            );
-            assert!(first_seen(3) < hop1_done);
+            assert!(events[hop1_done].0 >= Duration::from_millis(2900));
             assert_eq!(events[0].1.lookup_state, LookupState::Pending);
 
             let hops = state.hops();
