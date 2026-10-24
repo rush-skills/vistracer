@@ -45,7 +45,6 @@ This architecture ensures you get authentic network diagnostics from your actual
 - Load-balanced (multipath) hops: every responder of a hop is shown with its own RTTs.
 - GeoIP/ASN enrichment via local MaxMind GeoLite2 databases.
 - Enrichment through Team Cymru, RDAP, RIPEstat and PeeringDB, with retry/backoff, per-provider rate limits and a 7-day cache. A failed provider never hides the GeoLite2 data.
-- Suspected-anycast flag from a speed-of-light check (RTT vs. geolocated distance).
 - 3D globe (Three.js) visualising hop arcs, coloured by latency bands, plus per-hop markers.
 - Detailed hop table with RTT stats, packet loss, location and ASN metadata (including PeeringDB facility context when available).
 - Snapshot and animation exports saved directly to your downloads folder (PNG/JPG/WebP for stills, WebM/GIF for animated routes).
@@ -89,7 +88,7 @@ In addition to GeoLite2, VisTracer looks up each public hop address in these reg
 - Calls retry with backoff on rate limits, server errors and timeouts. If a provider still fails, the hop shows "N sources failed" and the hop details list each provider with its result.
 - The hop details panel shows every responder, the merged ASN/prefix/registry data, and the PeeringDB record (or why there is none).
 
-See [docs/architecture.md](./docs/architecture.md) for the pipeline, the merge rules and the anycast check.
+See [docs/architecture.md](./docs/architecture.md) for the pipeline and the merge rules.
 
 ### Linux: ICMP and TCP need raw sockets
 
@@ -196,7 +195,8 @@ The terminator position uses a simplified solar algorithm that provides accuracy
 
 - Scheduled GeoLite2 refresh (auto-download via license key works; periodic refresh is not yet automated)
 - MP4 export remains out of scope; use WebM or GIF instead.
-- Anycast detection is a heuristic ("suspected"); jitter visualisation and a comparison view are not implemented
+- Advanced heuristics (anycast detection, jitter visualisation, comparison view) are planned but not
+  implemented in this build
 - Windows `tracert` only sends ICMP probes, three per hop; the UDP/TCP choice does not apply there
 - Only the first responder of a multipath hop is geolocated and sent to the registry providers; the others show their address, host name and RTTs
 

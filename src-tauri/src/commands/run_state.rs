@@ -2,11 +2,10 @@
 //! results. Every emitted `HopResolution` is rendered from this state, so
 //! hop lines and lookup results can arrive in any order.
 
-use super::anycast::anycast_suspected;
 use super::lookup::{IpLookup, LookupKind, LookupRequest};
 use super::traceroute_parse::{ParsedHop, ParsedLine};
 use crate::net::is_private_ip;
-use crate::types::{GeoDetails, HopLatencyStats, HopResolution, HopResponder, LookupState};
+use crate::types::{HopLatencyStats, HopResolution, HopResponder, LookupState};
 use std::collections::{BTreeMap, HashMap};
 
 pub struct RunState {
@@ -141,28 +140,7 @@ impl RunState {
         }
     }
 
-    fn primary_geo(&self, hop: &ParsedHop) -> Option<&GeoDetails> {
-        let primary = hop.responders.first()?;
-        if is_private_ip(&primary.ip) {
-            return None;
-        }
-        self.results
-            .get(&primary.ip)?
-            .enrichment
-            .as_ref()?
-            .geo
-            .as_ref()
-    }
-
-    /// The first public hop with a location. It stands in for the location
-    /// of the machine running the trace.
-    fn vantage(&self) -> Option<(u32, &GeoDetails)> {
-        self.hops
-            .values()
-            .find_map(|hop| self.primary_geo(hop).map(|geo| (hop.hop_index, geo)))
-    }
-
-    fn render_hop(&self, hop: &ParsedHop, vantage: Option<(u32, &GeoDetails)>) -> HopResolution {
+    fn render_hop(&self, hop: &ParsedHop) -> HopResolution {
         let responders: Vec<HopResponder> = hop
             .responders
             .iter()
@@ -189,13 +167,6 @@ impl RunState {
             .and_then(|l| l.enrichment.as_ref());
         let geo = enrichment.and_then(|e| e.geo.clone());
 
-        let is_anycast_suspected = match (vantage, geo.as_ref(), latency.min_rtt_ms) {
-            (Some((vantage_index, vantage_geo)), Some(hop_geo), Some(min_rtt)) => {
-                hop.hop_index > vantage_index && anycast_suspected(vantage_geo, hop_geo, min_rtt)
-            }
-            _ => false,
-        };
-
         let lookup_state = if hop.responders.iter().any(|r| self.is_pending(&r.ip)) {
             LookupState::Pending
         } else {
@@ -212,7 +183,9 @@ impl RunState {
             latency,
             geo,
             asn: enrichment.and_then(|e| e.asn.clone()),
-            is_anycast_suspected,
+            // Anycast detection belongs to the geolocation-quality phase;
+            // see docs/deferred/anycast-heuristic.md.
+            is_anycast_suspected: false,
             raw_line: hop.raw_lines.join("\n"),
             providers: enrichment.map(|e| e.providers.clone()),
             peering_db: enrichment.and_then(|e| e.peering_db.clone()),
@@ -221,11 +194,7 @@ impl RunState {
     }
 
     pub fn hops(&self) -> Vec<HopResolution> {
-        let vantage = self.vantage();
-        self.hops
-            .values()
-            .map(|hop| self.render_hop(hop, vantage))
-            .collect()
+        self.hops.values().map(|hop| self.render_hop(hop)).collect()
     }
 
     /// Returns the hops whose rendered value changed since the last call.
@@ -260,22 +229,11 @@ mod tests {
         }
     }
 
-    fn geo(latitude: f64, longitude: f64, radius: f64) -> GeoDetails {
-        GeoDetails {
-            latitude,
-            longitude,
-            city: None,
-            country: None,
-            iso_code: None,
-            confidence: Some(radius),
-        }
-    }
-
-    fn enriched(geo: Option<GeoDetails>, asn: u32) -> IpLookup {
+    fn enriched(asn: u32) -> IpLookup {
         IpLookup {
             host_name: Some(format!("as{asn}.example")),
             enrichment: Some(Enrichment {
-                geo,
+                geo: None,
                 asn: Some(AsnDetails {
                     asn: Some(asn),
                     ..AsnDetails::default()
@@ -305,7 +263,7 @@ mod tests {
         assert_eq!(hop.latency.avg_rtt_ms, Some(1.5));
         assert!(hop.asn.is_none());
 
-        state.apply_lookup(&lookups[0], enriched(None, 15169));
+        state.apply_lookup(&lookups[0], enriched(15169));
         let updated = state.take_changed();
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0].lookup_state, LookupState::Complete);
@@ -383,34 +341,6 @@ mod tests {
         let mut state = RunState::new(3);
         assert!(feed(&mut state, "    1.2.3.4  1 ms").is_empty());
         assert!(state.hops().is_empty());
-    }
-
-    #[test]
-    fn anycast_is_flagged_relative_to_first_public_hop() {
-        let mut state = RunState::new(1);
-        let gateway = feed(&mut state, " 1  192.168.1.1  0.5 ms");
-        let isp = feed(&mut state, " 2  49.44.1.1  3.0 ms");
-        let anycast = feed(&mut state, " 3  8.8.8.8  4.0 ms");
-        state.apply_lookup(
-            &gateway[0],
-            IpLookup {
-                host_name: None,
-                enrichment: None,
-            },
-        );
-        // ISP edge in Mumbai, 8.8.8.8 geolocated to the US centroid.
-        state.apply_lookup(&isp[0], enriched(Some(geo(19.076, 72.8777, 20.0)), 55836));
-        state.apply_lookup(
-            &anycast[0],
-            enriched(Some(geo(37.751, -97.822, 1000.0)), 15169),
-        );
-
-        let hops = state.hops();
-        assert!(
-            !hops[1].is_anycast_suspected,
-            "vantage hop itself is never flagged"
-        );
-        assert!(hops[2].is_anycast_suspected);
     }
 
     /// Real `traceroute -n -q 3` output from macOS (ISP router addresses

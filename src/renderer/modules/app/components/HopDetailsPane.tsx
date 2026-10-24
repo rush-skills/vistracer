@@ -162,17 +162,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                       <td>{location}</td>
                       <td>
                         <div className="hop-details__asn-cell">
-                          <div>
-                            {hop.asn?.asn ? `AS${hop.asn.asn}` : "–"}
-                            {hop.isAnycastSuspected && (
-                              <span
-                                className="hop-details__tag hop-details__tag--anycast"
-                                title="RTT too short for the geolocated distance: likely anycast"
-                              >
-                                anycast?
-                              </span>
-                            )}
-                          </div>
+                          <div>{hop.asn?.asn ? `AS${hop.asn.asn}` : "–"}</div>
                           {hop.asn?.name && <small>{hop.asn.name}</small>}
                           {hop.asn?.network && <small>{hop.asn.network}</small>}
                           {failures.length > 0 && (

@@ -40,7 +40,7 @@ const multipathHop: HopResolution = {
   lookupState: "complete"
 };
 
-const anycastHop: HopResolution = {
+const unenrichedHop: HopResolution = {
   hopIndex: 2,
   ipAddress: "8.8.8.8",
   responders: [{ ipAddress: "8.8.8.8", rttsMs: [4.1, 4.3] }],
@@ -49,7 +49,7 @@ const anycastHop: HopResolution = {
   geo: { latitude: 37.751, longitude: -97.822, country: "United States" },
   asn: { asn: 15169, name: "GOOGLE" },
   isPrivate: false,
-  isAnycastSuspected: true,
+  isAnycastSuspected: false,
   rawLine: " 2  8.8.8.8  4.1 ms  4.3 ms",
   providers: [
     { provider: "peeringdb", status: "skipped", message: "Disabled in Integration settings." }
@@ -85,7 +85,7 @@ const run: TracerouteRun = {
     protocolsTried: ["ICMP", "UDP"],
     notices: ["ICMP probes need raw-socket privileges on Linux, so VisTracer ran this trace again with UDP probes."]
   },
-  hops: [multipathHop, anycastHop, pendingHop]
+  hops: [multipathHop, unenrichedHop, pendingHop]
 };
 
 const inspector = (hopIndex: number) => screen.getByLabelText(`Hop ${hopIndex} details`);
@@ -101,7 +101,6 @@ describe("HopDetailsPane", () => {
     expect(screen.getByText("1 source failed").getAttribute("title")).toBe(
       "RDAP: Server error (HTTP 500) after 3 attempts."
     );
-    expect(screen.getByText("anycast?")).toBeTruthy();
     expect(screen.getByText(/ran this trace again with UDP probes/)).toBeTruthy();
     expect(screen.getByText("Resolving…")).toBeTruthy();
   });
@@ -129,13 +128,12 @@ describe("HopDetailsPane", () => {
     expect(sources.getByText("success (cached)")).toBeTruthy();
   });
 
-  it("explains why PeeringDB has no data and flags suspected anycast", () => {
+  it("explains why PeeringDB has no data", () => {
     render(<HopDetailsPane run={run} selectedHopIndex={2} status="success" />);
     const details = within(inspector(2));
     expect(
       details.getByText("PeeringDB not queried: Disabled in Integration settings.")
     ).toBeTruthy();
-    expect(details.getByText(/Suspected anycast/)).toBeTruthy();
   });
 
   it("shows a pending state while lookups run", () => {

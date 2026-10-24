@@ -176,10 +176,6 @@
   vertical-align: middle;
 }
 
-.hop-details__tag--anycast {
-  background: rgba(171, 140, 255, 0.2);
-}
-
 .hop-details__table td small.hop-details__provider-error {
   color: #ff9f9f;
   opacity: 0.9;
@@ -209,14 +205,6 @@
   font-size: 0.72rem;
   font-weight: 400;
   opacity: 0.65;
-}
-
-.hop-inspector__notice {
-  margin: 0 0 0.6rem;
-  padding: 0.45rem 0.6rem;
-  border-radius: 10px;
-  background: rgba(171, 140, 255, 0.12);
-  line-height: 1.45;
 }
 
 .hop-inspector__section + .hop-inspector__section {

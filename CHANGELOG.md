@@ -10,7 +10,6 @@ All notable changes to VisTracer will be documented in this file.
 - Every responder of a load-balanced hop is parsed and shown with its own RTTs
 - Hop details panel: responders, merged network data, PeeringDB record (or the reason there is none), and the result of each provider
 - Provider on/off switches, RDAP base URL and PeeringDB API key in Integration settings
-- Suspected-anycast flag from a speed-of-light check (RTT vs. GeoLite2 distance)
 - In-app updates through the Tauri updater (needs the signing key setup in docs/releasing.md)
 - Universal macOS DMG (Apple Silicon and Intel)
 - Linux: ICMP/TCP traces that fail for lack of raw-socket privileges run again with UDP and show how to enable them

@@ -109,7 +109,6 @@ Key Events (Tauri emit/listen):
 - `commands/integrations.rs`: Provider parsers, `EnrichmentService` (cache, limits, retry), `merge_asn`
 - `commands/enrichment_cache.rs`: TTL cache persisted to `$APPCACHE/enrichment-cache.json`
 - `commands/retry.rs`: `ProviderError`, backoff with jitter, `with_retry`
-- `commands/anycast.rs`: Speed-of-light anycast check
 - `commands/dns.rs`: Reverse DNS on the blocking pool with timeout and caching
 - `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup
 - `commands/app_info.rs`: App version and updater key state
@@ -198,7 +197,7 @@ Each call: cache (7 days) → per-provider semaphore → cache again → `with_r
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
   - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
-  - Anycast check, settings validation, updater key detection
+  - Settings validation, updater key detection
 
 ## Key Implementation Details
 

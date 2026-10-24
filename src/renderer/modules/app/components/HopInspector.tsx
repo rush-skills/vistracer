@@ -91,13 +91,6 @@ export const HopInspector: React.FC<HopInspectorProps> = ({ hop }) => {
         )}
       </h3>
 
-      {hop.isAnycastSuspected && (
-        <p className="hop-inspector__notice">
-          Suspected anycast: the measured RTT is too short for the distance to the GeoLite2
-          location, so a closer replica answered (or the geolocation is wrong).
-        </p>
-      )}
-
       <section className="hop-inspector__section" aria-label="Responders">
         <h4>
           {responders.length > 1 ? `Responders (${responders.length} paths)` : "Responder"}

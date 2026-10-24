@@ -30,7 +30,7 @@ flowchart LR
     retry --> ripe["RIPEstat<br/>prefix-overview"]
     retry -->|by ASN| pdb["PeeringDB<br/>/api/net"]
     worker -->|IpLookup| loop
-    loop -->|"apply_lookup + anycast check"| state
+    loop -->|apply_lookup| state
     state -->|changed hops| late["hop event<br/>lookupState: complete"]
     early --> ui["Renderer store<br/>hop pane + globe"]
     late --> ui
@@ -114,16 +114,6 @@ Rules:
   GeoLite2 (live BGP before the database snapshot). The name only comes from
   a source that agrees on that ASN, then PeeringDB, then the RDAP registrant.
   The prefix comes from RIPEstat (when announced), then Team Cymru, then RDAP.
-
-### Anycast
-
-No provider flags anycast prefixes. `commands/anycast.rs` uses a
-speed-of-light check instead: light in fibre covers about 100 km per
-millisecond of round-trip time. When GeoLite2 places a hop further from the
-vantage point (the first public hop with a location) than its minimum RTT
-allows, plus the accuracy radii and 100 km slack, the hop is marked
-`isAnycastSuspected`. The UI calls it "suspected": the cause can also be a
-wrong geolocation.
 
 ## Settings and storage
 
