@@ -116,10 +116,12 @@ const drawOverlay = (
 
   if (hop.peeringDb) {
     const peeringLabel = hop.peeringDb.name ?? "PeeringDB entry";
-    const peeringLocation = hop.peeringDb.city
-      ? ` (${hop.peeringDb.city}${hop.peeringDb.country ? `, ${hop.peeringDb.country}` : ""})`
-      : "";
-    appendWrapped(`PeeringDB: ${peeringLabel}${peeringLocation}`, bodySmallFont, "rgba(215, 219, 255, 0.6)");
+    const peeringFacts = [
+      hop.peeringDb.infoType,
+      hop.peeringDb.ixCount != null ? `${hop.peeringDb.ixCount} IXPs` : undefined
+    ].filter(Boolean);
+    const peeringSuffix = peeringFacts.length > 0 ? ` (${peeringFacts.join(", ")})` : "";
+    appendWrapped(`PeeringDB: ${peeringLabel}${peeringSuffix}`, bodySmallFont, "rgba(215, 219, 255, 0.6)");
   }
 
   if (hop.providers && hop.providers.length > 0) {

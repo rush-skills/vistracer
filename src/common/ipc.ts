@@ -18,6 +18,7 @@ export interface GeoDetails extends GeoCoordinates {
   city?: string;
   country?: string;
   isoCode?: string;
+  /** GeoLite2 accuracy radius in kilometres. */
   confidence?: number;
 }
 
@@ -31,11 +32,18 @@ export interface AsnDetails {
 
 export type ProviderId = "maxmind" | "team-cymru" | "rdap" | "ripe-stat" | "peeringdb";
 
+/**
+ * success: the provider answered (with or without a record).
+ * error: the lookup failed (network, HTTP, timeout, parse).
+ * skipped: not attempted (disabled, private address, no ASN, no database).
+ */
+export type ProviderState = "success" | "error" | "skipped";
+
 export interface ProviderStatus {
   provider: ProviderId;
-  status: "success" | "error" | "skipped";
+  status: ProviderState;
   message?: string;
-  details?: Record<string, unknown>;
+  cached?: boolean;
 }
 
 export interface PeeringDbDetails {
@@ -43,9 +51,14 @@ export interface PeeringDbDetails {
   name?: string;
   aka?: string;
   website?: string;
-  city?: string;
-  country?: string;
+  infoType?: string;
+  infoScope?: string;
+  infoTraffic?: string;
+  infoRatio?: string;
+  policyGeneral?: string;
+  irrAsSet?: string;
   ixCount?: number;
+  facCount?: number;
 }
 
 export interface HopLatencyStats {
@@ -55,10 +68,20 @@ export interface HopLatencyStats {
   jitterMs: number | null;
 }
 
+/** One address that answered probes for a hop (multipath hops have several). */
+export interface HopResponder {
+  ipAddress: string;
+  hostName?: string | null;
+  rttsMs: number[];
+}
+
+export type LookupState = "pending" | "complete";
+
 export interface HopResolution {
   hopIndex: number;
   ipAddress: string | null;
   hostName?: string;
+  responders?: HopResponder[];
   lossPercent: number | null;
   latency: HopLatencyStats;
   geo?: GeoDetails;
@@ -68,6 +91,7 @@ export interface HopResolution {
   rawLine: string;
   providers?: ProviderStatus[];
   peeringDb?: PeeringDbDetails;
+  lookupState?: LookupState;
 }
 
 export interface TracerouteSummary {
@@ -77,6 +101,7 @@ export interface TracerouteSummary {
   hopCount: number;
   protocolsTried: TracerouteProtocol[];
   error?: string;
+  notices?: string[];
 }
 
 export interface TracerouteRun {

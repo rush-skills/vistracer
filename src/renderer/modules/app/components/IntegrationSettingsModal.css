@@ -300,3 +300,44 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.integration-settings-modal__providers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(12, 14, 20, 0.6);
+}
+
+.integration-settings-modal__providers h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.integration-settings-modal__providers header small {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.78rem;
+  opacity: 0.72;
+  line-height: 1.4;
+}
+
+.integration-settings-modal__provider {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.integration-settings-modal__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}

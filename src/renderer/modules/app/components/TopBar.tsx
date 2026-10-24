@@ -201,18 +201,10 @@ export const TopBar: React.FC = () => {
         continue;
       }
 
+      // "error" only means a failed lookup; a provider with no record reports "success".
       for (const provider of hop.providers) {
-        // Skip if not an error, or if already have an error for this provider
-        if (provider.status !== "error" || errors[provider.provider]) {
-          continue;
-        }
-
-        // Filter out "no data" messages - these are not real errors
-        const message = provider.message ?? "Provider returned an error.";
-        const isNoDataMessage = message.toLowerCase().includes("no data");
-
-        if (!isNoDataMessage) {
-          errors[provider.provider] = message;
+        if (provider.status === "error" && !errors[provider.provider]) {
+          errors[provider.provider] = provider.message ?? "Lookup failed.";
         }
       }
     }

@@ -17,14 +17,65 @@ interface IntegrationSettingsModalProps {
   onGeoSave: (paths: { cityPath?: string; asnPath?: string }) => Promise<void>;
 }
 
-interface IntegrationSettingsFormState {
+export interface IntegrationSettingsFormState {
+  teamCymruEnabled: boolean;
+  rdapEnabled: boolean;
   rdapBaseUrl: string;
+  ripeStatEnabled: boolean;
+  peeringDbEnabled: boolean;
   peeringDbApiKey: string;
 }
 
+export const DEFAULT_RDAP_BASE_URL = "https://rdap.org/ip";
+
 const defaultFormState: IntegrationSettingsFormState = {
+  teamCymruEnabled: true,
+  rdapEnabled: true,
   rdapBaseUrl: "",
+  ripeStatEnabled: true,
+  peeringDbEnabled: false,
   peeringDbApiKey: ""
+};
+
+const formFromSettings = (settings: IntegrationSettings): IntegrationSettingsFormState => ({
+  teamCymruEnabled: settings.teamCymru.enabled,
+  rdapEnabled: settings.rdap.enabled,
+  rdapBaseUrl: settings.rdap.baseUrl ?? "",
+  ripeStatEnabled: settings.ripeStat.enabled,
+  peeringDbEnabled: settings.peeringDb.enabled,
+  peeringDbApiKey: settings.peeringDb.apiKey ?? ""
+});
+
+/**
+ * Converts the form into settings. Returns an error message instead when a
+ * field is invalid; the backend validates the same rules again.
+ */
+export const buildIntegrationSettings = (
+  form: IntegrationSettingsFormState
+): { settings: IntegrationSettings } | { error: string } => {
+  const baseUrl = form.rdapBaseUrl.trim() || DEFAULT_RDAP_BASE_URL;
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    return { error: `RDAP base URL "${baseUrl}" is not a valid URL.` };
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return { error: "RDAP base URL must start with https:// or http://." };
+  }
+  const apiKey = form.peeringDbApiKey.trim();
+  if (/\s/.test(apiKey)) {
+    return { error: "PeeringDB API key must not contain spaces." };
+  }
+
+  return {
+    settings: {
+      teamCymru: { enabled: form.teamCymruEnabled },
+      rdap: { enabled: form.rdapEnabled, baseUrl: baseUrl.replace(/\/+$/, "") },
+      ripeStat: { enabled: form.ripeStatEnabled, sourceApp: "VisTracer" },
+      peeringDb: { enabled: form.peeringDbEnabled, apiKey: apiKey || undefined }
+    }
+  };
 };
 
 export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> = ({
@@ -50,10 +101,7 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
       return;
     }
 
-    setForm({
-      rdapBaseUrl: settings.rdap.baseUrl ?? "",
-      peeringDbApiKey: settings.peeringDb.apiKey ?? ""
-    });
+    setForm(formFromSettings(settings));
     setError(undefined);
     setGeoInlineError(undefined);
     setSaving(false);
@@ -119,29 +167,18 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
     setError(undefined);
     setGeoInlineError(undefined);
 
-    const trimmedBaseUrl = form.rdapBaseUrl.trim();
-    const trimmedApiKey = form.peeringDbApiKey.trim();
     const trimmedCityPath = cityPath.trim();
     const trimmedAsnPath = asnPath.trim();
 
-    const updated: IntegrationSettings = {
-      ...settings,
-      rdap: {
-        ...settings.rdap,
-        baseUrl: trimmedBaseUrl || "https://rdap.org/ip"
-      },
-      ripeStat: {
-        ...settings.ripeStat,
-        sourceApp: "VisTracer"
-      },
-      peeringDb: {
-        ...settings.peeringDb,
-        apiKey: trimmedApiKey ? trimmedApiKey : undefined
-      }
-    };
+    const built = buildIntegrationSettings(form);
+    if ("error" in built) {
+      setError(built.error);
+      setSaving(false);
+      return;
+    }
 
     try {
-      await onSave(updated);
+      await onSave(built.settings);
     } catch (saveError) {
       const message =
         saveError instanceof Error
@@ -291,67 +328,119 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
             )}
           </section>
 
-          <div className="integration-settings-modal__field">
-            <label className="integration-settings-modal__label" htmlFor="integration-settings-rdap">
-              RDAP base URL
-            </label>
-            <input
-              id="integration-settings-rdap"
-              className="integration-settings-modal__input"
-              type="url"
-              value={form.rdapBaseUrl}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, rdapBaseUrl: event.target.value }))
-              }
-              placeholder="https://rdap.org/ip"
-            />
-            <small className="integration-settings-modal__hint">
-              VisTracer defaults to https://rdap.org/ip. Override if you operate a private RDAP
-              resolver.
-            </small>
-          </div>
+          <section
+            className="integration-settings-modal__providers"
+            aria-labelledby="integration-settings-providers-title"
+          >
+            <header>
+              <h3 id="integration-settings-providers-title">Enrichment providers</h3>
+              <small>
+                Enabled services receive the public hop addresses of each trace. Private and
+                non-routable addresses are never sent. Answers are cached for 7 days.
+              </small>
+            </header>
 
-          <div className="integration-settings-modal__field">
-            <label className="integration-settings-modal__label" htmlFor="integration-settings-peeringdb">
-              PeeringDB API key
-            </label>
-            <input
-              id="integration-settings-peeringdb"
-              className="integration-settings-modal__input"
-              type="text"
-              value={form.peeringDbApiKey}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, peeringDbApiKey: event.target.value }))
-              }
-              placeholder="Optional"
-            />
-            <small className="integration-settings-modal__hint">
-              Optional. Adds authentication headers for faster, higher-rate PeeringDB requests.
-            </small>
-          </div>
+            <div className="integration-settings-modal__provider">
+              <label className="integration-settings-modal__toggle">
+                <input
+                  type="checkbox"
+                  checked={form.teamCymruEnabled}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, teamCymruEnabled: event.target.checked }))
+                  }
+                />
+                Team Cymru
+              </label>
+              <small className="integration-settings-modal__hint">
+                IP to ASN, BGP prefix and registry over whois (TCP port 43). No credentials needed.
+              </small>
+            </div>
 
-          <div className="integration-settings-modal__field">
-            <label className="integration-settings-modal__label" htmlFor="integration-settings-ripe">
-              RIPE Stat source app
-            </label>
-            <input
-              id="integration-settings-ripe"
-              className="integration-settings-modal__input"
-              type="text"
-              value="VisTracer"
-              disabled
-              readOnly
-            />
-            <small className="integration-settings-modal__hint">
-              RIPE Stat requests always identify as VisTracer.
-            </small>
-          </div>
+            <div className="integration-settings-modal__provider">
+              <label className="integration-settings-modal__toggle">
+                <input
+                  type="checkbox"
+                  checked={form.rdapEnabled}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, rdapEnabled: event.target.checked }))
+                  }
+                />
+                RDAP
+              </label>
+              <small className="integration-settings-modal__hint">
+                Registry owner, network block and country.
+              </small>
+              <label className="integration-settings-modal__label" htmlFor="integration-settings-rdap">
+                RDAP base URL
+              </label>
+              <input
+                id="integration-settings-rdap"
+                className="integration-settings-modal__input"
+                type="url"
+                value={form.rdapBaseUrl}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, rdapBaseUrl: event.target.value }))
+                }
+                placeholder={DEFAULT_RDAP_BASE_URL}
+                disabled={!form.rdapEnabled}
+              />
+              <small className="integration-settings-modal__hint">
+                Leave blank for {DEFAULT_RDAP_BASE_URL}, which redirects to the right registry.
+              </small>
+            </div>
 
-          <div className="integration-settings-modal__field integration-settings-modal__field--note">
-            <small className="integration-settings-modal__hint">
-              Team Cymru lookups run over their public whois service and do not require credentials.
-            </small>
-          </div>
+            <div className="integration-settings-modal__provider">
+              <label className="integration-settings-modal__toggle">
+                <input
+                  type="checkbox"
+                  checked={form.ripeStatEnabled}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, ripeStatEnabled: event.target.checked }))
+                  }
+                />
+                RIPEstat
+              </label>
+              <small className="integration-settings-modal__hint">
+                Announced prefix and origin ASN from live BGP data. Requests identify as
+                VisTracer.
+              </small>
+            </div>
+
+            <div className="integration-settings-modal__provider">
+              <label className="integration-settings-modal__toggle">
+                <input
+                  type="checkbox"
+                  checked={form.peeringDbEnabled}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, peeringDbEnabled: event.target.checked }))
+                  }
+                />
+                PeeringDB
+              </label>
+              <small className="integration-settings-modal__hint">
+                Network type, peering policy, exchange and facility counts for each ASN.
+              </small>
+              <label className="integration-settings-modal__label" htmlFor="integration-settings-peeringdb">
+                PeeringDB API key
+              </label>
+              <input
+                id="integration-settings-peeringdb"
+                className="integration-settings-modal__input"
+                type="password"
+                autoComplete="off"
+                value={form.peeringDbApiKey}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, peeringDbApiKey: event.target.value }))
+                }
+                placeholder="Optional"
+                disabled={!form.peeringDbEnabled}
+              />
+              <small className="integration-settings-modal__hint">
+                Optional. Anonymous requests work but have a lower rate limit. The key is stored in
+                the app settings file on this computer.
+              </small>
+            </div>
+          </section>
 
           {error && <div className="integration-settings-modal__error">{error}</div>}
 

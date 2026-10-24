@@ -202,15 +202,17 @@ describe("Store Integration", () => {
 
       handleProgress({
         runId: "run-merge",
-        hop: makeHop(1, "10.0.0.1"),
+        hop: { ...makeHop(1, "10.0.0.1"), lookupState: "pending" as const },
         completed: false,
       });
+      expect(useTracerouteStore.getState().runs["run-merge"].hops[0].lookupState).toBe("pending");
 
-      // Enriched version of same hop
+      // Enriched version of same hop, emitted when its lookups finish
       const enrichedHop = {
         ...makeHop(1, "10.0.0.1"),
         asn: { asn: 15169, name: "Google LLC", network: "10.0.0.0/8" },
-        peeringDb: { name: "Google", city: "Mountain View", country: "US" },
+        peeringDb: { name: "Google", infoType: "Content", ixCount: 160 },
+        lookupState: "complete" as const,
       };
 
       handleProgress({
@@ -224,6 +226,8 @@ describe("Store Integration", () => {
       expect(hops).toHaveLength(1); // Should have merged, not duplicated
       expect(hops[0].asn?.name).toBe("Google LLC");
       expect(hops[0].peeringDb?.name).toBe("Google");
+      expect(hops[0].peeringDb?.ixCount).toBe(160);
+      expect(hops[0].lookupState).toBe("complete");
     });
   });
 
