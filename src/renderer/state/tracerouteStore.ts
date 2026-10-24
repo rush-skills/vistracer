@@ -17,12 +17,15 @@ export interface TracerouteStore {
   error?: string;
   pendingRequest?: TracerouteRequest;
   selectedHopIndex?: number;
+  /** Hop under the pointer on the globe or in the hop table. */
+  hoveredHopIndex?: number;
   captureActive: boolean;
   startRun: (request: TracerouteRequest) => Promise<TracerouteExecutionResult | undefined>;
   cancelRun: () => Promise<void>;
   handleProgress: (event: TracerouteProgressEvent) => void;
   completeRun: (result: TracerouteExecutionResult) => void;
   setSelectedHop: (hopIndex: number | undefined) => void;
+  setHoveredHop: (hopIndex: number | undefined) => void;
   setCaptureActive: (active: boolean) => void;
   resetError: () => void;
 }
@@ -41,7 +44,13 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
   captureActive: false,
   startRun: async (request) => {
     const api = window.visTracer;
-    set({ status: "running", error: undefined, pendingRequest: request, captureActive: false });
+    set({
+      status: "running",
+      error: undefined,
+      pendingRequest: request,
+      captureActive: false,
+      hoveredHopIndex: undefined
+    });
 
     try {
       const result = await api.runTraceroute(request);
@@ -158,12 +167,14 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
     });
   },
   setSelectedHop: (hopIndex) => set({ selectedHopIndex: hopIndex }),
+  setHoveredHop: (hopIndex) => set({ hoveredHopIndex: hopIndex }),
   setCaptureActive: (active) => set({ captureActive: active }),
   resetError: () => set({ error: undefined }),
   error: undefined,
   pendingRequest: undefined,
   currentRunId: undefined,
-  selectedHopIndex: undefined
+  selectedHopIndex: undefined,
+  hoveredHopIndex: undefined
 }));
 
 export const selectCurrentRun = (state: TracerouteStore): TracerouteRun | undefined => {

@@ -190,6 +190,21 @@ describe("tracerouteStore", () => {
       useTracerouteStore.getState().setSelectedHop(undefined);
       expect(useTracerouteStore.getState().selectedHopIndex).toBeUndefined();
     });
+
+    it("tracks the hovered hop and forgets it when a new run starts", () => {
+      useTracerouteStore.getState().setHoveredHop(3);
+      expect(useTracerouteStore.getState().hoveredHopIndex).toBe(3);
+      mockApi.runTraceroute.mockReturnValue(new Promise(() => undefined));
+      void useTracerouteStore.getState().startRun({
+        target: "example.com",
+        protocol: "ICMP",
+        maxHops: 30,
+        timeoutMs: 4000,
+        packetCount: 3,
+        forceFresh: false
+      });
+      expect(useTracerouteStore.getState().hoveredHopIndex).toBeUndefined();
+    });
   });
 
   describe("cancelRun", () => {

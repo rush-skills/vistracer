@@ -87,7 +87,8 @@
   transition: background 0.18s ease;
 }
 
-.hop-details__row:hover {
+.hop-details__row:hover,
+.hop-details__row--hovered {
   background: rgba(95, 168, 151, 0.12);
 }
 

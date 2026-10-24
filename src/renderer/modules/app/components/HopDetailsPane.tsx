@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import type { TracerouteRun } from "@common/ipc";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { hopIndexToColor } from "@renderer/lib/globe";
@@ -22,6 +22,16 @@ const statusLabelMap: Record<HopDetailsPaneProps["status"], string> = {
 
 export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, selectedHopIndex, status }) => {
   const setSelectedHop = useTracerouteStore((state) => state.setSelectedHop);
+  const hoveredHopIndex = useTracerouteStore((state) => state.hoveredHopIndex);
+  const setHoveredHop = useTracerouteStore((state) => state.setHoveredHop);
+  const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
+
+  // A hop picked on the globe (or reached during a run) scrolls into view.
+  useEffect(() => {
+    if (selectedHopIndex != null) {
+      rowRefs.current.get(selectedHopIndex)?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [selectedHopIndex]);
 
   const hopRows = useMemo(() => {
     if (!run) return [];
@@ -91,12 +101,30 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
               ) : (
                 hopRows.map(({ hop, hopColor, location, extraPaths, failures, failureSummary }) => {
                   const isSelected = hop.hopIndex === selectedHopIndex;
+                  const rowClass = [
+                    "hop-details__row",
+                    isSelected && "hop-details__row--selected",
+                    hop.hopIndex === hoveredHopIndex && "hop-details__row--hovered"
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
 
                   return (
                     <tr
                       key={hop.hopIndex}
-                      className={isSelected ? "hop-details__row hop-details__row--selected" : "hop-details__row"}
+                      ref={(row) => {
+                        if (row) {
+                          rowRefs.current.set(hop.hopIndex, row);
+                        } else {
+                          rowRefs.current.delete(hop.hopIndex);
+                        }
+                      }}
+                      className={rowClass}
                       onClick={() => setSelectedHop(hop.hopIndex)}
+                      onMouseEnter={() => setHoveredHop(hop.hopIndex)}
+                      onMouseLeave={() => setHoveredHop(undefined)}
+                      onFocus={() => setHoveredHop(hop.hopIndex)}
+                      onBlur={() => setHoveredHop(undefined)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
