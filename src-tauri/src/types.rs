@@ -53,6 +53,9 @@ pub enum ProviderId {
     RipeStat,
     #[serde(rename = "peeringdb")]
     PeeringDb,
+    /// PeeringDB IX peering LAN list, matched locally per address.
+    #[serde(rename = "peeringdb-ix")]
+    PeeringDbIx,
 }
 
 /// `Success` means the provider answered (with or without a record).
@@ -137,10 +140,11 @@ pub struct HopResolution {
     pub responders: Vec<HopResponder>,
     pub loss_percent: Option<f64>,
     pub latency: HopLatencyStats,
+    /// Raw GeoLite2 City record of the primary responder.
     pub geo: Option<GeoDetails>,
     pub asn: Option<AsnDetails>,
     pub is_private: bool,
-    pub is_anycast_suspected: bool,
+    pub location: HopLocation,
     pub raw_line: String,
     pub providers: Option<Vec<ProviderStatus>>,
     pub peering_db: Option<PeeringDbDetails>,

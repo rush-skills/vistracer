@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::integrations::{CymruRecord, RdapRecord, RipeStatRecord};
+use crate::geoloc::ixp::IxDataset;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,10 +37,14 @@ impl<V> TtlMap<V> {
     }
 
     pub fn get(&self, key: &str, now_ms: i64, ttl_ms: i64) -> Option<&V> {
+        self.get_entry(key, now_ms, ttl_ms)
+            .map(|entry| &entry.value)
+    }
+
+    pub fn get_entry(&self, key: &str, now_ms: i64, ttl_ms: i64) -> Option<&TtlEntry<V>> {
         self.entries
             .get(key)
             .filter(|entry| Self::is_fresh(entry.stored_at_ms, now_ms, ttl_ms))
-            .map(|entry| &entry.value)
     }
 
     pub fn insert(&mut self, key: String, value: V, now_ms: i64) {
@@ -85,6 +90,7 @@ pub enum CachedRecord {
     Rdap(Option<RdapRecord>),
     RipeStat(Option<RipeStatRecord>),
     PeeringDb(Option<PeeringDbDetails>),
+    PeeringDbIx(Option<IxDataset>),
 }
 
 /// Maps a provider record type to its cache slot.
@@ -115,6 +121,7 @@ cached_provider!(CymruRecord, ProviderId::TeamCymru, TeamCymru);
 cached_provider!(RdapRecord, ProviderId::Rdap, Rdap);
 cached_provider!(RipeStatRecord, ProviderId::RipeStat, RipeStat);
 cached_provider!(PeeringDbDetails, ProviderId::PeeringDb, PeeringDb);
+cached_provider!(IxDataset, ProviderId::PeeringDbIx, PeeringDbIx);
 
 const CACHE_FORMAT_VERSION: u32 = 1;
 pub const MAX_CACHE_ENTRIES: usize = 4000;
@@ -164,6 +171,19 @@ impl EnrichmentCache {
         self.entries
             .get(&cache_key(T::PROVIDER, key), now_ms, ttl_ms)
             .and_then(T::unwrap)
+    }
+
+    /// Like `get`, with the time the entry was stored.
+    pub fn get_stored<T: CachedProvider>(
+        &self,
+        key: &str,
+        now_ms: i64,
+        ttl_ms: i64,
+    ) -> Option<(Option<T>, i64)> {
+        let entry = self
+            .entries
+            .get_entry(&cache_key(T::PROVIDER, key), now_ms, ttl_ms)?;
+        Some((T::unwrap(&entry.value)?, entry.stored_at_ms))
     }
 
     pub fn insert<T: CachedProvider>(&mut self, key: &str, record: Option<T>, now_ms: i64) {
