@@ -23,6 +23,8 @@ const makeHop = (overrides: Partial<HopResolution> = {}): HopResolution => ({
   isPrivate: false,
   isAnycastSuspected: false,
   rawLine: " 1  test.example.com (1.1.1.1)  10 ms  11 ms  12 ms",
+  responders: [{ ipAddress: "1.1.1.1", hostName: "test.example.com", rttsMs: [10, 11, 12] }],
+  lookupState: "complete",
   ...overrides
 });
 
@@ -51,7 +53,8 @@ describe("tracerouteStore", () => {
           target: "8.8.8.8",
           startedAt: Date.now(),
           hopCount: 1,
-          protocolsTried: ["ICMP"]
+          protocolsTried: ["ICMP"],
+          notices: []
         }
       };
 
@@ -136,7 +139,8 @@ describe("tracerouteStore", () => {
           startedAt: Date.now(),
           completedAt: Date.now(),
           hopCount: 1,
-          protocolsTried: ["ICMP"]
+          protocolsTried: ["ICMP"],
+          notices: []
         }
       });
 
@@ -155,6 +159,7 @@ describe("tracerouteStore", () => {
           startedAt: Date.now(),
           hopCount: 0,
           protocolsTried: ["ICMP"],
+          notices: [],
           error: "Traceroute failed: permission denied"
         }
       });

@@ -22,11 +22,11 @@ const multipathHop: HopResolution = {
   isAnycastSuspected: false,
   rawLine: " 1  72.14.204.170  11.9 ms\n    108.170.252.1  12.2 ms",
   providers: [
-    { provider: "maxmind", status: "success", message: "Resolved from local GeoLite2 databases." },
-    { provider: "team-cymru", status: "success", message: "Lookup complete." },
-    { provider: "rdap", status: "error", message: "Server error (HTTP 500) after 3 attempts." },
+    { provider: "maxmind", status: "success", message: "Resolved from local GeoLite2 databases.", cached: false },
+    { provider: "team-cymru", status: "success", message: "Lookup complete.", cached: false },
+    { provider: "rdap", status: "error", message: "Server error (HTTP 500) after 3 attempts.", cached: false },
     { provider: "ripe-stat", status: "success", message: "Loaded from cache.", cached: true },
-    { provider: "peeringdb", status: "success", message: "Lookup complete." }
+    { provider: "peeringdb", status: "success", message: "Lookup complete.", cached: false }
   ],
   peeringDb: {
     id: 433,
@@ -43,7 +43,8 @@ const multipathHop: HopResolution = {
 const unenrichedHop: HopResolution = {
   hopIndex: 2,
   ipAddress: "8.8.8.8",
-  responders: [{ ipAddress: "8.8.8.8", rttsMs: [4.1, 4.3] }],
+  hostName: null,
+  responders: [{ ipAddress: "8.8.8.8", hostName: null, rttsMs: [4.1, 4.3] }],
   lossPercent: 0,
   latency: { minRttMs: 4.1, maxRttMs: 4.3, avgRttMs: 4.2, jitterMs: 0.2 },
   geo: { latitude: 37.751, longitude: -97.822, country: "United States" },
@@ -52,7 +53,7 @@ const unenrichedHop: HopResolution = {
   isAnycastSuspected: false,
   rawLine: " 2  8.8.8.8  4.1 ms  4.3 ms",
   providers: [
-    { provider: "peeringdb", status: "skipped", message: "Disabled in Integration settings." }
+    { provider: "peeringdb", status: "skipped", message: "Disabled in Integration settings.", cached: false }
   ],
   lookupState: "complete"
 };
@@ -60,7 +61,8 @@ const unenrichedHop: HopResolution = {
 const pendingHop: HopResolution = {
   hopIndex: 3,
   ipAddress: "203.0.113.7",
-  responders: [{ ipAddress: "203.0.113.7", rttsMs: [20] }],
+  hostName: null,
+  responders: [{ ipAddress: "203.0.113.7", hostName: null, rttsMs: [20] }],
   lossPercent: 66.67,
   latency: { minRttMs: 20, maxRttMs: 20, avgRttMs: 20, jitterMs: null },
   isPrivate: false,

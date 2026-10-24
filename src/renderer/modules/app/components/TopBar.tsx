@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type {
-  GeoDatabaseMeta,
-  IntegrationSettings,
-  ProviderId,
-  TracerouteProtocol
+import {
+  DEFAULT_RDAP_BASE_URL,
+  type GeoDatabaseMeta,
+  type IntegrationSettings,
+  type ProviderId,
+  type TracerouteProtocol
 } from "@common/ipc";
 import { useRecentRuns } from "@renderer/hooks/useRecentRuns";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
@@ -40,7 +41,7 @@ const numericConstraints = {
 
 const integrationDefaults: IntegrationSettings = {
   teamCymru: { enabled: true },
-  rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
+  rdap: { enabled: true, baseUrl: DEFAULT_RDAP_BASE_URL },
   ripeStat: { enabled: true, sourceApp: "VisTracer" },
   peeringDb: { enabled: false }
 };

@@ -88,7 +88,8 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
             target: finalRequest.target,
             startedAt: Date.now(),
             hopCount: 0,
-            protocolsTried: [finalRequest.protocol]
+            protocolsTried: [finalRequest.protocol],
+            notices: []
           },
           hops: []
         };
@@ -151,7 +152,7 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
         runs,
         currentRunId: result.runId,
         status: result.run.summary.error ? "error" : "success",
-        error: result.run.summary.error,
+        error: result.run.summary.error ?? undefined,
         pendingRequest: undefined
       };
     });

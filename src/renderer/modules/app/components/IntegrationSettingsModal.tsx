@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import type { GeoDatabaseMeta, IntegrationSettings } from "@common/ipc";
+import { DEFAULT_RDAP_BASE_URL, type GeoDatabaseMeta, type IntegrationSettings } from "@common/ipc";
 import type { VisTracerWindow } from "@common/bridge";
 import { FiAlertCircle, FiCheckCircle, FiFolder } from "react-icons/fi";
 import { useModalA11y } from "@renderer/hooks/useModalA11y";
@@ -27,7 +27,6 @@ export interface IntegrationSettingsFormState {
   peeringDbApiKey: string;
 }
 
-const DEFAULT_RDAP_BASE_URL = "https://rdap.org/ip";
 
 const defaultFormState: IntegrationSettingsFormState = {
   teamCymruEnabled: true,

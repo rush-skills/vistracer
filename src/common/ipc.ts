@@ -42,8 +42,8 @@ export type ProviderState = "success" | "error" | "skipped";
 export interface ProviderStatus {
   provider: ProviderId;
   status: ProviderState;
-  message?: string;
-  cached?: boolean;
+  message: string | null;
+  cached: boolean;
 }
 
 export interface PeeringDbDetails {
@@ -71,37 +71,38 @@ export interface HopLatencyStats {
 /** One address that answered probes for a hop (multipath hops have several). */
 export interface HopResponder {
   ipAddress: string;
-  hostName?: string | null;
+  hostName: string | null;
   rttsMs: number[];
 }
 
 export type LookupState = "pending" | "complete";
 
+/** Rust sends every field; `Option` values arrive as `null`. */
 export interface HopResolution {
   hopIndex: number;
   ipAddress: string | null;
-  hostName?: string;
-  responders?: HopResponder[];
+  hostName: string | null;
+  responders: HopResponder[];
   lossPercent: number | null;
   latency: HopLatencyStats;
-  geo?: GeoDetails;
-  asn?: AsnDetails;
+  geo?: GeoDetails | null;
+  asn?: AsnDetails | null;
   isPrivate: boolean;
   isAnycastSuspected: boolean;
   rawLine: string;
-  providers?: ProviderStatus[];
-  peeringDb?: PeeringDbDetails;
-  lookupState?: LookupState;
+  providers?: ProviderStatus[] | null;
+  peeringDb?: PeeringDbDetails | null;
+  lookupState: LookupState;
 }
 
 export interface TracerouteSummary {
   target: string;
   startedAt: number;
-  completedAt?: number;
+  completedAt?: number | null;
   hopCount: number;
   protocolsTried: TracerouteProtocol[];
-  error?: string;
-  notices?: string[];
+  error?: string | null;
+  notices: string[];
 }
 
 export interface TracerouteRun {
@@ -171,6 +172,9 @@ export interface PeeringDbSettings {
   enabled: boolean;
   apiKey?: string;
 }
+
+/** Mirrors `DEFAULT_RDAP_BASE_URL` in src-tauri/src/commands/persistence.rs. */
+export const DEFAULT_RDAP_BASE_URL = "https://rdap.org/ip";
 
 export interface IntegrationSettings {
   teamCymru: TeamCymruSettings;

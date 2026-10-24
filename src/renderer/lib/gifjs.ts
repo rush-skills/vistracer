@@ -1,20 +1,40 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // gif.js is a UMD bundle that sets window.GIF. It is loaded as a same-origin
 // script file (not inline text) so that the app CSP can keep script-src 'self'.
 import gifJsUrl from "./vendor/gifjs.min.js?url";
 import gifWorkerSource from "./vendor/gif.worker.js?raw";
 
-let gifConstructorPromise: Promise<any> | undefined;
+export interface GifCreateOptions {
+  workers?: number;
+  quality?: number;
+  repeat?: number;
+  background?: string;
+}
+
+interface GifConstructorOptions extends Required<GifCreateOptions> {
+  workerScript: string;
+}
+
+/** The part of the gif.js API that VisTracer uses. */
+export interface GifJsInstance {
+  addFrame(element: CanvasImageSource, options?: { copy?: boolean; delay?: number }): void;
+  on(event: "finished", handler: (blob: Blob) => void): void;
+  on(event: "abort", handler: () => void): void;
+  render(): void;
+}
+
+type GifConstructor = new (options: GifConstructorOptions) => GifJsInstance;
+
+let gifConstructorPromise: Promise<GifConstructor> | undefined;
 let workerUrl: string | undefined;
 
-const loadGifConstructor = (): Promise<any> => {
+const loadGifConstructor = (): Promise<GifConstructor> => {
   if (!gifConstructorPromise) {
     gifConstructorPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = gifJsUrl;
       script.onload = () => {
-        const GIF = (window as any).GIF;
-        if (GIF) {
+        const GIF = (window as Window & { GIF?: GifConstructor }).GIF;
+        if (typeof GIF === "function") {
           resolve(GIF);
         } else {
           reject(new Error("gif.js loaded but did not register window.GIF"));
@@ -37,29 +57,13 @@ const getWorkerUrl = (): string => {
   return workerUrl;
 };
 
-export type GifJsInstance = {
-  addFrame: (element: CanvasImageSource, options?: Record<string, unknown>) => void;
-  on: (event: string, handler: (...args: any[]) => void) => void;
-  once: (event: string, handler: (...args: any[]) => void) => void;
-  render: () => void;
-  abort: () => void;
-};
-
-export interface GifCreateOptions {
-  workers?: number;
-  quality?: number;
-  repeat?: number;
-  background?: string;
-}
-
 export const createGif = async (options?: GifCreateOptions): Promise<GifJsInstance> => {
   const GIF = await loadGifConstructor();
-  const instance = new GIF({
+  return new GIF({
     workers: options?.workers ?? 2,
     quality: options?.quality ?? 10,
     repeat: options?.repeat ?? 0,
     background: options?.background ?? "#000",
     workerScript: getWorkerUrl()
   });
-  return instance as GifJsInstance;
 };
