@@ -10,8 +10,8 @@ use super::lookup::{HopLookup, IpLookup, LookupContext, LookupRequest};
 use super::persistence::SharedStore;
 use super::run_state::RunState;
 use super::traceroute_command::{
-    linux_permission_fallback, normalize_request, plan_command, system_resolver, CommandPlan,
-    Platform,
+    linux_permission_fallback, normalize_request, plan_command, CommandPlan, Platform,
+    SystemLocator,
 };
 use super::traceroute_parse::{parse_line, ParsedLine};
 use crate::types::*;
@@ -444,8 +444,8 @@ pub async fn run_traceroute(
 ) -> Result<TracerouteExecutionResult, String> {
     let request = normalize_request(&request)?;
     let platform = Platform::current();
-    let resolve = system_resolver(platform);
-    let mut plan = plan_command(&request, platform, &resolve)?;
+    let locator = SystemLocator::new(platform);
+    let mut plan = plan_command(&request, platform, &locator)?;
     let run_id = uuid::Uuid::new_v4().to_string();
     log::info!(
         "Starting traceroute run {run_id} via {} {:?}",
@@ -488,7 +488,7 @@ pub async fn run_traceroute(
             platform,
             &outcome.stderr,
             outcome.hop_lines,
-            &resolve,
+            &locator,
         ) {
             log::info!("Run {run_id}: {notice}");
             plan = udp_plan;
