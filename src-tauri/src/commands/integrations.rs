@@ -4,11 +4,12 @@
 //! limit, and retry with backoff. A failed provider never blocks the hop:
 //! it reports an error status and the merge uses the data that arrived.
 
-use super::enrichment_cache::{write_atomic, CachedProvider, EnrichmentCache};
+use super::enrichment_cache::{CachedProvider, ProviderCache};
 use super::geo::GeoLiteResult;
+use super::ix_list::{IxStore, IxUnavailable};
 use super::persistence::IntegrationSettings;
 use super::retry::{with_retry, ProviderError, RetryPolicy};
-use crate::geoloc::ixp::{build_dataset, IxDataset, IxIndex, IxResponses, IxpHit};
+use crate::geoloc::ixp::IxpHit;
 use crate::net::is_publicly_routable;
 use crate::types::{
     AsnDetails, GeoDetails, PeeringDbDetails, ProviderId, ProviderState, ProviderStatus,
@@ -19,7 +20,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -350,7 +351,8 @@ struct ProviderLimits {
     team_cymru: Semaphore,
     rdap: Semaphore,
     ripe_stat: Semaphore,
-    peering_db: Semaphore,
+    /// Shared with the IX list download.
+    peering_db: Arc<Semaphore>,
 }
 
 impl Default for ProviderLimits {
@@ -359,7 +361,7 @@ impl Default for ProviderLimits {
             team_cymru: Semaphore::new(2),
             rdap: Semaphore::new(2),
             ripe_stat: Semaphore::new(4),
-            peering_db: Semaphore::new(1),
+            peering_db: Arc::new(Semaphore::new(1)),
         }
     }
 }
@@ -433,34 +435,9 @@ pub struct EnrichmentService {
     breaker: BreakerPolicy,
     breakers: Mutex<HashMap<ProviderId, BreakerState>>,
     provider_budget: Duration,
-    ttl_ms: i64,
-    cache_path: Option<PathBuf>,
-    cache: Mutex<EnrichmentCache>,
-    /// Held from snapshot to rename, so two runs that finish together write
-    /// in snapshot order and never share the temporary file.
-    persist_lock: Mutex<()>,
+    cache: Arc<ProviderCache>,
     limits: ProviderLimits,
-    ix: tokio::sync::Mutex<IxState>,
-    ix_request_spacing: Duration,
-}
-
-/// The IX index in memory, and the last failed download.
-#[derive(Default)]
-struct IxState {
-    loaded: Option<LoadedIx>,
-    last_failure: Option<(Instant, String)>,
-}
-
-struct LoadedIx {
-    index: Arc<IxIndex>,
-    stored_at_ms: i64,
-}
-
-struct IxLoad {
-    index: Arc<IxIndex>,
-    downloaded_now: bool,
-    /// Set when a refresh failed and an older list is used.
-    stale: Option<String>,
+    ix: Arc<IxStore>,
 }
 
 struct ProviderOutcome<T> {
@@ -496,11 +473,7 @@ impl<T> ProviderOutcome<T> {
     }
 }
 
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
-}
-
-fn peeringdb_headers(api_key: Option<&str>) -> Result<HeaderMap, ProviderError> {
+pub(super) fn peeringdb_headers(api_key: Option<&str>) -> Result<HeaderMap, ProviderError> {
     let mut headers = HeaderMap::new();
     if let Some(key) = api_key {
         let value = format!("Api-Key {key}")
@@ -509,6 +482,29 @@ fn peeringdb_headers(api_key: Option<&str>) -> Result<HeaderMap, ProviderError> 
         headers.insert(AUTHORIZATION, value);
     }
     Ok(headers)
+}
+
+pub(super) async fn get_json(
+    client: &reqwest::Client,
+    url: &str,
+    headers: HeaderMap,
+) -> Result<Option<Value>, ProviderError> {
+    let response = client.get(url).headers(headers).send().await?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        return Err(ProviderError::from_status(
+            status.as_u16(),
+            parse_retry_after(response.headers()),
+        ));
+    }
+    let body = response
+        .json::<Value>()
+        .await
+        .map_err(|e| ProviderError::Parse(e.to_string()))?;
+    Ok(Some(body))
 }
 
 fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
@@ -523,21 +519,6 @@ fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
 }
 
 const WHOIS_RESPONSE_LIMIT: u64 = 64 * 1024;
-const IX_CACHE_KEY: &str = "ix-lans";
-/// PeeringDB limits repeated anonymous requests for responses above 100 kB
-/// to one per hour, so the IX list is downloaded at most once a day and
-/// "Force fresh lookups" does not download it again.
-const IX_TTL_MS: i64 = 24 * 3_600_000;
-/// An older list is still used when a refresh fails.
-const IX_MAX_STALE_MS: i64 = 7 * 24 * 3_600_000;
-const IX_FAILURE_BACKOFF: Duration = Duration::from_secs(15 * 60);
-const IX_OBJECTS: [(&str, &str); 5] = [
-    ("ixpfx", "ixlan_id,prefix"),
-    ("ixlan", "id,ix_id"),
-    ("ix", "id,name,city,country"),
-    ("ixfac", "ix_id,fac_id"),
-    ("fac", "id,latitude,longitude"),
-];
 const PRIVATE_ADDRESS_MESSAGE: &str =
     "Private or non-routable address; not sent to external providers.";
 const DISABLED_MESSAGE: &str = "Disabled in Integration settings.";
@@ -545,10 +526,17 @@ const DISABLED_MESSAGE: &str = "Disabled in Integration settings.";
 impl EnrichmentService {
     pub fn new(config: EnrichmentConfig) -> Self {
         let ttl_ms = i64::try_from(config.ttl.as_millis()).unwrap_or(i64::MAX);
-        let cache = match &config.cache_path {
-            Some(path) => EnrichmentCache::load(path, now_ms(), ttl_ms),
-            None => EnrichmentCache::default(),
-        };
+        let cache = Arc::new(ProviderCache::new(config.cache_path, ttl_ms));
+        let limits = ProviderLimits::default();
+        let ix = Arc::new(IxStore::new(
+            config.client.clone(),
+            config.endpoints.peering_db_base.clone(),
+            config.retry.clone(),
+            config.provider_budget,
+            config.ix_request_spacing,
+            limits.peering_db.clone(),
+            cache.clone(),
+        ));
         Self {
             client: config.client,
             endpoints: config.endpoints,
@@ -556,58 +544,15 @@ impl EnrichmentService {
             breaker: config.breaker,
             breakers: Mutex::new(HashMap::new()),
             provider_budget: config.provider_budget,
-            ttl_ms,
-            cache_path: config.cache_path,
-            cache: Mutex::new(cache),
-            persist_lock: Mutex::new(()),
-            limits: ProviderLimits::default(),
-            ix: tokio::sync::Mutex::new(IxState::default()),
-            ix_request_spacing: config.ix_request_spacing,
+            cache,
+            limits,
+            ix,
         }
     }
 
-    /// Writes changed cache entries to disk. Errors are logged; a lost
-    /// cache only costs extra lookups.
+    /// Writes changed cache entries to disk (see `ProviderCache::persist`).
     pub fn persist(&self) {
-        self.persist_with(write_atomic);
-    }
-
-    fn persist_with(&self, write: impl FnOnce(&Path, &[u8]) -> std::io::Result<()>) {
-        let Some(path) = &self.cache_path else {
-            return;
-        };
-        let _writer = self.persist_lock.lock().unwrap_or_else(|e| e.into_inner());
-        // Serialise under the cache lock; write after it is released so
-        // lookups are not blocked by disk I/O.
-        let snapshot = {
-            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-            cache.snapshot_if_dirty(now_ms(), self.ttl_ms)
-        };
-        let bytes = match snapshot {
-            Ok(Some(bytes)) => bytes,
-            Ok(None) => return,
-            Err(err) => {
-                log::warn!("Failed to serialise enrichment cache: {err}");
-                return;
-            }
-        };
-        if let Err(err) = write(path, &bytes) {
-            log::warn!("Failed to write enrichment cache {}: {err}", path.display());
-            self.cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .mark_dirty();
-        }
-    }
-
-    fn cache_get<T: CachedProvider>(&self, key: &str) -> Option<Option<T>> {
-        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.get::<T>(key, now_ms(), self.ttl_ms)
-    }
-
-    fn cache_insert<T: CachedProvider>(&self, key: &str, record: Option<T>) {
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.insert(key, record, now_ms());
+        self.cache.persist();
     }
 
     fn breaker_open_message(&self, provider: ProviderId) -> Option<String> {
@@ -654,7 +599,7 @@ impl EnrichmentService {
     {
         let provider = T::PROVIDER;
         if !force_fresh {
-            if let Some(hit) = self.cache_get::<T>(key) {
+            if let Some(hit) = self.cache.get::<T>(key) {
                 return ProviderOutcome::answered(provider, hit, true);
             }
         }
@@ -679,7 +624,7 @@ impl EnrichmentService {
         // Another hop may have filled the cache or tripped the breaker while
         // this one waited.
         if !force_fresh {
-            if let Some(hit) = self.cache_get::<T>(key) {
+            if let Some(hit) = self.cache.get::<T>(key) {
                 return ProviderOutcome::answered(provider, hit, true);
             }
         }
@@ -693,7 +638,7 @@ impl EnrichmentService {
         drop(permit);
         match result {
             Ok(Ok(record)) => {
-                self.cache_insert(key, record.clone());
+                self.cache.insert(key, record.clone());
                 self.record_result(provider, true);
                 ProviderOutcome::answered(provider, record, false)
             }
@@ -710,29 +655,6 @@ impl EnrichmentService {
                 ProviderOutcome::failed(provider, "Timed out.".to_string())
             }
         }
-    }
-
-    async fn get_json(
-        &self,
-        url: &str,
-        headers: HeaderMap,
-    ) -> Result<Option<Value>, ProviderError> {
-        let response = self.client.get(url).headers(headers).send().await?;
-        let status = response.status();
-        if status == reqwest::StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        if !status.is_success() {
-            return Err(ProviderError::from_status(
-                status.as_u16(),
-                parse_retry_after(response.headers()),
-            ));
-        }
-        let body = response
-            .json::<Value>()
-            .await
-            .map_err(|e| ProviderError::Parse(e.to_string()))?;
-        Ok(Some(body))
     }
 
     async fn fetch_team_cymru(&self, ip: IpAddr) -> Result<Option<CymruRecord>, ProviderError> {
@@ -784,8 +706,7 @@ impl EnrichmentService {
                 .parse()
                 .expect("static header"),
         );
-        Ok(self
-            .get_json(&url, headers)
+        Ok(get_json(&self.client, &url, headers)
             .await?
             .as_ref()
             .and_then(parse_rdap))
@@ -801,7 +722,7 @@ impl EnrichmentService {
             self.endpoints.ripe_stat_base.trim_end_matches('/'),
             urlencoding::encode(source_app)
         );
-        match self.get_json(&url, HeaderMap::new()).await? {
+        match get_json(&self.client, &url, HeaderMap::new()).await? {
             Some(body) => parse_ripe_stat(&body),
             None => Ok(None),
         }
@@ -816,134 +737,10 @@ impl EnrichmentService {
             "{}/api/net?asn={asn}",
             self.endpoints.peering_db_base.trim_end_matches('/')
         );
-        Ok(self
-            .get_json(&url, peeringdb_headers(api_key)?)
+        Ok(get_json(&self.client, &url, peeringdb_headers(api_key)?)
             .await?
             .as_ref()
             .and_then(parse_peeringdb))
-    }
-
-    /// Downloads the five PeeringDB lists that make up the IX dataset, one
-    /// request at a time, each with retries and the PeeringDB slot.
-    async fn fetch_ix_dataset(&self, api_key: Option<&str>) -> Result<IxDataset, String> {
-        let headers = peeringdb_headers(api_key).map_err(|e| e.describe())?;
-        let base = self.endpoints.peering_db_base.trim_end_matches('/');
-        let mut bodies = Vec::with_capacity(IX_OBJECTS.len());
-        for (position, (object, fields)) in IX_OBJECTS.iter().enumerate() {
-            if position > 0 {
-                tokio::time::sleep(self.ix_request_spacing).await;
-            }
-            let url = format!("{base}/api/{object}?fields={fields}");
-            let label = format!("PeeringDB {object} list");
-            let Ok(Ok(_permit)) =
-                tokio::time::timeout(self.provider_budget, self.limits.peering_db.acquire()).await
-            else {
-                return Err("other PeeringDB lookups kept the provider busy".to_string());
-            };
-            let result = tokio::time::timeout(
-                self.provider_budget,
-                with_retry(&self.retry, &label, || self.get_json(&url, headers.clone())),
-            )
-            .await;
-            match result {
-                Ok(Ok(Some(body))) => bodies.push(body),
-                Ok(Ok(None)) => return Err(format!("{object} list not found (HTTP 404)")),
-                Ok(Err((err, attempts))) => {
-                    let plural = if attempts == 1 { "" } else { "s" };
-                    return Err(format!(
-                        "{object} list: {} after {attempts} attempt{plural}",
-                        err.describe()
-                    ));
-                }
-                Err(_) => return Err(format!("{object} list timed out")),
-            }
-        }
-        let [ixpfx, ixlan, ix, ixfac, fac] =
-            <[Value; 5]>::try_from(bodies).map_err(|_| "incomplete IX download".to_string())?;
-        build_dataset(&IxResponses {
-            ixpfx,
-            ixlan,
-            ix,
-            ixfac,
-            fac,
-        })
-    }
-
-    /// The IX index from memory, the persisted cache, or a PeeringDB
-    /// download, in that order. One caller downloads; the others wait for
-    /// its result. After a failed download, PeeringDB is not asked again
-    /// for `IX_FAILURE_BACKOFF`, and a list up to `IX_MAX_STALE_MS` old is
-    /// used instead.
-    async fn ix_index(&self, api_key: Option<&str>) -> Result<IxLoad, String> {
-        let Ok(mut state) = tokio::time::timeout(self.provider_budget, self.ix.lock()).await else {
-            return Err("the IX list is still downloading".to_string());
-        };
-        let now = now_ms();
-        let fresh = |stored_at: i64| (0..IX_TTL_MS).contains(&(now - stored_at));
-        if state.loaded.is_none() {
-            let cached = {
-                let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-                cache.get_stored::<IxDataset>(IX_CACHE_KEY, now, IX_MAX_STALE_MS)
-            };
-            if let Some((Some(dataset), stored_at_ms)) = cached {
-                state.loaded = Some(LoadedIx {
-                    index: Arc::new(IxIndex::new(dataset)),
-                    stored_at_ms,
-                });
-            }
-        }
-        if let Some(loaded) = state.loaded.as_ref().filter(|l| fresh(l.stored_at_ms)) {
-            return Ok(IxLoad {
-                index: loaded.index.clone(),
-                downloaded_now: false,
-                stale: None,
-            });
-        }
-
-        let recent_failure = state
-            .last_failure
-            .as_ref()
-            .filter(|(at, _)| at.elapsed() < IX_FAILURE_BACKOFF)
-            .map(|(_, message)| message.clone());
-        let failure = match recent_failure {
-            Some(message) => message,
-            None => match self.fetch_ix_dataset(api_key).await {
-                Ok(dataset) => {
-                    self.cache_insert(IX_CACHE_KEY, Some(dataset.clone()));
-                    let index = Arc::new(IxIndex::new(dataset));
-                    log::info!(
-                        "Loaded {} IX peering LAN prefixes from PeeringDB",
-                        index.prefix_count()
-                    );
-                    state.loaded = Some(LoadedIx {
-                        index: index.clone(),
-                        stored_at_ms: now,
-                    });
-                    state.last_failure = None;
-                    return Ok(IxLoad {
-                        index,
-                        downloaded_now: true,
-                        stale: None,
-                    });
-                }
-                Err(message) => {
-                    log::warn!("PeeringDB IX list download failed: {message}");
-                    state.last_failure = Some((Instant::now(), message.clone()));
-                    message
-                }
-            },
-        };
-        match &state.loaded {
-            Some(loaded) if now - loaded.stored_at_ms < IX_MAX_STALE_MS => Ok(IxLoad {
-                index: loaded.index.clone(),
-                downloaded_now: false,
-                stale: Some(format!(
-                    "Using the IX list from {} h ago; refresh failed: {failure}.",
-                    (now - loaded.stored_at_ms) / 3_600_000
-                )),
-            }),
-            _ => Err(failure),
-        }
     }
 
     async fn ixp_lookup(
@@ -955,9 +752,15 @@ impl EnrichmentService {
         if !settings.peering_db.enabled {
             return ProviderOutcome::skipped(provider, DISABLED_MESSAGE);
         }
-        let load = match self.ix_index(settings.peering_db.api_key.as_deref()).await {
+        let load = match self.ix.index(settings.peering_db.api_key.as_deref()).await {
             Ok(load) => load,
-            Err(message) => {
+            Err(IxUnavailable::Busy) => {
+                return ProviderOutcome::skipped(
+                    provider,
+                    "Not queried: another lookup is still downloading the IX list.",
+                )
+            }
+            Err(IxUnavailable::Failed(message)) => {
                 return ProviderOutcome::failed(
                     provider,
                     format!("IX list unavailable: {message}."),
@@ -972,8 +775,8 @@ impl EnrichmentService {
             ),
             None => "Not on a known IX peering LAN.".to_string(),
         };
-        let message = match load.stale {
-            Some(stale) => format!("{found} {stale}"),
+        let message = match load.note {
+            Some(note) => format!("{found} {note}"),
             None => found,
         };
         let mut status = ProviderStatus::new(provider, ProviderState::Success, message);
@@ -1096,7 +899,13 @@ impl EnrichmentService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::ix_list::IX_CACHE_KEY;
     use crate::commands::persistence::IntegrationSettings;
+    use crate::geoloc::ixp::build_dataset;
+
+    fn now_ms() -> i64 {
+        chrono::Utc::now().timestamp_millis()
+    }
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::sync::Arc;
@@ -1748,12 +1557,7 @@ mod tests {
             .await;
         service.persist();
 
-        let mut cache = service.cache.lock().unwrap();
-        assert!(cache
-            .snapshot_if_dirty(now_ms(), service.ttl_ms)
-            .unwrap()
-            .is_some());
-        drop(cache);
+        assert!(service.cache.has_unsaved_changes());
         std::fs::remove_file(&blocker).unwrap();
     }
 
@@ -1895,82 +1699,63 @@ mod tests {
         );
         assert_eq!(ix_hits(&hits), [1, 1, 1, 1, 3]);
 
-        // A list from yesterday is used when the refresh fails.
+        // A list from yesterday is used at once while the refresh runs,
+        // and still after the refresh failed.
         let older = self::service(http, whois, None);
         let dataset = build_dataset(&crate::geoloc::ixp::tests::real_responses()).unwrap();
         older
             .cache
-            .lock()
-            .unwrap()
-            .insert(IX_CACHE_KEY, Some(dataset), now_ms() - 25 * 3_600_000);
+            .insert_at(IX_CACHE_KEY, Some(dataset), now_ms() - 25 * 3_600_000);
+        let ix_message = |result: &Enrichment| {
+            status(result, ProviderId::PeeringDbIx)
+                .message
+                .clone()
+                .unwrap()
+        };
         let stale = older
             .enrich(ip("80.81.194.152"), no_geolite(), &settings, false)
             .await;
         assert_eq!(stale.ixp.as_ref().unwrap().info.name, "DE-CIX Frankfurt");
-        let message = status(&stale, ProviderId::PeeringDbIx)
-            .message
-            .clone()
-            .unwrap();
         assert!(
-            message.contains("Using the IX list from 25 h ago; refresh failed"),
-            "{message}"
+            ix_message(&stale).contains("from 25 h ago while a newer one downloads"),
+            "{}",
+            ix_message(&stale)
+        );
+        let mut after_failure = String::new();
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let result = older
+                .enrich(ip("80.81.194.152"), no_geolite(), &settings, false)
+                .await;
+            after_failure = ix_message(&result);
+            if after_failure.contains("refresh failed") {
+                assert_eq!(result.ixp.as_ref().unwrap().info.name, "DE-CIX Frankfurt");
+                break;
+            }
+        }
+        assert!(
+            after_failure.contains("Using the IX list from 25 h ago; refresh failed: fac list"),
+            "{after_failure}"
         );
     }
 
-    #[test]
-    fn concurrent_persists_never_write_an_older_snapshot_last() {
-        use std::sync::mpsc;
-
-        let dir = std::env::temp_dir().join(format!("vistracer-persist-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("enrichment-cache.json");
-        let service = EnrichmentService::new(EnrichmentConfig {
-            client: reqwest::Client::new(),
-            endpoints: ProviderEndpoints::default(),
-            retry: RetryPolicy::default(),
-            breaker: BreakerPolicy::default(),
-            provider_budget: Duration::from_secs(1),
-            ttl: Duration::from_secs(3600),
-            cache_path: Some(path.clone()),
-            ix_request_spacing: Duration::ZERO,
-        });
-        let record = |asn| CymruRecord {
-            asn: Some(asn),
-            prefix: None,
-            country: None,
-            registry: None,
-            as_name: None,
-        };
-        service.cache_insert("1.1.1.1", Some(record(13335)));
-
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel::<()>();
-        std::thread::scope(|scope| {
-            // The first run's write is slow (busy disk) and holds an older
-            // snapshot while the second run finishes.
-            let service = &service;
-            scope.spawn(move || {
-                service.persist_with(move |path, bytes| {
-                    entered_tx.send(()).unwrap();
-                    release_rx.recv().unwrap();
-                    write_atomic(path, bytes)
-                });
-            });
-            entered_rx.recv().unwrap();
-            service.cache_insert("8.8.8.8", Some(record(15169)));
-            let second = scope.spawn(move || service.persist());
-            std::thread::sleep(Duration::from_millis(100));
-            release_tx.send(()).unwrap();
-            second.join().unwrap();
-        });
-
-        let loaded = EnrichmentCache::load(&path, now_ms(), service.ttl_ms);
+    #[tokio::test]
+    async fn waiting_for_the_ix_download_is_not_a_failure() {
+        let (http, hits) = mock_http(vec![]).await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service_with_budget(http, whois, None, Duration::from_millis(200));
+        // A download is running and there is no older list to use.
+        service.ix.mark_downloading();
+        let result = service
+            .enrich(ip("80.81.194.152"), no_geolite(), &ix_only(http), false)
+            .await;
+        let waited = status(&result, ProviderId::PeeringDbIx);
+        assert_eq!(waited.status, ProviderState::Skipped);
         assert_eq!(
-            loaded.get::<CymruRecord>("8.8.8.8", now_ms(), service.ttl_ms),
-            Some(Some(record(15169))),
-            "the newer snapshot must be the one on disk"
+            waited.message.as_deref(),
+            Some("Not queried: another lookup is still downloading the IX list.")
         );
-        assert!(!path.with_extension("json.tmp").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(ix_hits(&hits), [0, 0, 0, 0, 0]);
     }
 
     #[tokio::test]
