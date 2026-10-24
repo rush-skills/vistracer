@@ -15,11 +15,12 @@ use crate::types::{
 use reqwest::header::{HeaderMap, ACCEPT, AUTHORIZATION, RETRY_AFTER};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 
@@ -359,10 +360,35 @@ impl Default for ProviderLimits {
     }
 }
 
+/// After `threshold` failed lookups in a row, a provider is skipped for
+/// `cooldown`. Without this, a provider that times out holds every hop of a
+/// run for the full budget, one or two hops at a time.
+#[derive(Debug, Clone)]
+pub struct BreakerPolicy {
+    pub threshold: u32,
+    pub cooldown: Duration,
+}
+
+impl Default for BreakerPolicy {
+    fn default() -> Self {
+        Self {
+            threshold: 3,
+            cooldown: Duration::from_secs(60),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct BreakerState {
+    consecutive_failures: u32,
+    open_until: Option<Instant>,
+}
+
 pub struct EnrichmentConfig {
     pub client: reqwest::Client,
     pub endpoints: ProviderEndpoints,
     pub retry: RetryPolicy,
+    pub breaker: BreakerPolicy,
     /// Upper bound for one provider lookup, retries included.
     pub provider_budget: Duration,
     pub ttl: Duration,
@@ -383,6 +409,7 @@ impl EnrichmentConfig {
             client,
             endpoints: ProviderEndpoints::default(),
             retry: RetryPolicy::default(),
+            breaker: BreakerPolicy::default(),
             provider_budget: Duration::from_secs(25),
             ttl,
             cache_path: Some(cache_path),
@@ -394,6 +421,8 @@ pub struct EnrichmentService {
     client: reqwest::Client,
     endpoints: ProviderEndpoints,
     retry: RetryPolicy,
+    breaker: BreakerPolicy,
+    breakers: Mutex<HashMap<ProviderId, BreakerState>>,
     provider_budget: Duration,
     ttl_ms: i64,
     cache_path: Option<PathBuf>,
@@ -465,6 +494,8 @@ impl EnrichmentService {
             client: config.client,
             endpoints: config.endpoints,
             retry: config.retry,
+            breaker: config.breaker,
+            breakers: Mutex::new(HashMap::new()),
             provider_budget: config.provider_budget,
             ttl_ms,
             cache_path: config.cache_path,
@@ -495,6 +526,36 @@ impl EnrichmentService {
         cache.insert(key, record, now_ms());
     }
 
+    fn breaker_open_message(&self, provider: ProviderId) -> Option<String> {
+        let breakers = self.breakers.lock().unwrap_or_else(|e| e.into_inner());
+        let open_until = breakers.get(&provider)?.open_until?;
+        let remaining = open_until.checked_duration_since(Instant::now())?;
+        Some(format!(
+            "Skipped: failed {} times in a row. Retrying in {} s.",
+            self.breaker.threshold,
+            remaining.as_secs().max(1)
+        ))
+    }
+
+    fn record_result(&self, provider: ProviderId, success: bool) {
+        let mut breakers = self.breakers.lock().unwrap_or_else(|e| e.into_inner());
+        let state = breakers.entry(provider).or_default();
+        if success {
+            *state = BreakerState::default();
+            return;
+        }
+        state.consecutive_failures += 1;
+        if state.consecutive_failures >= self.breaker.threshold {
+            state.open_until = Some(Instant::now() + self.breaker.cooldown);
+            state.consecutive_failures = 0;
+            log::warn!(
+                "{provider:?}: {} failures in a row, pausing lookups for {:?}",
+                self.breaker.threshold,
+                self.breaker.cooldown
+            );
+        }
+    }
+
     async fn cached_lookup<T, F, Fut>(
         &self,
         key: &str,
@@ -513,32 +574,41 @@ impl EnrichmentService {
                 return ProviderOutcome::answered(provider, hit, true);
             }
         }
-
-        let Ok(_permit) = limit.acquire().await else {
-            return ProviderOutcome::failed(provider, "Provider limiter closed.".to_string());
-        };
-        // Another hop may have fetched the same key while this one waited.
-        if !force_fresh {
-            if let Some(hit) = self.cache_get::<T>(key) {
-                return ProviderOutcome::answered(provider, hit, true);
-            }
+        if let Some(message) = self.breaker_open_message(provider) {
+            return ProviderOutcome::failed(provider, message);
         }
 
         let label = format!("{provider:?} {key}");
-        match tokio::time::timeout(self.provider_budget, with_retry(&self.retry, &label, fetch))
-            .await
-        {
-            Ok(Ok(record)) => {
+        // The budget includes the wait for a provider slot, so queued hops
+        // cannot stretch a run beyond it.
+        let lookup = async {
+            let _permit = limit.acquire().await.ok();
+            // Another hop may have fetched the same key while this one waited.
+            if !force_fresh {
+                if let Some(hit) = self.cache_get::<T>(key) {
+                    return Ok((hit, true));
+                }
+            }
+            with_retry(&self.retry, &label, fetch)
+                .await
+                .map(|record| (record, false))
+        };
+        match tokio::time::timeout(self.provider_budget, lookup).await {
+            Ok(Ok((record, true))) => ProviderOutcome::answered(provider, record, true),
+            Ok(Ok((record, false))) => {
                 self.cache_insert(key, record.clone());
+                self.record_result(provider, true);
                 ProviderOutcome::answered(provider, record, false)
             }
             Ok(Err((err, attempts))) => {
+                self.record_result(provider, false);
                 let plural = if attempts == 1 { "" } else { "s" };
                 let message = format!("{} after {attempts} attempt{plural}.", err.describe());
                 log::warn!("{label}: {message}");
                 ProviderOutcome::failed(provider, message)
             }
             Err(_) => {
+                self.record_result(provider, false);
                 log::warn!("{label}: lookup exceeded {:?}", self.provider_budget);
                 ProviderOutcome::failed(provider, "Timed out.".to_string())
             }
@@ -583,7 +653,25 @@ impl EnrichmentService {
             .read_to_end(&mut response)
             .await
             .map_err(network)?;
-        Ok(parse_team_cymru(&String::from_utf8_lossy(&response), ip))
+        let text = String::from_utf8_lossy(&response);
+        // An empty reply is a dropped connection, not "no record"; it must
+        // not be cached.
+        if text.trim().is_empty() {
+            return Err(ProviderError::Network(
+                "Team Cymru closed the connection without an answer".to_string(),
+            ));
+        }
+        if !text.contains("Bulk mode") && !text.contains('|') {
+            let first_line: String = text
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .chars()
+                .take(120)
+                .collect();
+            return Err(ProviderError::Parse(first_line));
+        }
+        Ok(parse_team_cymru(&text, ip))
     }
 
     async fn fetch_rdap(
@@ -1046,6 +1134,10 @@ mod tests {
                 max_delay: Duration::from_millis(5),
                 attempt_timeout: Duration::from_secs(2),
             },
+            breaker: BreakerPolicy {
+                threshold: 3,
+                cooldown: Duration::from_millis(300),
+            },
             provider_budget: Duration::from_secs(10),
             ttl: Duration::from_secs(3600),
             cache_path,
@@ -1209,6 +1301,91 @@ mod tests {
         assert_eq!(
             status(&result, ProviderId::MaxMind).status,
             ProviderState::Success
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_failures_pause_the_provider_then_retry() {
+        let (http, hits) = mock_http(vec![
+            ("/rdap/ip", vec![(500, vec![], "{}".into())]),
+            (
+                "/data/prefix-overview",
+                vec![(200, vec![], RIPESTAT.to_string())],
+            ),
+        ])
+        .await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+        let mut settings = settings(http);
+        settings.peering_db.enabled = false;
+
+        for addr in ["8.8.8.8", "8.8.4.4", "1.1.1.1"] {
+            let result = service
+                .enrich(ip(addr), no_geolite(), &settings, false)
+                .await;
+            assert_eq!(
+                status(&result, ProviderId::Rdap).status,
+                ProviderState::Error
+            );
+        }
+        assert_eq!(hits.count("/rdap/ip"), 9, "3 lookups x 3 attempts");
+
+        let paused = service
+            .enrich(ip("9.9.9.9"), no_geolite(), &settings, false)
+            .await;
+        let rdap = status(&paused, ProviderId::Rdap);
+        assert_eq!(rdap.status, ProviderState::Error);
+        assert!(rdap
+            .message
+            .as_deref()
+            .unwrap()
+            .starts_with("Skipped: failed 3 times"));
+        assert_eq!(hits.count("/rdap/ip"), 9, "no request while paused");
+        assert_eq!(
+            status(&paused, ProviderId::RipeStat).status,
+            ProviderState::Success
+        );
+
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        service
+            .enrich(ip("9.9.9.9"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(
+            hits.count("/rdap/ip"),
+            12,
+            "lookups resume after the cooldown"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_whois_reply_is_an_error_and_not_cached() {
+        let (http, _) = mock_http(vec![]).await;
+        let (whois, whois_hits) = mock_whois("").await;
+        let service = service(http, whois, None);
+        let mut settings = settings(http);
+        settings.rdap.enabled = false;
+        settings.ripe_stat.enabled = false;
+        settings.peering_db.enabled = false;
+
+        let first = service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        let cymru = status(&first, ProviderId::TeamCymru);
+        assert_eq!(cymru.status, ProviderState::Error);
+        assert!(cymru
+            .message
+            .as_deref()
+            .unwrap()
+            .contains("without an answer"));
+        assert_eq!(whois_hits.load(std::sync::atomic::Ordering::SeqCst), 3);
+
+        service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(
+            whois_hits.load(std::sync::atomic::Ordering::SeqCst),
+            6,
+            "nothing was cached"
         );
     }
 

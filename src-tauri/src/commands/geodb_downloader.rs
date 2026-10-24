@@ -28,7 +28,8 @@ async fn download_file(url: &str, dest: &Path) -> Result<(), String> {
         .header("User-Agent", "VisTracer/0.2 (GeoIP database downloader)")
         .send()
         .await
-        .map_err(|e| format!("Download failed: {}", e))?;
+        // The URL carries the license key; keep it out of logs and the UI.
+        .map_err(|e| format!("Download failed: {}", e.without_url()))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -43,7 +44,7 @@ async fn download_file(url: &str, dest: &Path) -> Result<(), String> {
     let bytes = resp
         .bytes()
         .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
+        .map_err(|e| format!("Failed to read response: {}", e.without_url()))?;
 
     tokio::fs::write(dest, &bytes)
         .await

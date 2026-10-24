@@ -45,9 +45,12 @@ flowchart LR
    other characters than letters, digits, `.`, `-`, `:`, `_`, `%` are rejected.
 2. **Spawn and read** (`commands/traceroute.rs`). A reader task forwards
    stdout lines. macOS TCP traces need root, so they run through the
-   `osascript` administrator prompt, write to a temp file, and the reader
-   follows that file. The elevated binary must be a root-owned file in a
-   root-only system directory; `PATH` is not used for it.
+   `osascript` administrator prompt and write to a temp file that the reader
+   follows. The elevated binary must be a root-owned file in a root-only
+   system directory; `PATH` is not used for it. The root shell creates the
+   output file itself (`set -C`, one redirection), so a symlink planted in
+   the temp folder cannot make root overwrite another file. On Windows,
+   `tracert` starts without a console window.
 3. **Parse** (`commands/traceroute_parse.rs`). Every responder on a line is
    kept: Linux prints load-balanced responders on one line, macOS prints them
    on indented lines without a hop number, Windows puts the RTT columns before
@@ -62,7 +65,8 @@ flowchart LR
    responder is upgraded to a full lookup.
 6. **Finish**. After the process exits and the lookups finish, the backend
    emits the completed run and writes the provider cache to disk. Cancel
-   kills the process and aborts the lookups in flight.
+   kills the process and aborts the lookups in flight, also when the process
+   has already exited and only lookups are left.
 
 ### Linux privileges
 
@@ -88,13 +92,19 @@ responses in `src-tauri/fixtures/providers/`) and the merge.
 
 Rules:
 
-- Private, CGNAT (100.64/10), link-local, loopback, multicast and
-  documentation addresses are never sent to a provider.
+- Private, CGNAT (100.64/10), link-local, loopback, multicast,
+  documentation, benchmarking/"fake IP" (198.18/15), reserved (240/4) and
+  IPv4-mapped private addresses are never sent to a provider.
+- An empty Team Cymru reply is a retryable error and is not cached.
 - Each provider call goes through the cache, then the provider's concurrency
   limit, then the cache again (another hop may have filled it), then
   `with_retry`. Retries happen on HTTP 429, 5xx, timeouts and connection
   errors: 3 attempts, exponential backoff from 500 ms to 8 s with jitter, and
-  a server `Retry-After` is honoured. One provider lookup has a 25 s budget.
+  a server `Retry-After` is honoured. One provider lookup has a 25 s budget,
+  which includes the wait for a free provider slot.
+- After 3 failed lookups in a row, a provider is skipped for 60 s (its
+  status says so). A provider that is down therefore costs a few timeouts per
+  run instead of one timeout per hop.
 - "No record" answers are cached too, so repeated misses do not hit the
   network. Errors are not cached. "Force fresh lookups" skips cache reads.
 - A failed provider reports `status: "error"` with a message. The hop keeps

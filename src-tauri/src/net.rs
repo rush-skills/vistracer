@@ -69,27 +69,40 @@ pub fn is_private_ip(ip: &str) -> bool {
 pub fn is_publicly_routable(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
+            let [a, b, c, _] = v4.octets();
+            let this_network = a == 0;
             let shared_cgnat = a == 100 && (64..=127).contains(&b);
+            let ietf_assignments = a == 192 && b == 0 && c == 0;
+            // 198.18.0.0/15 is the benchmarking range; VPN and proxy apps use
+            // it for "fake IP" DNS answers.
+            let benchmarking = a == 198 && (b == 18 || b == 19);
+            let reserved = a >= 240;
             !(v4.is_private()
                 || v4.is_loopback()
                 || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
                 || v4.is_documentation()
                 || v4.is_multicast()
-                || shared_cgnat)
+                || this_network
+                || shared_cgnat
+                || ietf_assignments
+                || benchmarking
+                || reserved)
         }
         IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_publicly_routable(IpAddr::V4(v4));
+            }
             let first = v6.segments()[0];
             let unique_local = (first & 0xfe00) == 0xfc00;
             let link_local = (first & 0xffc0) == 0xfe80;
+            let site_local = (first & 0xffc0) == 0xfec0;
             let documentation = first == 0x2001 && v6.segments()[1] == 0x0db8;
             !(v6.is_loopback()
                 || v6.is_unspecified()
                 || v6.is_multicast()
                 || unique_local
                 || link_local
+                || site_local
                 || documentation)
         }
     }
@@ -114,6 +127,16 @@ mod tests {
         assert!(!routable("fd12::1"));
         assert!(!routable("2001:db8::1"));
         assert!(!routable("::1"));
+        assert!(!routable("0.1.2.3"));
+        assert!(!routable("192.0.0.9"));
+        assert!(!routable("198.18.0.1"));
+        assert!(!routable("198.19.255.1"));
+        assert!(routable("198.20.0.1"));
+        assert!(!routable("240.0.0.1"));
+        assert!(!routable("255.255.255.255"));
+        assert!(!routable("::ffff:10.0.0.1"));
+        assert!(routable("::ffff:8.8.8.8"));
+        assert!(!routable("fec0::1"));
     }
 
     #[test]

@@ -27,7 +27,7 @@ export interface IntegrationSettingsFormState {
   peeringDbApiKey: string;
 }
 
-export const DEFAULT_RDAP_BASE_URL = "https://rdap.org/ip";
+const DEFAULT_RDAP_BASE_URL = "https://rdap.org/ip";
 
 const defaultFormState: IntegrationSettingsFormState = {
   teamCymruEnabled: true,
