@@ -424,6 +424,10 @@ describe("HopDetailsPane", () => {
     expect(fact(location, "RTT check")).toBe(
       "Conflicts with hop 1's GeoLite2 city estimate: 1,139 km away, but 155.32 ms (hop 6) allows at most 840 km. Kept, because this source is at least as strong as that estimate; one of the two is wrong."
     );
+    const row = screen
+      .getAllByRole("button")
+      .find((el) => el.textContent?.includes("154.54.56.85")) as HTMLElement;
+    expect(within(row).getByText("conflict")).toBeTruthy();
   });
 
   it("marks anycast hops and draws no point for them", () => {

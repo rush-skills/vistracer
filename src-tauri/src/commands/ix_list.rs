@@ -27,6 +27,9 @@ pub(crate) const IX_MAX_STALE_MS: i64 = 7 * 24 * 3_600_000;
 const IX_FAILURE_BACKOFF: Duration = Duration::from_secs(15 * 60);
 /// A 429 means PeeringDB's one-per-hour rule; asking again sooner fails.
 const IX_RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(3600);
+/// `Retry-After` comes from the server; a larger value is capped here so
+/// that one answer cannot turn exchange matching off for the session.
+const IX_MAX_BACKOFF: Duration = Duration::from_secs(24 * 3600);
 /// Five requests, each with its own budget and retries, plus the spacing.
 const IX_DOWNLOAD_BUDGET: Duration = Duration::from_secs(150);
 const IX_OBJECTS: [(&str, &str); 5] = [
@@ -98,6 +101,15 @@ pub struct IxStore {
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
+}
+
+/// `Instant + Duration` panics on overflow, and release builds abort on a
+/// panic, so the sum is checked.
+fn retry_at(backoff: Duration) -> Instant {
+    let now = Instant::now();
+    now.checked_add(backoff.min(IX_MAX_BACKOFF))
+        .or_else(|| now.checked_add(IX_FAILURE_BACKOFF))
+        .unwrap_or(now)
 }
 
 impl IxStore {
@@ -237,7 +249,7 @@ impl IxStore {
                     log::warn!("PeeringDB IX list download failed: {message}");
                     state.last_failure = Some(IxFailure {
                         message,
-                        retry_at: Instant::now() + backoff,
+                        retry_at: retry_at(backoff),
                     });
                 }
             }
@@ -296,7 +308,9 @@ impl IxStore {
                     )))
                 }
                 Ok(Ok(Err(retry_after))) => {
-                    let backoff = IX_RATE_LIMIT_BACKOFF.max(retry_after.unwrap_or_default());
+                    let backoff = IX_RATE_LIMIT_BACKOFF
+                        .max(retry_after.unwrap_or_default())
+                        .min(IX_MAX_BACKOFF);
                     return Err(FetchError {
                         message: format!(
                             "{object} list: rate limited by PeeringDB (HTTP 429); next attempt in {} min",

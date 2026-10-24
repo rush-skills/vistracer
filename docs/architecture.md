@@ -231,14 +231,22 @@ The Delhi hint fails the check (1,139 km, 840 km allowed) but stays best,
 and the hop stays on the globe. A GeoLite2 country centroid (low), such as
 8.8.8.8 at the US centroid, is still ruled out.
 
-This is the simpler of the two fixes the review offered (the other was to
-validate the reference and replace it). It changes one decision, never hides
-a hop because of a weaker anchor, and keeps the checks that matter most: low
-confidence country centroids and registered addresses far from the path. A feasible candidate is **tightened** when the whole
-area within `max` of the reference lies inside its radius (the radius
-shrinks to `distance + max`), and **widened** when that area starts beyond
-its radius (the radius grows, at most to the hard radius, and confidence
-drops to low). The check never moves a candidate.
+What the check removes therefore depends on the reference. The usual
+reference is the first hop's GeoLite2 city record (medium). Against it, only
+low-confidence candidates are ruled out: GeoLite2 country centroids and
+GeoLite2 city records with a radius above 100 km. A GeoLite2 city record of
+another hop with a radius up to 100 km is also medium, so it is kept as a
+conflict even when it is a registered address far from the path. A conflict
+ring on the globe uses the low-confidence style, and the hop table shows a
+"conflict" tag.
+
+A feasible candidate is **tightened** when the whole area within `max` of
+the reference lies inside its radius (the radius shrinks to
+`distance + max`), and **widened** when that area starts beyond its radius
+(the radius grows, at most to the hard radius). A widened candidate drops
+to low confidence only when it is weaker than the reference; otherwise it
+would lose the ranking to a weaker record, which is what the conflict rule
+prevents. The check never moves a candidate.
 
 - **Reference hop.** The app does not know the user's own address, so the
   reference is the first public hop whose best candidate has a radius of at
@@ -303,7 +311,10 @@ download ends.
   7 days old is used meanwhile; the provider status says the refresh
   failed.
 - An HTTP 429 from PeeringDB is final: no retry within seconds, and no new
-  download for `max(1 h, Retry-After)`, because the limit is per hour.
+  download for `max(1 h, Retry-After)`, at most 24 h, because the limit is
+  per hour. The cap keeps one server answer from turning exchange matching
+  off for the session. This backoff is kept in memory only: after a restart
+  within the hour, the app sends one more request, which gets a 429 again.
 - The provider cache keeps entries for at least 7 days, also when the
   provider TTL (`cacheSettings.enrichmentTtlMs`) is shorter, so a short TTL
   cannot make the app download the list more than once a day. The cache
@@ -319,6 +330,11 @@ download ends.
   public hop in Mumbai (medium) while the user is in Delhi; a low-confidence
   GeoLite2 record that correctly says Delhi for a hop 3 ms away is ruled
   out. Candidates as strong as the reference are kept as conflicts.
+- The reverse also holds: with a medium GeoLite2 reference, a wrong
+  medium GeoLite2 record of another hop (a registered address with a radius
+  up to 100 km, for example "Ashburn ±20 km" for a router 3 ms from Mumbai)
+  is kept as a conflict and drawn. The anycast-operator rule has the same
+  limit: it applies only when GeoLite2 is weaker than the reference.
 - Remote peering: an address on an IX peering LAN can belong to a router
   far from the exchange (connected over a long-distance link). The IX
   candidate is still high confidence up to 150 km.

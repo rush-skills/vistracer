@@ -49,6 +49,10 @@ describe("IntegrationSettingsModal providers", () => {
       )
     ).toBeTruthy();
     expect(input("PeeringDB API key").type).toBe("password");
+    // The exchange list download uses the key too, so it stays editable
+    // while either switch is on.
+    expect(input("PeeringDB API key").disabled).toBe(false);
+    fireEvent.click(checkbox("Internet exchanges"));
     expect(input("PeeringDB API key").disabled).toBe(true);
   });
 

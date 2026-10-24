@@ -199,7 +199,10 @@ export function buildConfidenceRings(
     if (!position || position.radiusKm <= 0 || position.radiusKm > MAX_RING_RADIUS_KM) {
       return [];
     }
-    const style = RING_STYLES[position.confidence];
+    // A conflict keeps its confidence for ranking, but the RTT check
+    // disagrees with it, so its ring looks as uncertain as a low estimate.
+    const style =
+      position.rtt?.verdict === "conflict" ? RING_STYLES.low : RING_STYLES[position.confidence];
     const selected = hop.hopIndex === selectedHopIndex;
     return [
       {

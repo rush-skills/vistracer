@@ -1758,7 +1758,9 @@ mod tests {
 
     #[tokio::test]
     async fn rate_limited_ix_download_is_final_and_backs_off_at_least_an_hour() {
-        for (retry_after, minutes) in [("0", 60), ("7200", 120)] {
+        // u64::MAX seconds would overflow `Instant + Duration`; it is capped
+        // at 24 h.
+        for (retry_after, minutes) in [("0", 60), ("7200", 120), ("18446744073709551615", 1440)] {
             let mut routes = ix_routes(fac_fixture());
             routes[0] = (
                 "/api/ixpfx",

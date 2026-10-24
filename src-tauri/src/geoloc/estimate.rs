@@ -262,7 +262,11 @@ fn apply_rtt(estimate: &mut LocationEstimate, reference: &RttReference, bound: R
             check.verdict = RttVerdict::Conflict;
         }
         RttVerdict::Widened => {
-            estimate.confidence = LocationConfidence::Low;
+            // Lowering a candidate that is as strong as the reference would
+            // let a weaker record win the ranking, as a hard veto would.
+            if estimate.confidence < reference.confidence {
+                estimate.confidence = LocationConfidence::Low;
+            }
             estimate.radius_km = radius;
         }
         _ => estimate.radius_km = radius,
@@ -707,16 +711,30 @@ mod tests {
     }
 
     #[test]
-    fn widened_estimate_drops_to_low_confidence() {
-        let mumbai = geo(MUMBAI.0, MUMBAI.1, Some("Mumbai"), "IN", 20.0);
-        // ~845 km away with radius 100 (hard 200) and a 740 km limit.
+    fn widened_estimate_grows_and_drops_confidence_only_when_weaker() {
+        // ~845 km from Mumbai with radius 100 (hard 200), medium confidence.
         let bangalore = geo(12.9716, 77.5946, Some("Bengaluru"), "IN", 100.0);
-        let mut reference = input(1, "49.44.1.1", 2.0);
-        reference.geolite = Some(&mumbai);
         let mut hop = input(2, "49.44.5.5", 4.0);
         hop.geolite = Some(&bangalore);
+
+        // Medium GeoLite2 reference (740 km limit): as strong as the
+        // candidate, so the radius grows but the confidence stays.
+        let mumbai = geo(MUMBAI.0, MUMBAI.1, Some("Mumbai"), "IN", 20.0);
+        let mut reference = input(1, "49.44.1.1", 2.0);
+        reference.geolite = Some(&mumbai);
         let best = locate_hops(&[reference, hop])[1].best.clone().unwrap();
         assert_eq!(best.rtt.as_ref().unwrap().verdict, RttVerdict::Widened);
+        assert_eq!(best.radius_km, 200.0);
+        assert_eq!(best.confidence, LocationConfidence::Medium);
+
+        // High host name reference (650 km limit): the weaker candidate is
+        // widened and drops to low.
+        let mut strong = input(1, "49.44.1.1", 1.0);
+        strong.host_name = Some("bom07s29-in-f14.1e100.net");
+        let best = locate_hops(&[strong, hop])[1].best.clone().unwrap();
+        let check = best.rtt.as_ref().unwrap();
+        assert_eq!(check.verdict, RttVerdict::Widened, "{check:?}");
+        assert_eq!(check.reference_source, LocationSource::HostnameHint);
         assert_eq!(best.radius_km, 200.0);
         assert_eq!(best.confidence, LocationConfidence::Low);
     }

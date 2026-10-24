@@ -28,7 +28,7 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (74 tests across 9 files)
+npm run test           # Run unit + component tests (75 tests across 9 files)
 npm run test:e2e       # Run e2e tests (72 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
@@ -173,7 +173,7 @@ GeoLite2 databases can be configured two ways:
 - **RIPE Stat**: Prefix and ASN holder context
 - **PeeringDB**: Network type, policy, IXP/facility counts for known ASNs (optional API key, `Authorization: Api-Key`)
 
-- **PeeringDB IX list** (`peeringdb-ix`, own switch `ixMatching`, on by default and independent of the PeeringDB switch; old settings files load with it on): five list requests 2 s apart in a background task, cached 24 h in the provider cache and written to disk when the download ends; a list up to 7 days old is served at once while a refresh runs; lookups wait (max 25 s, else `skipped`) only when there is no list; not refetched by "Force fresh" (PeeringDB allows one identical large anonymous request per hour); 15 min backoff after a failure
+- **PeeringDB IX list** (`peeringdb-ix`, own switch `ixMatching`, on by default and independent of the PeeringDB switch; old settings files load with it on): five list requests 2 s apart in a background task, cached 24 h in the provider cache and written to disk when the download ends; a list up to 7 days old is served at once while a refresh runs; lookups wait (max 25 s, else `skipped`) only when there is no list; not refetched by "Force fresh" (PeeringDB allows one identical large anonymous request per hour); 15 min backoff after a failure; a 429 is not retried and backs off max(1 h, Retry-After), capped at 24 h (in memory only)
 
 Each call: cache (7 days; RDAP keyed by base URL) → wait up to 25 s for a provider slot (else `skipped`, not a failure) → cache and circuit-breaker check → `with_retry` (429/5xx/timeouts, backoff + jitter). Failures become `status: "error"`, count toward the breaker (3 in a row pause the provider for 60 s) and never drop GeoLite2 data. Only publicly routable addresses are sent. Parsers are tested against real responses in `src-tauri/fixtures/providers/`.
 
@@ -185,11 +185,11 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 74 tests across 9 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 75 tests across 9 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 9 tests: store behavior
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
-  - `src/renderer/lib/__tests__/globe.test.ts` — 11 tests: arcs, confidence rings (radius on the sphere, styles), utilities
+  - `src/renderer/lib/__tests__/globe.test.ts` — 12 tests: arcs, confidence rings (radius on the sphere, styles, conflict style), utilities
   - `src/renderer/lib/__tests__/sun-calculation.test.ts` — 5 tests: solar position
   - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 12 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 7 tests: provider toggles, exchange matching switch, key, URL validation

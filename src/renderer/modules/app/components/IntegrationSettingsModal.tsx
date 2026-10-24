@@ -45,7 +45,7 @@ const formFromSettings = (settings: IntegrationSettings): IntegrationSettingsFor
   ripeStatEnabled: settings.ripeStat.enabled,
   peeringDbEnabled: settings.peeringDb.enabled,
   peeringDbApiKey: settings.peeringDb.apiKey ?? "",
-  ixMatchingEnabled: settings.ixMatching?.enabled ?? true
+  ixMatchingEnabled: settings.ixMatching.enabled
 });
 
 /**
@@ -496,7 +496,7 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
                   setForm((prev) => ({ ...prev, peeringDbApiKey: event.target.value }))
                 }
                 placeholder="Optional"
-                disabled={!form.peeringDbEnabled}
+                disabled={!form.peeringDbEnabled && !form.ixMatchingEnabled}
               />
               <small className="integration-settings-modal__hint">
                 Optional. Anonymous requests work but have a lower rate limit. The key is also used

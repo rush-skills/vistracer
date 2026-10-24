@@ -186,6 +186,10 @@
   background: rgba(171, 140, 255, 0.22);
 }
 
+.hop-details__tag--conflict {
+  background: rgba(255, 196, 87, 0.2);
+}
+
 .hop-details__confidence {
   display: inline-block;
   padding: 0 0.35rem;

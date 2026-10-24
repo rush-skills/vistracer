@@ -158,6 +158,32 @@ describe("confidence rings", () => {
     expect(surfaceKm(centre, rings[1].points[7])).toBeCloseTo(200, 3);
   });
 
+  it("draws a conflicting estimate with the low-confidence style", () => {
+    const location = at(28.6, 77.2, "high", 50);
+    const best = location.best;
+    if (!best) throw new Error("fixture has a best estimate");
+    const conflicting: HopLocation = {
+      ...location,
+      best: {
+        ...best,
+        rtt: {
+          verdict: "conflict",
+          distanceKm: 1139,
+          maxDistanceKm: 840,
+          originalRadiusKm: 50,
+          referenceHopIndex: 1,
+          referenceSource: "geolite-city",
+          boundHopIndex: 2,
+          boundRttMs: 5
+        }
+      }
+    };
+    const [ring] = buildConfidenceRings([baseHop({ hopIndex: 2, location: conflicting })]);
+    expect(ring.confidence).toBe("high");
+    expect(ring.radiusKm).toBe(50);
+    expect(ring).toMatchObject(RING_STYLES.low);
+  });
+
   it("emphasises the selected hop and skips useless or missing radii", () => {
     const hops = [
       baseHop({ hopIndex: 1, location: at(0, 0, "medium", 100) }),

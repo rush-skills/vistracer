@@ -156,6 +156,14 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                                 anycast
                               </span>
                             )}
+                            {hop.location.best?.rtt?.verdict === "conflict" && (
+                              <span
+                                className="hop-details__tag hop-details__tag--conflict"
+                                title="The RTT check against the reference hop disagrees with this location; one of the two is wrong."
+                              >
+                                conflict
+                              </span>
+                            )}
                           </span>
                           {hop.location.best && (
                             <small title={`Source: ${SOURCE_LABELS[hop.location.best.source]}`}>
