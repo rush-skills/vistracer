@@ -994,6 +994,10 @@ mod tests {
         /// VISTRACER_CITY_DB=/path/GeoLite2-City.mmdb VISTRACER_ASN_DB=/path/GeoLite2-ASN.mmdb \
         /// cargo test smoke_real_traceroute -- --ignored --nocapture
         /// ```
+        ///
+        /// `VISTRACER_SMOKE_PROTOCOL=ICMP`, `VISTRACER_SMOKE_MAX_HOPS`,
+        /// `VISTRACER_SMOKE_JSON_DIR` (writes the hops of each target) and
+        /// `VISTRACER_SMOKE_CACHE` (provider cache file to keep) are optional.
         #[tokio::test]
         #[ignore = "network: runs real traceroutes and queries the providers"]
         async fn smoke_real_traceroute() {
@@ -1016,13 +1020,20 @@ mod tests {
             app_store.geo.asn_db_path = std::env::var("VISTRACER_ASN_DB").ok();
             app_store.integrations.peering_db.enabled = true;
             let settings = app_store.integrations.clone();
+            // A kept cache avoids PeeringDB's one-per-hour limit on repeated
+            // large anonymous requests when the smoke test runs again.
+            let kept_cache = std::env::var("VISTRACER_SMOKE_CACHE")
+                .ok()
+                .map(PathBuf::from);
             let cache_dir =
                 std::env::temp_dir().join(format!("vistracer-smoke-{}", uuid::Uuid::new_v4()));
             let ctx = Arc::new(LookupContext {
                 store: Arc::new(Mutex::new(app_store)),
                 readers: Arc::new(Mutex::new(GeoReaders::default())),
                 enrichment: Arc::new(EnrichmentService::new(EnrichmentConfig::production(
-                    cache_dir.join("enrichment-cache.json"),
+                    kept_cache
+                        .clone()
+                        .unwrap_or_else(|| cache_dir.join("enrichment-cache.json")),
                     Duration::from_secs(3600),
                 ))),
                 settings,
@@ -1050,6 +1061,10 @@ mod tests {
                 println!("| hop | address | host name | min RTT | phase 1 (GeoLite2) | phase 2 best | RTT check | other candidates |");
                 println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
                 let hops = state.hops();
+                if let Ok(dir) = std::env::var("VISTRACER_SMOKE_JSON_DIR") {
+                    let path = std::path::Path::new(&dir).join(format!("{}.json", target.trim()));
+                    std::fs::write(&path, serde_json::to_vec_pretty(&hops).unwrap()).unwrap();
+                }
                 let ix_status = hops
                     .iter()
                     .filter_map(|hop| hop.providers.as_ref())
