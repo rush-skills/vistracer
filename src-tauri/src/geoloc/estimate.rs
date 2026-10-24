@@ -6,9 +6,9 @@
 //!    hop. A router on the path is no further from the user than any later
 //!    hop reached through it. Later hops only count when this hop and the
 //!    later hop each have one responder (no load balancing).
-//! 3. Reference: the first public hop whose best candidate has a radius of
-//!    at most `REFERENCE_MAX_RADIUS_KM`. Every other hop's candidates are
-//!    checked against it (`rtt::check`).
+//! 3. Reference: the first public hop whose best candidate has at least
+//!    medium confidence and a radius of at most `REFERENCE_MAX_RADIUS_KM`.
+//!    Every other hop's candidates are checked against it (`rtt::check`).
 //! 4. Anycast: a documented anycast prefix, or an anycast operator's ASN
 //!    with a GeoLite2 location that the RTT rules out. Anycast hops get no
 //!    best estimate.
@@ -28,8 +28,10 @@ use std::cmp::Ordering;
 use std::net::IpAddr;
 
 /// Only a city-level estimate is precise enough to check other hops
-/// against.
+/// against. A wrong reference makes correct candidates of other hops look
+/// impossible, so low-confidence estimates never serve as reference.
 pub const REFERENCE_MAX_RADIUS_KM: f64 = 200.0;
+const REFERENCE_MIN_CONFIDENCE: LocationConfidence = LocationConfidence::Medium;
 /// GeoLite2 omits the accuracy radius for some records.
 const GEOLITE_CITY_DEFAULT_RADIUS_KM: f64 = 200.0;
 const GEOLITE_COUNTRY_DEFAULT_RADIUS_KM: f64 = 1000.0;
@@ -224,7 +226,9 @@ fn choose_reference(
         .zip(bounds)
         .find_map(|((input, found), bound)| {
             let best = found.estimates.first()?;
-            let usable = found.known_anycast.is_none() && best.radius_km <= REFERENCE_MAX_RADIUS_KM;
+            let usable = found.known_anycast.is_none()
+                && best.radius_km <= REFERENCE_MAX_RADIUS_KM
+                && best.confidence >= REFERENCE_MIN_CONFIDENCE;
             usable.then_some(RttReference {
                 hop_index: input.hop_index,
                 latitude: best.latitude,
@@ -468,6 +472,33 @@ mod tests {
                 .reference_hop_index,
             3
         );
+    }
+
+    #[test]
+    fn low_confidence_estimates_never_become_the_reference() {
+        // A 150 km GeoLite2 city record is low confidence, and so is a bare
+        // airport code: neither may anchor the RTT check.
+        let low_city = geo(18.52, 73.86, Some("Pune"), "IN", 150.0);
+        let mumbai = geo(MUMBAI.0, MUMBAI.1, Some("Mumbai"), "IN", 20.0);
+        let india = geo(20.0, 77.0, None, "IN", 1000.0);
+        let mut first = input(1, "49.44.1.1", 1.0);
+        first.geolite = Some(&low_city);
+        let mut bare = input(2, "49.44.2.2", 1.5);
+        bare.host_name = Some("bom.example.net");
+        bare.geolite = Some(&india);
+        let mut city = input(3, "49.44.3.3", 2.0);
+        city.geolite = Some(&mumbai);
+
+        let locations = locate_hops(&[first, bare, city]);
+        assert!(!locations[0].is_rtt_reference);
+        assert!(!locations[1].is_rtt_reference);
+        assert_eq!(
+            locations[1].best.as_ref().unwrap().confidence,
+            LocationConfidence::Low
+        );
+        assert!(locations[2].is_rtt_reference);
+        let check = locations[0].best.as_ref().unwrap().rtt.clone().unwrap();
+        assert_eq!(check.reference_hop_index, 3);
     }
 
     #[test]

@@ -211,7 +211,14 @@ impl RunState {
             asn: enrichment.and_then(|e| e.asn.as_ref()),
             ixp: enrichment.and_then(|e| e.ixp.as_ref()),
             single_responder: hop.responders.len() == 1,
-            min_rtt_ms: view.latency.min_rtt_ms,
+            // The estimates belong to the primary responder; another
+            // responder of a load-balanced hop may be closer.
+            min_rtt_ms: compute_latency_stats(
+                hop.responders
+                    .first()
+                    .map_or(&[][..], |primary| primary.rtts.as_slice()),
+            )
+            .min_rtt_ms,
         }
     }
 
@@ -528,6 +535,34 @@ mod tests {
         let changed: Vec<u32> = state.take_changed().iter().map(|h| h.hop_index).collect();
         assert!(changed.contains(&2), "{changed:?}");
         assert!(state.hops()[1].location.best.is_none());
+    }
+
+    #[test]
+    fn multipath_hop_is_checked_with_its_primary_responders_rtt() {
+        let mut state = RunState::new(2);
+        let isp = feed(&mut state, " 1  49.44.1.1  1.0 ms");
+        // The primary responder (London) answers in 130 ms; a second path
+        // of the same hop answers in 3 ms.
+        let hop = feed(&mut state, " 2  62.115.1.1  130.0 ms 49.44.9.9  3.0 ms");
+        state.apply_lookup(
+            &isp[0],
+            located(geo(19.076, 72.8777, Some("Mumbai"), 20.0), 55836),
+        );
+        state.apply_lookup(
+            &hop[0],
+            located(geo(51.5, -0.12, Some("London"), 20.0), 1299),
+        );
+
+        let hops = state.hops();
+        assert_eq!(hops[1].latency.min_rtt_ms, Some(3.0));
+        let best = hops[1]
+            .location
+            .best
+            .as_ref()
+            .expect("London is possible at 130 ms");
+        let check = best.rtt.as_ref().unwrap();
+        assert_eq!(check.verdict, RttVerdict::Feasible);
+        assert_eq!(check.bound_rtt_ms, 130.0);
     }
 
     #[test]

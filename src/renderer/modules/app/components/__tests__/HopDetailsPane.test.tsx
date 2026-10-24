@@ -57,6 +57,17 @@ const multipathHop: HopResolution = {
       label: "Mumbai, India",
       rtt: null
     },
+    alternatives: [
+      {
+        source: "geolite-country",
+        latitude: 22,
+        longitude: 79,
+        radiusKm: 1000,
+        confidence: "low",
+        label: "India",
+        rtt: null
+      }
+    ],
     isRttReference: true
   },
   rawLine: " 1  72.14.204.170  11.9 ms\n    108.170.252.1  12.2 ms",
@@ -356,6 +367,25 @@ describe("HopDetailsPane", () => {
     expect(location.getByText("Germany")).toBeTruthy();
   });
 
+  it("does not claim a city placement for an IX without facility coordinates", () => {
+    const ixp = ixpHop.location.ixp;
+    if (!ixp) throw new Error("fixture has an IXP");
+    const noFacilities: HopResolution = {
+      ...ixpHop,
+      location: { ...ixpHop.location, ixp: { ...ixp, facilityCount: 0 } }
+    };
+    render(
+      <HopDetailsPane
+        run={{ ...run, hops: [noFacilities] }}
+        selectedHopIndex={4}
+        status="success"
+      />
+    );
+    expect(fact(locationOf(4), "IXP")).toBe(
+      "DE-CIX Frankfurt80.81.192.0/21 · Frankfurt, DE · no facility coordinates"
+    );
+  });
+
   it("shows the host name hint and an RTT bound from a later hop", () => {
     render(<HopDetailsPane run={run} selectedHopIndex={5} status="success" />);
     const location = locationOf(5);
@@ -411,6 +441,7 @@ describe("HopDetailsPane", () => {
     expect(fact(locationOf(1), "RTT check")).toBe(
       "Reference: the other hops are checked against this location."
     );
+    expect(locationOf(1).getByText("Not checked: this hop is the RTT reference.")).toBeTruthy();
   });
 
   it("selects a hop when its row is clicked", () => {

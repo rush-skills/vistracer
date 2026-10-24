@@ -43,16 +43,24 @@ export const locationLabel = (hop: HopResolution): string => {
   return "Unknown";
 };
 
-/** What the speed-of-light check said about one estimate of hop `hopIndex`. */
+/**
+ * What the speed-of-light check said about one estimate of hop `hopIndex`.
+ * On the reference hop only the best estimate is the reference; the other
+ * estimates of that hop are not checked.
+ */
 export const describeRtt = (
   check: RttCheck | null,
   hopIndex: number,
-  isReference: boolean
+  onReferenceHop: boolean,
+  isBest: boolean
 ): string => {
   if (!check) {
-    return isReference
-      ? "Reference: the other hops are checked against this location."
-      : "Not checked: no reference hop or no RTT yet.";
+    if (onReferenceHop) {
+      return isBest
+        ? "Reference: the other hops are checked against this location."
+        : "Not checked: this hop is the RTT reference.";
+    }
+    return "Not checked: no reference hop or no RTT yet.";
   }
   const limit = `at most ${km(check.maxDistanceKm)} from hop ${check.referenceHopIndex}`;
   const bound =

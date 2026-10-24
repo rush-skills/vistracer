@@ -124,7 +124,9 @@ const CandidateList: React.FC<{ hop: HopResolution; candidates: LocationEstimate
         <span className="hop-inspector__source-status">
           {candidate.confidence} · {formatRadius(candidate.radiusKm)}
         </span>
-        <small>{describeRtt(candidate.rtt, hop.hopIndex, hop.location.isRttReference)}</small>
+        <small>
+          {describeRtt(candidate.rtt, hop.hopIndex, hop.location.isRttReference, false)}
+        </small>
       </li>
     ))}
   </ul>
@@ -150,7 +152,7 @@ const LocationSection: React.FC<HopInspectorProps> = ({ hop }) => {
         <dt>Radius</dt>
         <dd>{formatRadius(best.radiusKm)}</dd>
         <dt>RTT check</dt>
-        <dd>{describeRtt(best.rtt, hop.hopIndex, hop.location.isRttReference)}</dd>
+        <dd>{describeRtt(best.rtt, hop.hopIndex, hop.location.isRttReference, true)}</dd>
       </dl>
     );
   } else if (anycast) {
@@ -193,7 +195,7 @@ const LocationSection: React.FC<HopInspectorProps> = ({ hop }) => {
                     [ixp.city, ixp.country].filter(Boolean).join(", "),
                     ixp.facilityCount > 0
                       ? `${ixp.facilityCount} ${ixp.facilityCount === 1 ? "facility" : "facilities"}`
-                      : "placed by city"
+                      : "no facility coordinates"
                   ]
                     .filter(Boolean)
                     .join(" · ")}

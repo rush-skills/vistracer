@@ -6,7 +6,9 @@
 //! most a site number after it. Tokens that routers use for roles or
 //! interfaces (`ccr41`, `agg1`, `cgn`, `pos`) are never read as places even
 //! when they are also airport codes. Known carrier domains raise the
-//! confidence of the scheme that carrier uses. A bare 3-letter token, or a
+//! confidence of the scheme that carrier uses; for carriers whose site label
+//! has a fixed position (Cogent `fra03.atlas`, Microsoft `par21.ntwk`) only
+//! that label is read. A bare 3-letter token, or a
 //! code of a small airport outside a known carrier's names, is only kept
 //! when another source agrees on the country. Two different places at the
 //! same confidence cancel out.
@@ -32,6 +34,10 @@ struct Carrier {
     trust: Trust,
     /// Google service names: `bom07s29-in-f14.1e100.net`.
     google_style: bool,
+    /// The label that always follows the site label (Cogent
+    /// `fra03.atlas`). When present, only the site label is read, so role
+    /// labels such as `mag01` or `ibr01` cannot be taken for airports.
+    site_label_before: Option<&'static str>,
 }
 
 const fn named(label: &'static str, iata: &'static str) -> NamedPlace {
@@ -95,6 +101,7 @@ static CARRIERS: &[Carrier] = &[
         codes: ARELION_CODES,
         trust: NONE,
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "Hurricane Electric",
@@ -102,6 +109,7 @@ static CARRIERS: &[Carrier] = &[
         codes: HE_CODES,
         trust: AIRPORT,
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "NTT",
@@ -113,6 +121,7 @@ static CARRIERS: &[Carrier] = &[
             city_name: false,
         },
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "Cogent",
@@ -120,6 +129,15 @@ static CARRIERS: &[Carrier] = &[
         codes: &[],
         trust: AIRPORT,
         google_style: false,
+        site_label_before: Some("atlas"),
+    },
+    Carrier {
+        name: "Microsoft",
+        suffixes: &["msn.net"],
+        codes: &[],
+        trust: AIRPORT,
+        google_style: false,
+        site_label_before: Some("ntwk"),
     },
     Carrier {
         name: "Zayo",
@@ -127,6 +145,7 @@ static CARRIERS: &[Carrier] = &[
         codes: &[],
         trust: AIRPORT,
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "GTT",
@@ -134,6 +153,7 @@ static CARRIERS: &[Carrier] = &[
         codes: &[],
         trust: AIRPORT,
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "Verizon",
@@ -145,6 +165,7 @@ static CARRIERS: &[Carrier] = &[
             city_name: false,
         },
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "Lumen",
@@ -152,6 +173,7 @@ static CARRIERS: &[Carrier] = &[
         codes: &[],
         trust: CITY_NAME,
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "Tata",
@@ -159,6 +181,7 @@ static CARRIERS: &[Carrier] = &[
         codes: &[],
         trust: CITY_NAME,
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "Comcast",
@@ -166,6 +189,7 @@ static CARRIERS: &[Carrier] = &[
         codes: &[],
         trust: CITY_NAME,
         google_style: false,
+        site_label_before: None,
     },
     Carrier {
         name: "Google",
@@ -173,22 +197,30 @@ static CARRIERS: &[Carrier] = &[
         codes: &[],
         trust: NONE,
         google_style: true,
+        site_label_before: None,
     },
 ];
 
-/// Router roles, interface names and host-name words that collide with
-/// IATA codes (`ccr` = Concord, `cgn` = Cologne, `man` = Manchester,
-/// `sat` = San Antonio). Generic rules never read these as places.
+/// Router roles and interface names (`ccr41`, `mag01`, `ibr01`, `ae`,
+/// `pos`) that are also IATA codes (`ccr` = Concord, `mag` = Madang, `ibr` =
+/// Ibaraki). Never read as places, not even in a carrier's site label.
+const ROUTER_ROLES: &[&str] = &[
+    "acc", "acx", "agg", "agr", "asr", "asw", "atm", "bar", "bbr", "bdr", "bng", "brs", "bsr",
+    "bvi", "car", "ccr", "cor", "crs", "csw", "dsw", "ear", "eth", "gig", "gwy", "ibr", "icr",
+    "irb", "lag", "mag", "mpd", "msr", "pos", "rcr", "rtr", "ser", "srx", "ten", "tun",
+];
+
+/// Other host-name words that are also IATA codes (`cgn` = Cologne, `man` =
+/// Manchester, `sat` = San Antonio). Not read as places, except in a
+/// carrier's site label, where `man01` is Manchester.
 const STOPWORDS: &[&str] = &[
-    "acc", "acx", "agg", "agr", "api", "app", "asr", "asw", "atm", "bar", "bbn", "bbr", "bdr",
-    "bgp", "bng", "brs", "bsr", "bvi", "cab", "car", "cat", "ccr", "cdn", "cgn", "cmt", "com",
-    "cor", "cpe", "crs", "csw", "dev", "dmz", "dns", "doc", "dsl", "dsw", "dyn", "ear", "edu",
-    "eth", "ext", "fix", "ftp", "gig", "gin", "gov", "gwy", "hfc", "hsd", "hub", "idr", "ilo",
-    "int", "ipt", "irb", "isp", "ixp", "ixs", "lab", "lag", "lan", "lnk", "lte", "man", "mgm",
-    "mgt", "mob", "mpd", "msr", "nap", "nat", "net", "noc", "nyk", "olt", "one", "ont", "oob",
-    "ops", "org", "pon", "pop", "pos", "ppp", "prd", "pri", "ptr", "pub", "rcr", "reg", "res",
-    "rgn", "rtr", "sat", "sec", "ser", "srv", "srx", "stc", "stg", "sub", "svc", "ten", "the",
-    "tst", "tun", "uat", "vpn", "vps", "vrf", "wan", "web", "wls", "www",
+    "api", "app", "bbn", "bgp", "cab", "cat", "cdn", "cgn", "cmt", "com", "cpe", "dev", "dmz",
+    "dns", "doc", "dsl", "dyn", "edu", "ext", "fix", "ftp", "gin", "gov", "hfc", "hsd", "hub",
+    "idr", "ilo", "int", "ipt", "isp", "ixp", "ixs", "lab", "lan", "lnk", "lte", "man", "mgm",
+    "mgt", "mob", "nap", "nat", "net", "noc", "nyk", "olt", "one", "ont", "oob", "ops", "org",
+    "pon", "pop", "ppp", "prd", "pri", "ptr", "pub", "reg", "res", "rgn", "sat", "sec", "srv",
+    "stc", "stg", "sub", "svc", "the", "tst", "uat", "vpn", "vps", "vrf", "wan", "web", "wls",
+    "www",
 ];
 
 const GENERIC_TLDS: &[&str] = &[
@@ -330,7 +362,9 @@ impl Found {
     }
 }
 
-fn piece_matches(piece: &str, carrier: Option<&Carrier>) -> Vec<Found> {
+/// `at_site_label`: the piece is in a carrier's site label, so host-name
+/// words that are also airport codes (`man01` = Manchester) count.
+fn piece_matches(piece: &str, carrier: Option<&Carrier>, at_site_label: bool) -> Vec<Found> {
     let mut found = Vec::new();
     let trust = carrier.map(|c| c.trust).unwrap_or_default();
 
@@ -372,7 +406,9 @@ fn piece_matches(piece: &str, carrier: Option<&Carrier>) -> Vec<Found> {
             found.push(Found::new(resolved, HintRule::CityName, confidence));
         }
     }
-    if letters.len() == 3 && !STOPWORDS.contains(&letters) {
+    let stopped =
+        ROUTER_ROLES.contains(&letters) || (!at_site_label && STOPWORDS.contains(&letters));
+    if letters.len() == 3 && !stopped {
         let metro = places::lookup(METRO_CODES, letters).and_then(named_place);
         let is_metro = metro.is_some();
         let resolved = metro.or_else(|| places::airport(letters).map(|a| (a, city_label(a))));
@@ -414,11 +450,21 @@ pub fn hostname_hint(host_name: &str, context_country: Option<&str>) -> Option<H
             .any(|s| host == *s || host.ends_with(&format!(".{s}")))
     });
     let scanned = labels.len() - registrable_len(&labels);
+    let site_label = carrier
+        .and_then(|c| c.site_label_before)
+        .and_then(|anchor| labels.iter().position(|label| *label == anchor))
+        .filter(|&anchor| (1..=scanned).contains(&anchor))
+        .map(|anchor| anchor - 1);
+    let read: Vec<usize> = match site_label {
+        Some(index) => vec![index],
+        None => (0..scanned).collect(),
+    };
 
     let mut matches: Vec<Match> = Vec::new();
-    for (index, label) in labels[..scanned].iter().enumerate() {
+    for index in read {
+        let label = labels[index];
         for piece in label.split('-') {
-            for mut found in piece_matches(piece, carrier) {
+            for mut found in piece_matches(piece, carrier, site_label.is_some()) {
                 let country_agrees = match country_label(labels.get(index + 1), found.airport) {
                     CountryLabel::Disagrees => continue,
                     CountryLabel::Agrees => true,

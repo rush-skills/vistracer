@@ -67,6 +67,14 @@ abts-kk-dynamic-1.72.76.171.airtelbroadband.in | IN | -
 nsg-corporate-193.159.186.122.airtel.in | IN | -
 dsldevice.lan | - | -
 
+# Role labels next to the site label (code review): only the label before
+# Cogent's `atlas` and Microsoft's `ntwk` is read.
+te8-3.mag01.man01.atlas.cogentco.com | - | MAN airport-code high
+gi9-5.mag01.mad05.atlas.cogentco.com | - | MAD airport-code high
+be-7-0.ibr01.par21.ntwk.msn.net | - | ORY airport-code high
+ae22-0.icr01.lon24.ntwk.msn.net | - | LCY airport-code high
+38.122.40.1.cogentco.com | US | -
+
 # Generic rules (no known carrier domain).
 xe-0-0-0.lon10.core | - | LCY airport-code medium
 ae1.fra03.example.net | - | FRA airport-code medium
@@ -81,6 +89,8 @@ par.example.net | - | -
 par.example.net | DE | -
 ae1.fra03.us.example.net | - | -
 ae1.avk1.example.net | - | -
+mag01.example.net | PG | -
+ibr01.par21.example.net | - | ORY airport-code medium
 fra-ams.example.net | - | -
 ae1.fra2-ams3.example.net | - | -
 c-73-158-12-34.hsd1.ca.comcast.net | US | -
