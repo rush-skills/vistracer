@@ -20,9 +20,11 @@ Pre-built binaries are available on the [Releases](https://github.com/rush-skill
 
 | Platform | Format |
 |----------|--------|
-| macOS    | `.dmg` |
+| macOS    | `.dmg`: one universal DMG for Apple Silicon and Intel (releases after v1.0.0; v1.0.0 is Apple Silicon only) |
 | Windows  | `.exe` (NSIS installer) |
 | Linux    | `.AppImage`, `.deb` |
+
+Releases after v1.0.0 update themselves: VisTracer checks the latest GitHub release on start and offers **Install and restart**. Downloads are signature-checked before they are installed.
 
 ## Why a Desktop App?
 
@@ -39,9 +41,11 @@ This architecture ensures you get authentic network diagnostics from your actual
 
 - Cross-platform Tauri v2 shell with Rust backend and type-safe IPC to the React frontend.
 - Native traceroute execution (ICMP/UDP/TCP) via system binaries with cancellation support.
-- Streaming progress updates: hop data appears in the UI as traceroute output is parsed.
-- GeoIP/ASN enrichment via local MaxMind GeoLite2 databases with persistent caching.
-- Optional secondary enrichment through Team Cymru, RDAP, RIPE Stat, and PeeringDB to fill gaps and validate MaxMind output.
+- Streaming progress updates: each hop appears as soon as its line is parsed; DNS, GeoIP and registry lookups fill it in afterwards, so a slow lookup never holds up later hops.
+- Load-balanced (multipath) hops: every responder of a hop is shown with its own RTTs.
+- GeoIP/ASN enrichment via local MaxMind GeoLite2 databases.
+- Enrichment through Team Cymru, RDAP, RIPEstat and PeeringDB, with retry/backoff, per-provider rate limits and a 7-day cache. A failed provider never hides the GeoLite2 data.
+- Suspected-anycast flag from a speed-of-light check (RTT vs. geolocated distance).
 - 3D globe (Three.js) visualising hop arcs, coloured by latency bands, plus per-hop markers.
 - Detailed hop table with RTT stats, packet loss, location and ASN metadata (including PeeringDB facility context when available).
 - Snapshot and animation exports saved directly to your downloads folder (PNG/JPG/WebP for stills, WebM/GIF for animated routes).
@@ -68,18 +72,34 @@ VisTracer can provide rich geographic visualization and network details when Max
 
 If databases are missing, a warning banner will appear in the footer. The same settings modal can be opened directly from the banner or the gear icon—no restart required.
 
-### External Enrichment Providers (Optional)
+### External Enrichment Providers
 
-In addition to GeoLite2, VisTracer can cross-check hop metadata using several public registry services:
+In addition to GeoLite2, VisTracer looks up each public hop address in these registry services:
 
-| Provider | Purpose | Credentials |
-| --- | --- | --- |
-| **Team Cymru** | IP ↔ ASN mapping via whois | none |
-| **RDAP** (default `https://rdap.org/ip`) | Registry owner/country data | optional custom base URL |
-| **RIPE Stat** | Prefix + ASN holder context | identifies as `VisTracer` |
-| **PeeringDB** | Facility/operator details for known ASNs | optional API key for higher rate limits |
+| Provider | Gives | Credentials | Default |
+| --- | --- | --- | --- |
+| **Team Cymru** | Origin ASN, BGP prefix, registry, AS name (whois over TCP port 43) | none | on |
+| **RDAP** (default `https://rdap.org/ip`) | Network name, registrant org, CIDR, country | optional custom base URL | on |
+| **RIPEstat** | Announced prefix and origin ASNs from live BGP data | identifies as `VisTracer` | on |
+| **PeeringDB** | Network type, peering policy, IXP and facility counts per ASN | optional API key (higher rate limit) | off |
 
-Use the **Integrations** toggles above the advanced traceroute options to enable or disable each provider. The settings modal exposes credential fields for the services that support them. VisTracer logs every lookup in the application log so it is easy to verify which providers responded for a given hop.
+- Turn each provider on or off in **Integration settings** (gear icon) or with the quick toggles under the target field. The settings also hold the RDAP base URL and the PeeringDB API key.
+- Only public hop addresses are sent. Private, CGNAT, link-local and documentation addresses never leave your machine.
+- Answers are cached for 7 days in the app cache folder. **Force fresh lookups** skips the cache for one run.
+- Calls retry with backoff on rate limits, server errors and timeouts. If a provider still fails, the hop shows "N sources failed" and the hop details list each provider with its result.
+- The hop details panel shows every responder, the merged ASN/prefix/registry data, and the PeeringDB record (or why there is none).
+
+See [docs/architecture.md](./docs/architecture.md) for the pipeline, the merge rules and the anycast check.
+
+### Linux: ICMP and TCP need raw sockets
+
+`traceroute -I` (ICMP) and `-T` (TCP) need raw-socket privileges on Linux. Without them, VisTracer runs the trace again with UDP probes and shows a notice. To allow ICMP/TCP without running the app as root, give the system binary the capability once:
+
+```bash
+sudo setcap cap_net_raw+ep "$(readlink -f "$(command -v traceroute)")"
+```
+
+On macOS, TCP traces ask for your administrator password; VisTracer only runs `/usr/sbin`, `/usr/bin`, `/sbin` or `/bin` binaries that root owns with elevated rights.
 
 ### Install Dependencies
 
@@ -119,9 +139,12 @@ Build artifacts are placed in `src-tauri/target/release/bundle/`.
 ### Linting & Tests
 
 ```bash
-npm run lint        # ESLint across main + renderer sources
-npm run typecheck   # TypeScript project references for both processes
-npm run test        # Vitest + Testing Library (renderer-focused)
+npm run lint        # ESLint across renderer and shared sources
+npm run typecheck   # TypeScript type check
+npm run test        # Vitest unit and component tests
+npm run test:e2e    # Vitest bridge/store integration tests
+cd src-tauri && cargo test                               # Rust tests
+cd src-tauri && cargo clippy --all-targets -- -D warnings
 ```
 
 ## Project Structure
@@ -172,11 +195,10 @@ The terminator position uses a simplified solar algorithm that provides accuracy
 ## Known Gaps & Next Steps
 
 - Scheduled GeoLite2 refresh (auto-download via license key works; periodic refresh is not yet automated)
-- Provider rate-limit handling and retry UX for external enrichment APIs
 - MP4 export remains out of scope; use WebM or GIF instead.
-- Advanced heuristics (anycast detection, jitter visualisation, comparison view) are planned but not
-  implemented in this build
-- Windows environments rely on `tracert`; ensure it is available on `PATH`
+- Anycast detection is a heuristic ("suspected"); jitter visualisation and a comparison view are not implemented
+- Windows `tracert` only sends ICMP probes, three per hop; the UDP/TCP choice does not apply there
+- Only the first responder of a multipath hop is geolocated and sent to the registry providers; the others show their address, host name and RTTs
 
 ## Contributing
 
@@ -185,5 +207,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, coding standards
 ## Additional Documentation
 
 - [GEOLITE2_SETUP.md](./GEOLITE2_SETUP.md) - Complete guide to downloading and configuring GeoLite2 databases
+- [docs/architecture.md](./docs/architecture.md) - Hop pipeline, enrichment, storage and security
+- [docs/releasing.md](./docs/releasing.md) - Update signing key setup and the release workflow
 - [CLAUDE.md](./CLAUDE.md) - Architecture overview and development guide for contributors
 - [CHANGELOG.md](./CHANGELOG.md) - Release history

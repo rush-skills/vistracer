@@ -80,7 +80,7 @@ Tauri CLI is used for packaging. Do not commit built artifacts.
    git checkout -b fix/your-topic
    ```
 2. Make your changes, following the code style and testing guidelines above.
-3. Ensure `npm run lint`, `npm run typecheck`, and `npm run test` all pass.
+3. Ensure `npm run lint`, `npm run typecheck`, `npm run test`, `npm run test:e2e`, and in `src-tauri/` both `cargo test` and `cargo clippy --all-targets -- -D warnings` pass.
 4. Open a pull request against `main` on `rush-skills/vistracer`. Fill in the pull request template completely.
 5. A maintainer will review your PR. Please respond to review comments promptly and push fixup commits rather than force-pushing during an active review.
 6. Once approved, a maintainer will merge using squash-and-merge to keep the history clean.

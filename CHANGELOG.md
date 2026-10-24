@@ -2,6 +2,31 @@
 
 All notable changes to VisTracer will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- External enrichment now runs: Team Cymru, RDAP, RIPEstat and PeeringDB fill ASN, holder, prefix, registry and PeeringDB network details, with retry/backoff, per-provider rate limits and a 7-day cache in the app cache folder
+- Every responder of a load-balanced hop is parsed and shown with its own RTTs
+- Hop details panel: responders, merged network data, PeeringDB record (or the reason there is none), and the result of each provider
+- Provider on/off switches, RDAP base URL and PeeringDB API key in Integration settings
+- Suspected-anycast flag from a speed-of-light check (RTT vs. GeoLite2 distance)
+- In-app updates through the Tauri updater (needs the signing key setup in docs/releasing.md)
+- Universal macOS DMG (Apple Silicon and Intel)
+- Linux: ICMP/TCP traces that fail for lack of raw-socket privileges run again with UDP and show how to enable them
+
+### Changed
+
+- Hops appear as soon as traceroute prints them; DNS, GeoIP and provider lookups run in the background and update the hop
+- Traceroute binaries are found through PATH with system fallbacks; a missing binary shows an install command
+- Content Security Policy enabled; file system scope limited to the app data, app cache and Downloads folders
+
+### Fixed
+
+- Team Cymru lookups could never connect, PeeringDB sent the API key in the wrong header, and RIPEstat/PeeringDB fields that do not exist were read
+- macOS TCP traces only run root-owned system binaries with administrator rights
+- A partial settings file no longer resets all settings
+
 ## [1.0.0] - 2026-04-11
 
 Port from Electron to Tauri v2. A Rust backend replaces the Electron main process; the React + Three.js renderer is kept.
