@@ -34,7 +34,7 @@ const defaultState: TracerouteFormState = {
 
 const numericConstraints = {
   maxHops: { min: 1, max: 64 },
-  timeoutMs: { min: 500, max: 20000 },
+  timeoutMs: { min: 1000, max: 10000 },
   packetCount: { min: 1, max: 5 }
 } as const;
 
@@ -470,8 +470,8 @@ export const TopBar: React.FC = () => {
             Timeout (ms)
             <input
               type="number"
-              min={500}
-              max={20000}
+              min={1000}
+              max={10000}
               step={250}
               value={form.timeoutMs}
               onChange={handleChange("timeoutMs")}

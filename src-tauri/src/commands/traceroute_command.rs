@@ -214,7 +214,9 @@ pub fn normalize_request(request: &TracerouteRequest) -> Result<TracerouteReques
         target: validate_target(&request.target)?,
         protocol: request.protocol,
         max_hops: request.max_hops.clamp(1, 64),
-        timeout_ms: request.timeout_ms.max(1000),
+        // Per-probe wait; without an upper bound one silent hop could hold a
+        // run for minutes.
+        timeout_ms: request.timeout_ms.clamp(1000, 10_000),
         packet_count: request.packet_count.clamp(1, 5),
         force_fresh: request.force_fresh,
     })
@@ -714,6 +716,9 @@ mod tests {
         let mut req = request("example.com", TracerouteProtocol::Icmp);
         req.max_hops = 100;
         req.timeout_ms = 500;
+        let mut long = req.clone();
+        long.timeout_ms = 600_000;
+        assert_eq!(normalize_request(&long).unwrap().timeout_ms, 10_000);
         req.packet_count = 10;
         let normalized = normalize_request(&req).unwrap();
         assert_eq!(normalized.max_hops, 64);
