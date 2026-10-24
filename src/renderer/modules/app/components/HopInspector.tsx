@@ -1,6 +1,7 @@
 import React from "react";
-import type { HopResolution, PeeringDbDetails } from "@common/ipc";
+import type { HopResolution, LocationEstimate, PeeringDbDetails } from "@common/ipc";
 import { PROVIDER_LABELS, findProvider } from "../lib/providers";
+import { HINT_RULE_LABELS, SOURCE_LABELS, describeRtt, formatRadius } from "../lib/location";
 
 interface HopInspectorProps {
   hop: HopResolution;
@@ -77,6 +78,155 @@ const PeeringDbSection: React.FC<HopInspectorProps> = ({ hop }) => {
   );
 };
 
+const AnycastNotice: React.FC<HopInspectorProps> = ({ hop }) => {
+  const anycast = hop.location.anycast;
+  if (!anycast) {
+    return null;
+  }
+  const evidence =
+    anycast.evidence === "known-prefix"
+      ? `${anycast.service} documents this prefix as anycast.`
+      : `AS${hop.asn?.asn ?? "?"} (${anycast.service}) announces its addresses from many sites, and the RTT rules out the GeoLite2 location.`;
+  return (
+    <p className="hop-inspector__notice" role="note">
+      <strong>Anycast.</strong> Many sites share this address and the nearest one answered, so
+      the globe shows no point for this hop. {evidence}
+      {anycast.maxDistanceKm != null && anycast.referenceHopIndex != null && (
+        <>
+          {" "}
+          The site that answered is at most {Math.round(anycast.maxDistanceKm).toLocaleString("en-US")} km
+          from hop {anycast.referenceHopIndex}.
+        </>
+      )}
+      {anycast.evidence === "known-prefix" && anycast.geoliteRuledOut && (
+        <> The RTT also rules out the GeoLite2 location.</>
+      )}
+    </p>
+  );
+};
+
+const CandidateList: React.FC<{ hop: HopResolution; candidates: LocationEstimate[] }> = ({
+  hop,
+  candidates
+}) => (
+  <ul className="hop-inspector__candidates">
+    {candidates.map((candidate) => (
+      <li
+        key={`${candidate.source}-${candidate.label}`}
+        className={
+          candidate.rtt?.verdict === "infeasible"
+            ? "hop-inspector__candidate hop-inspector__candidate--ruled-out"
+            : "hop-inspector__candidate"
+        }
+      >
+        <span className="hop-inspector__source-name">{SOURCE_LABELS[candidate.source]}</span>
+        <span>{candidate.label}</span>
+        <span className="hop-inspector__source-status">
+          {candidate.confidence} · {formatRadius(candidate.radiusKm)}
+        </span>
+        <small>{describeRtt(candidate.rtt, hop.hopIndex, hop.location.isRttReference)}</small>
+      </li>
+    ))}
+  </ul>
+);
+
+const LocationSection: React.FC<HopInspectorProps> = ({ hop }) => {
+  const { best, alternatives, ixp, hostnameHint, anycast } = hop.location;
+  let summary: React.ReactNode = null;
+
+  if (best) {
+    summary = (
+      <dl className="hop-inspector__facts">
+        <dt>Place</dt>
+        <dd>{best.label}</dd>
+        <dt>Source</dt>
+        <dd>{SOURCE_LABELS[best.source]}</dd>
+        <dt>Confidence</dt>
+        <dd>
+          <span className={`hop-details__confidence hop-details__confidence--${best.confidence}`}>
+            {best.confidence}
+          </span>
+        </dd>
+        <dt>Radius</dt>
+        <dd>{formatRadius(best.radiusKm)}</dd>
+        <dt>RTT check</dt>
+        <dd>{describeRtt(best.rtt, hop.hopIndex, hop.location.isRttReference)}</dd>
+      </dl>
+    );
+  } else if (anycast) {
+    summary = null;
+  } else if (!hop.ipAddress) {
+    summary = <p className="hop-inspector__empty">No address answered at this hop.</p>;
+  } else if (alternatives.length > 0) {
+    summary = (
+      <p className="hop-inspector__empty hop-inspector__empty--error">
+        No source fits the measured RTT, so the globe shows no point for this hop.
+      </p>
+    );
+  } else if (hop.lookupState === "pending") {
+    summary = <p className="hop-inspector__empty">Looking up…</p>;
+  } else if (hop.isPrivate) {
+    summary = <p className="hop-inspector__empty">Private address: it has no public location.</p>;
+  } else {
+    summary = (
+      <p className="hop-inspector__empty">
+        No location source has data for this address, so the globe shows no point for this hop.
+      </p>
+    );
+  }
+
+  return (
+    <section className="hop-inspector__section" aria-label="Location">
+      <h4>Location</h4>
+      <AnycastNotice hop={hop} />
+      {summary}
+      {(ixp || hostnameHint) && (
+        <dl className="hop-inspector__facts hop-inspector__facts--evidence">
+          {ixp && (
+            <>
+              <dt>IXP</dt>
+              <dd>
+                {ixp.name}
+                <small>
+                  {[
+                    ixp.prefix,
+                    [ixp.city, ixp.country].filter(Boolean).join(", "),
+                    ixp.facilityCount > 0
+                      ? `${ixp.facilityCount} ${ixp.facilityCount === 1 ? "facility" : "facilities"}`
+                      : "placed by city"
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </small>
+              </dd>
+            </>
+          )}
+          {hostnameHint && (
+            <>
+              <dt>Host name hint</dt>
+              <dd>
+                <code>{hostnameHint.token}</code> → {hostnameHint.place}
+                <small>
+                  {HINT_RULE_LABELS[hostnameHint.rule]}
+                  {hostnameHint.carrier ? ` · ${hostnameHint.carrier} naming` : ""}
+                </small>
+              </dd>
+            </>
+          )}
+        </dl>
+      )}
+      {alternatives.length > 0 && (
+        <details className="hop-inspector__more" open={!best && !anycast}>
+          <summary>
+            {best ? "Other candidates" : "Candidates"} ({alternatives.length})
+          </summary>
+          <CandidateList hop={hop} candidates={alternatives} />
+        </details>
+      )}
+    </section>
+  );
+};
+
 export const HopInspector: React.FC<HopInspectorProps> = ({ hop }) => {
   const responders = hop.responders ?? [];
 
@@ -109,6 +259,8 @@ export const HopInspector: React.FC<HopInspectorProps> = ({ hop }) => {
           </ul>
         )}
       </section>
+
+      <LocationSection hop={hop} />
 
       {hop.asn && (
         <section className="hop-inspector__section" aria-label="Network">

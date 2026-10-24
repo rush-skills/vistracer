@@ -6,9 +6,11 @@ import * as THREE from "three";
 import type { TracerouteRun } from "@common/ipc";
 import {
   buildArcDescriptors,
+  buildConfidenceRings,
   EARTH_RADIUS_UNITS,
   latLngToVector3,
   hopIndexToColor,
+  hopPosition,
   calculateSunDirection
 } from "@renderer/lib/globe";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
@@ -172,16 +174,16 @@ const CameraController: React.FC<{ run?: TracerouteRun; selectedHopIndex?: numbe
       return;
     }
 
-    const hopsWithGeo = run.hops.filter(hop => hop.geo);
-    const currentHopCount = hopsWithGeo.length;
+    const positions = run.hops.flatMap((hop) => {
+      const position = hopPosition(hop);
+      return position ? [position] : [];
+    });
+    const currentHopCount = positions.length;
 
     // New hop detected
     if (currentHopCount > lastHopCountRef.current && currentHopCount > 0) {
-      const latestHop = hopsWithGeo[currentHopCount - 1];
-
-      if (latestHop.geo) {
-        animateToHop.current(latestHop.geo.latitude, latestHop.geo.longitude);
-      }
+      const latest = positions[currentHopCount - 1];
+      animateToHop.current(latest.latitude, latest.longitude);
     }
 
     lastHopCountRef.current = currentHopCount;
@@ -201,8 +203,9 @@ const CameraController: React.FC<{ run?: TracerouteRun; selectedHopIndex?: numbe
     }
 
     const selectedHop = run.hops.find(hop => hop.hopIndex === selectedHopIndex);
-    if (selectedHop?.geo) {
-      animateToHop.current(selectedHop.geo.latitude, selectedHop.geo.longitude);
+    const position = selectedHop ? hopPosition(selectedHop) : null;
+    if (position) {
+      animateToHop.current(position.latitude, position.longitude);
     }
   }, [selectedHopIndex, run]);
 
@@ -396,32 +399,49 @@ const Earth: React.FC = () => {
   );
 };
 
+/** Camera distance at which markers have their nominal size. */
+const DEFAULT_CAMERA_DISTANCE = 14;
+const MARKER_LIFT = 0.05;
+
 const HopMarkers: React.FC<{ run: TracerouteRun; selectedHopIndex?: number }> = ({
   run,
   selectedHopIndex
 }) => {
   const setSelectedHop = useTracerouteStore((state) => state.setSelectedHop);
+  const groupRef = useRef<THREE.Group>(null);
+
+  // Markers keep the same size on screen while the rings keep their true
+  // size in km, so zooming in reveals small uncertainty rings. The scale
+  // follows the camera height above the surface, which sets the zoom.
+  useFrame(({ camera }) => {
+    const scale =
+      (camera.position.length() - EARTH_RADIUS_UNITS) /
+      (DEFAULT_CAMERA_DISTANCE - EARTH_RADIUS_UNITS);
+    groupRef.current?.children.forEach((marker) => {
+      marker.scale.setScalar(scale);
+      marker.position.setLength(EARTH_RADIUS_UNITS + MARKER_LIFT * scale);
+    });
+  });
 
   // Sort hops so that the selected hop is rendered last (appears on top)
   const sortedHops = useMemo(() => {
-    const hopsWithGeo = run.hops.filter((hop) => hop.geo);
-
-    if (selectedHopIndex === undefined) {
-      return hopsWithGeo;
-    }
-
-    // Separate selected hop from others
-    const selectedHop = hopsWithGeo.find((hop) => hop.hopIndex === selectedHopIndex);
-    const otherHops = hopsWithGeo.filter((hop) => hop.hopIndex !== selectedHopIndex);
-
-    // Return with selected hop at the end
-    return selectedHop ? [...otherHops, selectedHop] : hopsWithGeo;
+    const located = run.hops.flatMap((hop) => {
+      const estimate = hopPosition(hop);
+      return estimate ? [{ hop, estimate }] : [];
+    });
+    const selected = located.filter(({ hop }) => hop.hopIndex === selectedHopIndex);
+    const others = located.filter(({ hop }) => hop.hopIndex !== selectedHopIndex);
+    return [...others, ...selected];
   }, [run.hops, selectedHopIndex]);
 
   return (
-    <group>
-      {sortedHops.map((hop) => {
-        const position = latLngToVector3(hop.geo!.latitude, hop.geo!.longitude, EARTH_RADIUS_UNITS + 0.05);
+    <group ref={groupRef}>
+      {sortedHops.map(({ hop, estimate }) => {
+        const position = latLngToVector3(
+          estimate.latitude,
+          estimate.longitude,
+          EARTH_RADIUS_UNITS + MARKER_LIFT
+        );
         const isSelected = hop.hopIndex === selectedHopIndex;
         const color = hopIndexToColor(hop.hopIndex);
 
@@ -431,11 +451,40 @@ const HopMarkers: React.FC<{ run: TracerouteRun; selectedHopIndex?: number }> = 
             position={position.toArray() as [number, number, number]}
             onClick={() => setSelectedHop(hop.hopIndex)}
           >
-            <sphereGeometry args={[isSelected ? 0.16 : 0.12, 24, 24]} />
+            <sphereGeometry args={[isSelected ? 0.11 : 0.08, 24, 24]} />
             <meshStandardMaterial color={color} emissive={color} emissiveIntensity={isSelected ? 0.8 : 0.4} />
           </mesh>
         );
       })}
+    </group>
+  );
+};
+
+/** Uncertainty radius of each drawn hop, true to scale on the globe. */
+const ConfidenceRings: React.FC<{ run: TracerouteRun; selectedHopIndex?: number }> = ({
+  run,
+  selectedHopIndex
+}) => {
+  const rings = useMemo(
+    () => buildConfidenceRings(run.hops, selectedHopIndex),
+    [run.hops, selectedHopIndex]
+  );
+
+  return (
+    <group>
+      {rings.map((ring) => (
+        <Line
+          key={ring.id}
+          points={ring.points.map((point) => point.toArray() as [number, number, number])}
+          color={ring.color}
+          lineWidth={ring.lineWidth}
+          transparent
+          opacity={ring.opacity}
+          dashed={ring.dashed}
+          dashSize={0.06}
+          gapSize={0.04}
+        />
+      ))}
     </group>
   );
 };
@@ -457,15 +506,14 @@ const ArcLines: React.FC<{ run: TracerouteRun }> = ({ run }) => {
   );
 };
 
-
 export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIndex }) => {
-  const hasRenderableHops = Boolean(run?.hops?.some((hop) => hop.geo));
+  const hasRenderableHops = Boolean(run?.hops?.some((hop) => hopPosition(hop)));
   const captureActive = useTracerouteStore((state) => state.captureActive);
 
   return (
     <section className="globe-viewport" aria-label="3D globe showing traceroute path">
       <Canvas
-        camera={{ position: [0, 0, 14], fov: 50, near: 0.1, far: 1000 }}
+        camera={{ position: [0, 0, DEFAULT_CAMERA_DISTANCE], fov: 50, near: 0.1, far: 1000 }}
         gl={{ preserveDrawingBuffer: true }}
       >
         <ambientLight intensity={0.35} />
@@ -477,6 +525,7 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
         {run && hasRenderableHops && (
           <>
             <ArcLines run={run} />
+            <ConfidenceRings run={run} selectedHopIndex={selectedHopIndex} />
             <HopMarkers run={run} selectedHopIndex={selectedHopIndex} />
           </>
         )}

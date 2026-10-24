@@ -20,7 +20,16 @@ import {
   selectCurrentRun,
   selectCurrentHop,
 } from "../../src/renderer/state/tracerouteStore";
-import type { TracerouteRun, HopResolution } from "../../src/common/ipc";
+import type { TracerouteRun, HopLocation, HopResolution } from "../../src/common/ipc";
+
+const noLocation: HopLocation = {
+  best: null,
+  alternatives: [],
+  ixp: null,
+  hostnameHint: null,
+  anycast: null,
+  isRttReference: false
+};
 
 function makeHop(index: number, ip: string | null): HopResolution {
   return {
@@ -46,7 +55,7 @@ function makeHop(index: number, ip: string | null): HopResolution {
       ? { asn: 1000 + index, name: `ISP ${index}` }
       : undefined,
     isPrivate: false,
-    isAnycastSuspected: false,
+    location: noLocation,
     rawLine: `${index}  ${ip ?? "* * *"}`,
   };
 }
@@ -297,7 +306,7 @@ describe("Store Integration", () => {
           geo: { latitude: 37.7749, longitude: -122.4194, city: "San Francisco", country: "US" },
           asn: { asn: 15169, name: "Google" },
           isPrivate: false,
-          isAnycastSuspected: false,
+          location: noLocation,
           rawLine: "1  2001:db8::1  2 ms",
         },
         completed: true,
@@ -318,7 +327,7 @@ describe("Store Integration", () => {
             geo: { latitude: 37.7749, longitude: -122.4194, city: "San Francisco", country: "US" },
             asn: { asn: 15169, name: "Google" },
             isPrivate: false,
-            isAnycastSuspected: false,
+            location: noLocation,
             rawLine: "1  2001:db8::1  2 ms",
           },
         ],
@@ -350,7 +359,7 @@ describe("Store Integration", () => {
           lossPercent: 0,
           latency: { minRttMs: 0.5, maxRttMs: 1, avgRttMs: 0.75, jitterMs: 0.5 },
           isPrivate: true,
-          isAnycastSuspected: false,
+          location: noLocation,
           rawLine: "1  192.168.1.1  0.75 ms",
         },
         completed: false,
@@ -375,7 +384,7 @@ describe("Store Integration", () => {
             lossPercent: 0,
             latency: { minRttMs: 0.5, maxRttMs: 1, avgRttMs: 0.75, jitterMs: 0.5 },
             isPrivate: true,
-            isAnycastSuspected: false,
+            location: noLocation,
             rawLine: "1  192.168.1.1  0.75 ms",
           },
           makeHop(2, "8.8.8.8"),

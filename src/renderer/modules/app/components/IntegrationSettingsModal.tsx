@@ -477,7 +477,9 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
                 PeeringDB
               </label>
               <small className="integration-settings-modal__hint">
-                Network type, peering policy, exchange and facility counts for each ASN.
+                Network type, peering policy, exchange and facility counts for each ASN. Also
+                places hops on an exchange (IX) peering LAN at that exchange; the IX list is
+                downloaded at most once a day.
               </small>
               <label className="integration-settings-modal__label" htmlFor="integration-settings-peeringdb">
                 PeeringDB API key

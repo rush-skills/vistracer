@@ -1,6 +1,15 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
-import type { TracerouteProgressEvent, HopResolution } from "@common/ipc";
+import type { TracerouteProgressEvent, HopLocation, HopResolution } from "@common/ipc";
+
+const noLocation: HopLocation = {
+  best: null,
+  alternatives: [],
+  ixp: null,
+  hostnameHint: null,
+  anycast: null,
+  isRttReference: false
+};
 
 // Mock window.visTracer API
 const mockApi = {
@@ -21,7 +30,7 @@ const makeHop = (overrides: Partial<HopResolution> = {}): HopResolution => ({
   latency: { minRttMs: 10, maxRttMs: 12, avgRttMs: 11, jitterMs: 2 },
   geo: { latitude: 37.7749, longitude: -122.4194 },
   isPrivate: false,
-  isAnycastSuspected: false,
+  location: noLocation,
   rawLine: " 1  test.example.com (1.1.1.1)  10 ms  11 ms  12 ms",
   responders: [{ ipAddress: "1.1.1.1", hostName: "test.example.com", rttsMs: [10, 11, 12] }],
   lookupState: "complete",

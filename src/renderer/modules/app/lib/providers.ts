@@ -5,7 +5,8 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
   "team-cymru": "Team Cymru",
   rdap: "RDAP",
   "ripe-stat": "RIPEstat",
-  peeringdb: "PeeringDB"
+  peeringdb: "PeeringDB",
+  "peeringdb-ix": "PeeringDB IX list"
 };
 
 export const findProvider = (

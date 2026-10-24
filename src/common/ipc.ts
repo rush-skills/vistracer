@@ -30,7 +30,13 @@ export interface AsnDetails {
   registry?: string;
 }
 
-export type ProviderId = "maxmind" | "team-cymru" | "rdap" | "ripe-stat" | "peeringdb";
+export type ProviderId =
+  | "maxmind"
+  | "team-cymru"
+  | "rdap"
+  | "ripe-stat"
+  | "peeringdb"
+  | "peeringdb-ix";
 
 /**
  * success: the provider answered (with or without a record).
@@ -77,6 +83,84 @@ export interface HopResponder {
 
 export type LookupState = "pending" | "complete";
 
+/** What produced a location estimate (mirrors `LocationSource` in src-tauri/src/types.rs). */
+export type LocationSource = "ixp" | "hostname-hint" | "geolite-city" | "geolite-country";
+
+export type LocationConfidence = "high" | "medium" | "low";
+
+/**
+ * feasible: possible, radius unchanged. tightened: the RTT limits the hop to a
+ * smaller area. widened: possible only beyond the stated radius. infeasible:
+ * physically impossible for the measured RTT; never the best estimate.
+ */
+export type RttVerdict = "feasible" | "tightened" | "widened" | "infeasible";
+
+export interface RttCheck {
+  verdict: RttVerdict;
+  distanceKm: number;
+  maxDistanceKm: number;
+  originalRadiusKm: number;
+  referenceHopIndex: number;
+  /** Hop whose RTT set the bound: this hop or a later one. */
+  boundHopIndex: number;
+  boundRttMs: number;
+}
+
+export interface LocationEstimate {
+  source: LocationSource;
+  latitude: number;
+  longitude: number;
+  radiusKm: number;
+  confidence: LocationConfidence;
+  label: string;
+  rtt: RttCheck | null;
+}
+
+export interface IxpMatch {
+  ixId: number;
+  name: string;
+  city: string | null;
+  country: string | null;
+  prefix: string;
+  facilityCount: number;
+}
+
+export type HintRule =
+  | "carrier-code"
+  | "city-region-code"
+  | "city-name"
+  | "airport-code"
+  | "bare-airport-code";
+
+export interface HostnameHint {
+  hostName: string;
+  token: string;
+  rule: HintRule;
+  carrier: string | null;
+  iata: string;
+  place: string;
+}
+
+export type AnycastEvidence = "known-prefix" | "operator-asn-rtt";
+
+export interface AnycastInfo {
+  evidence: AnycastEvidence;
+  service: string;
+  geoliteRuledOut: boolean;
+  maxDistanceKm: number | null;
+  referenceHopIndex: number | null;
+}
+
+/** `best` is drawn on the globe; anycast hops have none. */
+export interface HopLocation {
+  best: LocationEstimate | null;
+  alternatives: LocationEstimate[];
+  ixp: IxpMatch | null;
+  hostnameHint: HostnameHint | null;
+  anycast: AnycastInfo | null;
+  isRttReference: boolean;
+}
+
 /** Rust sends every field; `Option` values arrive as `null`. */
 export interface HopResolution {
   hopIndex: number;
@@ -85,10 +169,11 @@ export interface HopResolution {
   responders: HopResponder[];
   lossPercent: number | null;
   latency: HopLatencyStats;
+  /** Raw GeoLite2 City record; `location` holds the estimate to draw. */
   geo?: GeoDetails | null;
   asn?: AsnDetails | null;
   isPrivate: boolean;
-  isAnycastSuspected: boolean;
+  location: HopLocation;
   rawLine: string;
   providers?: ProviderStatus[] | null;
   peeringDb?: PeeringDbDetails | null;
