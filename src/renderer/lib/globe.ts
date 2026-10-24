@@ -1,5 +1,5 @@
 import { Vector3 } from "three";
-import type { HopResolution } from "@common/ipc";
+import type { HopResolution, LocationConfidence, LocationEstimate } from "@common/ipc";
 
 export interface ArcDescriptor {
   id: string;
@@ -10,6 +10,9 @@ export interface ArcDescriptor {
 }
 
 const EARTH_RADIUS = 5;
+const EARTH_RADIUS_KM = 6371;
+/** A ring this large covers a continent and tells the user nothing. */
+export const MAX_RING_RADIUS_KM = 5000;
 
 export function latLngToVector3(latitude: number, longitude: number, radius = EARTH_RADIUS): Vector3 {
   const phi = ((90 - latitude) * Math.PI) / 180;
@@ -83,31 +86,32 @@ export function hopIndexToColor(hopIndex: number): string {
   return colors[hopIndex % colors.length];
 }
 
+/**
+ * The estimate to draw for a hop. Anycast hops and hops whose candidates
+ * the RTT rules out have none, so they get no marker, ring or arc.
+ */
+export function hopPosition(hop: HopResolution): LocationEstimate | null {
+  const best = hop.location.best;
+  if (!best || !isFinite(best.latitude) || !isFinite(best.longitude)) {
+    return null;
+  }
+  return best;
+}
+
 export function buildArcDescriptors(hops: HopResolution[]): ArcDescriptor[] {
   const arcs: ArcDescriptor[] = [];
-
-  // Filter hops to only those with valid geo data
-  const hopsWithGeo = hops.filter(hop => {
-    if (!hop.geo) return false;
-
-    // Validate that coordinates are valid numbers
-    if (
-      !isFinite(hop.geo.latitude) ||
-      !isFinite(hop.geo.longitude)
-    ) {
-      return false;
-    }
-
-    return true;
+  const located = hops.flatMap((hop) => {
+    const position = hopPosition(hop);
+    return position ? [{ hop, position }] : [];
   });
 
-  // Connect consecutive hops with geo data (skipping unknown hops)
-  for (let i = 0; i < hopsWithGeo.length - 1; i += 1) {
-    const current = hopsWithGeo[i];
-    const next = hopsWithGeo[i + 1];
+  // Connect consecutive located hops, skipping hops without a position.
+  for (let i = 0; i < located.length - 1; i += 1) {
+    const current = located[i].hop;
+    const next = located[i + 1].hop;
 
-    const start = latLngToVector3(current.geo!.latitude, current.geo!.longitude);
-    const end = latLngToVector3(next.geo!.latitude, next.geo!.longitude);
+    const start = latLngToVector3(located[i].position.latitude, located[i].position.longitude);
+    const end = latLngToVector3(located[i + 1].position.latitude, located[i + 1].position.longitude);
 
     // Validate that the resulting vectors are valid
     if (!isFinite(start.x) || !isFinite(start.y) || !isFinite(start.z) ||
@@ -131,6 +135,96 @@ export function buildArcDescriptors(hops: HopResolution[]): ArcDescriptor[] {
 }
 
 export const EARTH_RADIUS_UNITS = EARTH_RADIUS;
+
+/**
+ * Points of a circle on the globe surface: all points `radiusKm` along the
+ * surface from the centre. `radius` is the sphere the line is drawn on.
+ */
+export function circlePoints(
+  latitude: number,
+  longitude: number,
+  radiusKm: number,
+  segments = 64,
+  radius = EARTH_RADIUS
+): Vector3[] {
+  const centre = latLngToVector3(latitude, longitude, 1);
+  const angle = radiusKm / EARTH_RADIUS_KM;
+  const helper = Math.abs(centre.y) < 0.99 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
+  const u = new Vector3().crossVectors(centre, helper).normalize();
+  const w = new Vector3().crossVectors(centre, u).normalize();
+  const points: Vector3[] = [];
+  for (let i = 0; i <= segments; i += 1) {
+    const phi = (i / segments) * Math.PI * 2;
+    points.push(
+      centre
+        .clone()
+        .multiplyScalar(Math.cos(angle))
+        .addScaledVector(u, Math.sin(angle) * Math.cos(phi))
+        .addScaledVector(w, Math.sin(angle) * Math.sin(phi))
+        .multiplyScalar(radius)
+    );
+  }
+  return points;
+}
+
+export interface RingStyle {
+  opacity: number;
+  dashed: boolean;
+  lineWidth: number;
+}
+
+/** Solid for high confidence, dashed and fainter as confidence drops. */
+export const RING_STYLES: Record<LocationConfidence, RingStyle> = {
+  high: { opacity: 0.9, dashed: false, lineWidth: 1.6 },
+  medium: { opacity: 0.6, dashed: true, lineWidth: 1.3 },
+  low: { opacity: 0.4, dashed: true, lineWidth: 1 }
+};
+
+export interface ConfidenceRing extends RingStyle {
+  id: string;
+  hopIndex: number;
+  radiusKm: number;
+  confidence: LocationConfidence;
+  color: string;
+  points: Vector3[];
+}
+
+/** One uncertainty ring per drawn hop, scaled to its radius in km. */
+export function buildConfidenceRings(
+  hops: HopResolution[],
+  selectedHopIndex?: number
+): ConfidenceRing[] {
+  return hops.flatMap((hop) => {
+    const position = hopPosition(hop);
+    if (!position || position.radiusKm <= 0 || position.radiusKm > MAX_RING_RADIUS_KM) {
+      return [];
+    }
+    // A conflict keeps its confidence for ranking, but the RTT check
+    // disagrees with it, so its ring looks as uncertain as a low estimate.
+    const style =
+      position.rtt?.verdict === "conflict" ? RING_STYLES.low : RING_STYLES[position.confidence];
+    const selected = hop.hopIndex === selectedHopIndex;
+    return [
+      {
+        id: `ring-${hop.hopIndex}`,
+        hopIndex: hop.hopIndex,
+        radiusKm: position.radiusKm,
+        confidence: position.confidence,
+        color: hopIndexToColor(hop.hopIndex),
+        points: circlePoints(
+          position.latitude,
+          position.longitude,
+          position.radiusKm,
+          64,
+          EARTH_RADIUS + 0.03
+        ),
+        opacity: selected ? 1 : style.opacity,
+        dashed: style.dashed,
+        lineWidth: selected ? style.lineWidth + 0.8 : style.lineWidth
+      }
+    ];
+  });
+}
 
 /**
  * Calculate the sun's direction vector based on current date/time.

@@ -45,7 +45,8 @@ This architecture ensures you get authentic network diagnostics from your actual
 - Load-balanced (multipath) hops: every responder of a hop is shown with its own RTTs.
 - GeoIP/ASN enrichment via local MaxMind GeoLite2 databases.
 - Enrichment through Team Cymru, RDAP, RIPEstat and PeeringDB, with retry/backoff, per-provider rate limits and a 7-day cache. A failed provider never hides the GeoLite2 data.
-- 3D globe (Three.js) visualising hop arcs, coloured by latency bands, plus per-hop markers.
+- Hop locations from several sources (PeeringDB exchange LANs, router host names, GeoLite2), checked against the speed of light, with an honest confidence and radius per hop. Anycast addresses are marked and not drawn at a fake point.
+- 3D globe (Three.js) visualising hop arcs, coloured by latency bands, plus per-hop markers and an uncertainty ring true to scale.
 - Detailed hop table with RTT stats, packet loss, location and ASN metadata (including PeeringDB facility context when available).
 - Snapshot and animation exports saved directly to your downloads folder (PNG/JPG/WebP for stills, WebM/GIF for animated routes).
 
@@ -81,6 +82,7 @@ In addition to GeoLite2, VisTracer looks up each public hop address in these reg
 | **RDAP** (default `https://rdap.org/ip`) | Network name, registrant org, CIDR, country | optional custom base URL | on |
 | **RIPEstat** | Announced prefix and origin ASNs from live BGP data | identifies as `VisTracer` | on |
 | **PeeringDB** | Network type, peering policy, IXP and facility counts per ASN | optional API key (higher rate limit) | off |
+| **Internet exchanges** | PeeringDB's public exchange list, used to place hops at an exchange. Nothing about your route is sent. | none (uses the PeeringDB key if one is saved) | on |
 
 - Turn each provider on or off in **Integration settings** (gear icon) or with the quick toggles under the target field. The settings also hold the RDAP base URL and the PeeringDB API key.
 - Only public hop addresses are sent. Private, CGNAT, link-local and documentation addresses never leave your machine.
@@ -89,6 +91,23 @@ In addition to GeoLite2, VisTracer looks up each public hop address in these reg
 - The hop details panel shows every responder, the merged ASN/prefix/registry data, and the PeeringDB record (or why there is none).
 
 See [docs/architecture.md](./docs/architecture.md) for the pipeline and the merge rules.
+
+### Hop locations
+
+GeoLite2 often puts a router at its operator's head office or in the middle of a country. VisTracer collects every location candidate for a hop and picks the best one:
+
+| Source | Example | Typical radius |
+| --- | --- | --- |
+| **Exchange (IX) peering LAN** (PeeringDB) | `80.81.192.96` is on the DE-CIX Frankfurt LAN | 25–150 km |
+| **Router host name** | `be2816.ccr42.ham01.atlas.cogentco.com` names Hamburg | 50 km |
+| **GeoLite2 city / country** | "Bengaluru, India" or "United States" | 20–1000 km |
+
+- **Speed of light.** Light in fibre covers about 200 km per millisecond one way, so a hop's round-trip time limits how far it can be from you. Each location is checked against the estimate of a reference hop (the first public hop with a city-level location, often from GeoLite2). A location that is impossible relative to that estimate and weaker than it is not drawn. One that is at least as strong is kept and marked as a conflict, because the reference can be wrong too. A location that fits gets a tighter or wider radius. Locations are never moved by RTT alone.
+- **Anycast.** Public DNS resolvers, the DNS root servers and some CDN networks answer from the nearest of many sites. These hops show an "anycast" tag and a notice, and get no point on the globe.
+- **Confidence.** Each drawn hop has a ring on the globe with its radius in km: solid for high confidence, dashed and fainter for medium and low. The hop details show the source, confidence, radius, the RTT check, the IXP or host name that matched, and the other candidates.
+- Exchange matching has its own switch (**Internet exchanges**, on by default), separate from PeeringDB. It downloads PeeringDB's public exchange list at most once a day and sends nothing about your route.
+
+Data sources and licenses: [src-tauri/data/README.md](./src-tauri/data/README.md) (OurAirports, public domain). Rules and known limits: [docs/architecture.md#hop-locations](./docs/architecture.md#hop-locations).
 
 ### Linux: ICMP and TCP need raw sockets
 

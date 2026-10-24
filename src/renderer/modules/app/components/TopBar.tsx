@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  DEFAULT_RDAP_BASE_URL,
   type GeoDatabaseMeta,
   type IntegrationSettings,
   type ProviderId,
@@ -13,6 +12,7 @@ import { FiChevronDown, FiChevronUp, FiHelpCircle, FiSettings } from "react-icon
 import { IntegrationSettingsModal } from "./IntegrationSettingsModal";
 import logo from "@assets/logo.png";
 import { UI_EVENTS } from "../lib/uiEvents";
+import { INTEGRATION_DEFAULTS, normalizeIntegrations } from "../lib/integrationSettings";
 import "./TopBar.css";
 
 interface TracerouteFormState {
@@ -38,13 +38,6 @@ const numericConstraints = {
   timeoutMs: { min: 1000, max: 10000 },
   packetCount: { min: 1, max: 5 }
 } as const;
-
-const integrationDefaults: IntegrationSettings = {
-  teamCymru: { enabled: true },
-  rdap: { enabled: true, baseUrl: DEFAULT_RDAP_BASE_URL },
-  ripeStat: { enabled: true, sourceApp: "VisTracer" },
-  peeringDb: { enabled: false }
-};
 
 type IntegrationKey = keyof IntegrationSettings;
 
@@ -77,32 +70,18 @@ const integrationToggleConfig: Array<{
     label: "PeeringDB",
     description: "Facility & operator context",
     providerId: "peeringdb"
+  },
+  {
+    key: "ixMatching",
+    label: "Exchanges",
+    description: "Place hops at internet exchanges",
+    providerId: "peeringdb-ix"
   }
 ];
 
-const normalizeIntegrations = (
-  settings?: Partial<IntegrationSettings>
-): IntegrationSettings => ({
-  teamCymru: {
-    enabled: settings?.teamCymru?.enabled ?? integrationDefaults.teamCymru.enabled
-  },
-  rdap: {
-    enabled: settings?.rdap?.enabled ?? integrationDefaults.rdap.enabled,
-    baseUrl: settings?.rdap?.baseUrl ?? integrationDefaults.rdap.baseUrl
-  },
-  ripeStat: {
-    enabled: settings?.ripeStat?.enabled ?? integrationDefaults.ripeStat.enabled,
-    sourceApp: "VisTracer"
-  },
-  peeringDb: {
-    enabled: settings?.peeringDb?.enabled ?? integrationDefaults.peeringDb.enabled,
-    apiKey: settings?.peeringDb?.apiKey
-  }
-});
-
 export const TopBar: React.FC = () => {
   const [form, setForm] = useState<TracerouteFormState>(defaultState);
-  const [integrationSettings, setIntegrationSettings] = useState<IntegrationSettings>(integrationDefaults);
+  const [integrationSettings, setIntegrationSettings] = useState<IntegrationSettings>(INTEGRATION_DEFAULTS);
   const [integrationsLoading, setIntegrationsLoading] = useState(true);
   const [integrationSaveError, setIntegrationSaveError] = useState<string | undefined>(undefined);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);

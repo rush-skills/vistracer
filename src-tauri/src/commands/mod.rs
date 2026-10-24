@@ -4,6 +4,7 @@ pub mod enrichment_cache;
 pub mod geo;
 pub mod geodb_downloader;
 pub mod integrations;
+pub mod ix_list;
 pub mod lookup;
 pub mod persistence;
 pub mod retry;

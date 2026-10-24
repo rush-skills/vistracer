@@ -11,7 +11,8 @@ const savedSettings: IntegrationSettings = {
   teamCymru: { enabled: true },
   rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
   ripeStat: { enabled: true, sourceApp: "VisTracer" },
-  peeringDb: { enabled: false }
+  peeringDb: { enabled: false },
+  ixMatching: { enabled: true }
 };
 
 const renderModal = (settings: IntegrationSettings = savedSettings) => {
@@ -41,7 +42,17 @@ describe("IntegrationSettingsModal providers", () => {
     expect(checkbox("RDAP").checked).toBe(true);
     expect(checkbox("RIPEstat").checked).toBe(true);
     expect(checkbox("PeeringDB").checked).toBe(false);
+    expect(checkbox("Internet exchanges").checked).toBe(true);
+    expect(
+      screen.getByText(
+        "Match hops to internet exchanges. Downloads PeeringDB's public exchange list once a day; nothing about your route is sent."
+      )
+    ).toBeTruthy();
     expect(input("PeeringDB API key").type).toBe("password");
+    // The exchange list download uses the key too, so it stays editable
+    // while either switch is on.
+    expect(input("PeeringDB API key").disabled).toBe(false);
+    fireEvent.click(checkbox("Internet exchanges"));
     expect(input("PeeringDB API key").disabled).toBe(true);
   });
 
@@ -58,9 +69,23 @@ describe("IntegrationSettingsModal providers", () => {
       teamCymru: { enabled: false },
       rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
       ripeStat: { enabled: true, sourceApp: "VisTracer" },
-      peeringDb: { enabled: true, apiKey: "key-123" }
+      peeringDb: { enabled: true, apiKey: "key-123" },
+      ixMatching: { enabled: true }
     });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("saves exchange matching separately from PeeringDB", async () => {
+    const { onSave, onClose } = renderModal();
+    expect(checkbox("PeeringDB").checked).toBe(false);
+
+    fireEvent.click(checkbox("Internet exchanges"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+    const saved = onSave.mock.calls[0][0] as IntegrationSettings;
+    expect(saved.ixMatching).toEqual({ enabled: false });
+    expect(saved.peeringDb.enabled).toBe(false);
   });
 
   it("loads an existing key and lets the user disable a provider", async () => {
@@ -98,7 +123,8 @@ describe("buildIntegrationSettings", () => {
     rdapBaseUrl: "",
     ripeStatEnabled: true,
     peeringDbEnabled: true,
-    peeringDbApiKey: ""
+    peeringDbApiKey: "",
+    ixMatchingEnabled: true
   };
 
   it("uses the default RDAP URL when blank and drops an empty key", () => {
@@ -108,7 +134,8 @@ describe("buildIntegrationSettings", () => {
         teamCymru: { enabled: true },
         rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
         ripeStat: { enabled: true, sourceApp: "VisTracer" },
-        peeringDb: { enabled: true, apiKey: undefined }
+        peeringDb: { enabled: true, apiKey: undefined },
+        ixMatching: { enabled: true }
       }
     });
   });

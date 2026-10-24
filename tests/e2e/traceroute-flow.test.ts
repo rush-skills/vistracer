@@ -41,7 +41,16 @@ function emitEvent(event: string, payload: unknown) {
 import "../../src/common/bridge";
 // Import store after mocks
 import { useTracerouteStore } from "../../src/renderer/state/tracerouteStore";
-import type { TracerouteProgressEvent, HopResolution } from "../../src/common/ipc";
+import type { TracerouteProgressEvent, HopLocation, HopResolution } from "../../src/common/ipc";
+
+const noLocation: HopLocation = {
+  best: null,
+  alternatives: [],
+  ixp: null,
+  hostnameHint: null,
+  anycast: null,
+  isRttReference: false
+};
 
 function createMockHop(index: number, ip: string, avgRtt: number): HopResolution {
   return {
@@ -68,7 +77,7 @@ function createMockHop(index: number, ip: string, avgRtt: number): HopResolution
       network: `${ip}/24`,
     },
     isPrivate: false,
-    isAnycastSuspected: false,
+    location: noLocation,
     rawLine: `${index}  ${ip}  ${avgRtt} ms`,
     providers: [
       { provider: "maxmind", status: "success", message: "Resolved locally." },
@@ -200,7 +209,7 @@ describe("Full Traceroute Flow", () => {
         lossPercent: 100,
         latency: { minRttMs: null, maxRttMs: null, avgRttMs: null, jitterMs: null },
         isPrivate: false,
-        isAnycastSuspected: false,
+        location: noLocation,
         rawLine: "2  * * *",
       },
       completed: false,
@@ -225,7 +234,7 @@ describe("Full Traceroute Flow", () => {
           lossPercent: 100,
           latency: { minRttMs: null, maxRttMs: null, avgRttMs: null, jitterMs: null },
           isPrivate: false,
-          isAnycastSuspected: false,
+          location: noLocation,
           rawLine: "2  * * *",
         },
         createMockHop(3, "8.8.8.8", 15),

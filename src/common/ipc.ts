@@ -30,7 +30,13 @@ export interface AsnDetails {
   registry?: string;
 }
 
-export type ProviderId = "maxmind" | "team-cymru" | "rdap" | "ripe-stat" | "peeringdb";
+export type ProviderId =
+  | "maxmind"
+  | "team-cymru"
+  | "rdap"
+  | "ripe-stat"
+  | "peeringdb"
+  | "peeringdb-ix";
 
 /**
  * success: the provider answered (with or without a record).
@@ -77,6 +83,89 @@ export interface HopResponder {
 
 export type LookupState = "pending" | "complete";
 
+/** What produced a location estimate (mirrors `LocationSource` in src-tauri/src/types.rs). */
+export type LocationSource = "ixp" | "hostname-hint" | "geolite-city" | "geolite-country";
+
+export type LocationConfidence = "high" | "medium" | "low";
+
+/**
+ * Checked against the reference hop's estimate (itself often GeoLite2).
+ * feasible: possible, radius unchanged. tightened: the RTT limits the hop to a
+ * smaller area. widened: possible only beyond the stated radius. infeasible:
+ * impossible relative to the reference and weaker than it; never the best
+ * estimate. conflict: impossible relative to the reference but at least as
+ * strong as it; kept, radius unchanged.
+ */
+export type RttVerdict = "feasible" | "tightened" | "widened" | "infeasible" | "conflict";
+
+export interface RttCheck {
+  verdict: RttVerdict;
+  distanceKm: number;
+  maxDistanceKm: number;
+  originalRadiusKm: number;
+  referenceHopIndex: number;
+  /** Source of the reference hop's estimate. */
+  referenceSource: LocationSource;
+  /** Hop whose RTT set the bound: this hop or a later one. */
+  boundHopIndex: number;
+  boundRttMs: number;
+}
+
+export interface LocationEstimate {
+  source: LocationSource;
+  latitude: number;
+  longitude: number;
+  radiusKm: number;
+  confidence: LocationConfidence;
+  label: string;
+  rtt: RttCheck | null;
+}
+
+export interface IxpMatch {
+  ixId: number;
+  name: string;
+  city: string | null;
+  country: string | null;
+  prefix: string;
+  facilityCount: number;
+}
+
+export type HintRule =
+  | "carrier-code"
+  | "city-region-code"
+  | "city-name"
+  | "airport-code"
+  | "bare-airport-code";
+
+export interface HostnameHint {
+  hostName: string;
+  token: string;
+  rule: HintRule;
+  carrier: string | null;
+  iata: string;
+  place: string;
+}
+
+export type AnycastEvidence = "known-prefix" | "operator-asn-rtt";
+
+export interface AnycastInfo {
+  evidence: AnycastEvidence;
+  service: string;
+  geoliteRuledOut: boolean;
+  maxDistanceKm: number | null;
+  referenceHopIndex: number | null;
+}
+
+/** `best` is drawn on the globe; anycast hops have none. */
+export interface HopLocation {
+  best: LocationEstimate | null;
+  alternatives: LocationEstimate[];
+  ixp: IxpMatch | null;
+  hostnameHint: HostnameHint | null;
+  anycast: AnycastInfo | null;
+  isRttReference: boolean;
+}
+
 /** Rust sends every field; `Option` values arrive as `null`. */
 export interface HopResolution {
   hopIndex: number;
@@ -85,10 +174,11 @@ export interface HopResolution {
   responders: HopResponder[];
   lossPercent: number | null;
   latency: HopLatencyStats;
+  /** Raw GeoLite2 City record; `location` holds the estimate to draw. */
   geo?: GeoDetails | null;
   asn?: AsnDetails | null;
   isPrivate: boolean;
-  isAnycastSuspected: boolean;
+  location: HopLocation;
   rawLine: string;
   providers?: ProviderStatus[] | null;
   peeringDb?: PeeringDbDetails | null;
@@ -173,6 +263,15 @@ export interface PeeringDbSettings {
   apiKey?: string;
 }
 
+/**
+ * Placing hops at internet exchanges. Separate from `peeringDb`: it downloads
+ * PeeringDB's public exchange list and sends nothing about the route. On by
+ * default, also for settings saved before it existed.
+ */
+export interface IxMatchingSettings {
+  enabled: boolean;
+}
+
 /** Mirrors `DEFAULT_RDAP_BASE_URL` in src-tauri/src/commands/persistence.rs. */
 export const DEFAULT_RDAP_BASE_URL = "https://rdap.org/ip";
 
@@ -181,6 +280,7 @@ export interface IntegrationSettings {
   rdap: RdapSettings;
   ripeStat: RipeStatSettings;
   peeringDb: PeeringDbSettings;
+  ixMatching: IxMatchingSettings;
 }
 
 export interface AppInfo {

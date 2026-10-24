@@ -2,11 +2,14 @@
 //! results. Every emitted `HopResolution` is rendered from this state, so
 //! hop lines and lookup results can arrive in any order.
 
+use super::integrations::Enrichment;
 use super::lookup::{IpLookup, LookupKind, LookupRequest};
 use super::traceroute_parse::{ParsedHop, ParsedLine};
-use crate::net::is_private_ip;
+use crate::geoloc::estimate::{locate_hops, HopInput};
+use crate::net::{is_private_ip, is_publicly_routable};
 use crate::types::{HopLatencyStats, HopResolution, HopResponder, LookupState};
 use std::collections::{BTreeMap, HashMap};
+use std::net::IpAddr;
 
 pub struct RunState {
     probes_per_hop: u32,
@@ -140,6 +143,13 @@ impl RunState {
         }
     }
 
+    fn primary_enrichment(&self, hop: &ParsedHop) -> Option<&Enrichment> {
+        let primary = hop.responders.first()?;
+        self.results.get(&primary.ip)?.enrichment.as_ref()
+    }
+
+    /// Renders a hop without its location, which depends on the other hops
+    /// (see `hops`).
     fn render_hop(&self, hop: &ParsedHop) -> HopResolution {
         let responders: Vec<HopResponder> = hop
             .responders
@@ -160,11 +170,7 @@ impl RunState {
             .then(|| round2(lost as f64 / self.probes_per_hop as f64 * 100.0));
 
         let primary = responders.first();
-        let enrichment = hop
-            .responders
-            .first()
-            .and_then(|r| self.results.get(&r.ip))
-            .and_then(|l| l.enrichment.as_ref());
+        let enrichment = self.primary_enrichment(hop);
         let geo = enrichment.and_then(|e| e.geo.clone());
 
         let lookup_state = if hop.responders.iter().any(|r| self.is_pending(&r.ip)) {
@@ -183,9 +189,7 @@ impl RunState {
             latency,
             geo,
             asn: enrichment.and_then(|e| e.asn.clone()),
-            // Anycast detection belongs to the geolocation-quality phase;
-            // see docs/deferred/anycast-heuristic.md.
-            is_anycast_suspected: false,
+            location: Default::default(),
             raw_line: hop.raw_lines.join("\n"),
             providers: enrichment.map(|e| e.providers.clone()),
             peering_db: enrichment.and_then(|e| e.peering_db.clone()),
@@ -193,8 +197,49 @@ impl RunState {
         }
     }
 
+    fn location_input<'a>(&'a self, hop: &ParsedHop, view: &'a HopResolution) -> HopInput<'a> {
+        let enrichment = self.primary_enrichment(hop);
+        HopInput {
+            hop_index: view.hop_index,
+            public_ip: view
+                .ip_address
+                .as_deref()
+                .and_then(|ip| ip.parse::<IpAddr>().ok())
+                .filter(|ip| is_publicly_routable(*ip)),
+            host_name: view.host_name.as_deref(),
+            geolite: enrichment.and_then(|e| e.geo.as_ref()),
+            asn: enrichment.and_then(|e| e.asn.as_ref()),
+            ixp: enrichment.and_then(|e| e.ixp.as_ref()),
+            single_responder: hop.responders.len() == 1,
+            // The estimates belong to the primary responder; another
+            // responder of a load-balanced hop may be closer.
+            min_rtt_ms: compute_latency_stats(
+                hop.responders
+                    .first()
+                    .map_or(&[][..], |primary| primary.rtts.as_slice()),
+            )
+            .min_rtt_ms,
+        }
+    }
+
+    /// Every hop, with locations estimated across the whole run: RTT
+    /// checks use a reference hop and the RTTs of later hops.
     pub fn hops(&self) -> Vec<HopResolution> {
-        self.hops.values().map(|hop| self.render_hop(hop)).collect()
+        let mut rendered: Vec<HopResolution> =
+            self.hops.values().map(|hop| self.render_hop(hop)).collect();
+        let locations = {
+            let inputs: Vec<HopInput> = self
+                .hops
+                .values()
+                .zip(&rendered)
+                .map(|(hop, view)| self.location_input(hop, view))
+                .collect();
+            locate_hops(&inputs)
+        };
+        for (hop, location) in rendered.iter_mut().zip(locations) {
+            hop.location = location;
+        }
+        rendered
     }
 
     /// Returns the hops whose rendered value changed since the last call.
@@ -214,9 +259,11 @@ impl RunState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::integrations::Enrichment;
     use crate::commands::traceroute_parse::parse_line;
-    use crate::types::{AsnDetails, ProviderId, ProviderState, ProviderStatus};
+    use crate::types::{
+        AnycastEvidence, AsnDetails, GeoDetails, LocationSource, ProviderId, ProviderState,
+        ProviderStatus, RttVerdict,
+    };
 
     fn feed(state: &mut RunState, line: &str) -> Vec<LookupRequest> {
         state.apply_line(parse_line(line))
@@ -239,6 +286,7 @@ mod tests {
                     ..AsnDetails::default()
                 }),
                 peering_db: None,
+                ixp: None,
                 providers: vec![ProviderStatus::new(
                     ProviderId::TeamCymru,
                     ProviderState::Error,
@@ -384,6 +432,137 @@ mod tests {
         );
         assert!(hops[0].is_private);
         assert_eq!(hops[2].raw_line.lines().count(), 3);
+    }
+
+    fn located(geo: GeoDetails, asn: u32) -> IpLookup {
+        let mut lookup = enriched(asn);
+        lookup.host_name = None;
+        if let Some(enrichment) = lookup.enrichment.as_mut() {
+            enrichment.geo = Some(geo);
+        }
+        lookup
+    }
+
+    fn geo(latitude: f64, longitude: f64, city: Option<&str>, radius: f64) -> GeoDetails {
+        GeoDetails {
+            latitude,
+            longitude,
+            city: city.map(str::to_string),
+            country: None,
+            iso_code: None,
+            confidence: Some(radius),
+        }
+    }
+
+    /// The trace from Mumbai of the old deferred anycast note, run through
+    /// the state: hop 2 is the RTT reference, 8.8.8.8 is anycast, and the
+    /// Cogent router name beats GeoLite2's registered location.
+    #[test]
+    fn locations_use_reference_hop_rtt_and_host_names() {
+        let mut state = RunState::new(1);
+        let gateway = feed(&mut state, " 1  192.168.1.1  0.5 ms");
+        let isp = feed(&mut state, " 2  49.44.1.1  2.0 ms");
+        let anycast = feed(&mut state, " 3  8.8.8.8  4.0 ms");
+        let cogent = feed(
+            &mut state,
+            " 4  be3187.ccr41.fra03.atlas.cogentco.com (154.54.1.1)  120.0 ms",
+        );
+        state.apply_lookup(
+            &gateway[0],
+            IpLookup {
+                host_name: None,
+                enrichment: None,
+            },
+        );
+        state.apply_lookup(
+            &isp[0],
+            located(geo(19.076, 72.8777, Some("Mumbai"), 20.0), 55836),
+        );
+        state.apply_lookup(
+            &anycast[0],
+            located(geo(37.751, -97.822, None, 1000.0), 15169),
+        );
+        // GeoLite2 places the Cogent router at the company's US address.
+        state.apply_lookup(
+            &cogent[0],
+            located(geo(38.9, -77.0, Some("Washington"), 1000.0), 174),
+        );
+
+        let hops = state.hops();
+        assert_eq!(hops[0].location, Default::default(), "private hop");
+        assert!(hops[1].location.is_rtt_reference);
+        assert_eq!(
+            hops[1].location.best.as_ref().unwrap().source,
+            LocationSource::GeoliteCity
+        );
+
+        let dns = &hops[2].location;
+        assert!(dns.best.is_none(), "anycast hops get no point");
+        let info = dns.anycast.as_ref().unwrap();
+        assert_eq!(info.evidence, AnycastEvidence::KnownPrefix);
+        assert!(info.geolite_ruled_out);
+        assert_eq!(
+            dns.alternatives[0].rtt.as_ref().unwrap().verdict,
+            RttVerdict::Infeasible
+        );
+
+        let router = &hops[3].location;
+        let best = router.best.as_ref().unwrap();
+        assert_eq!(best.source, LocationSource::HostnameHint);
+        assert_eq!(router.hostname_hint.as_ref().unwrap().token, "fra03");
+        assert_eq!(best.rtt.as_ref().unwrap().verdict, RttVerdict::Feasible);
+        assert_eq!(router.alternatives[0].source, LocationSource::GeoliteCity);
+    }
+
+    #[test]
+    fn a_new_lower_rtt_hop_re_emits_earlier_hops() {
+        let mut state = RunState::new(1);
+        let isp = feed(&mut state, " 1  49.44.1.1  1.0 ms");
+        let slow = feed(&mut state, " 2  62.115.1.1  130.0 ms");
+        state.apply_lookup(
+            &isp[0],
+            located(geo(19.076, 72.8777, Some("Mumbai"), 20.0), 55836),
+        );
+        state.apply_lookup(
+            &slow[0],
+            located(geo(51.5, -0.12, Some("London"), 150.0), 1299),
+        );
+        state.take_changed();
+        assert!(state.hops()[1].location.best.is_some());
+
+        // Hop 3 answers in 3 ms, so hop 2 cannot be in London.
+        feed(&mut state, " 3  49.44.9.9  3.0 ms");
+        let changed: Vec<u32> = state.take_changed().iter().map(|h| h.hop_index).collect();
+        assert!(changed.contains(&2), "{changed:?}");
+        assert!(state.hops()[1].location.best.is_none());
+    }
+
+    #[test]
+    fn multipath_hop_is_checked_with_its_primary_responders_rtt() {
+        let mut state = RunState::new(2);
+        let isp = feed(&mut state, " 1  49.44.1.1  1.0 ms");
+        // The primary responder (London) answers in 130 ms; a second path
+        // of the same hop answers in 3 ms.
+        let hop = feed(&mut state, " 2  62.115.1.1  130.0 ms 49.44.9.9  3.0 ms");
+        state.apply_lookup(
+            &isp[0],
+            located(geo(19.076, 72.8777, Some("Mumbai"), 20.0), 55836),
+        );
+        state.apply_lookup(
+            &hop[0],
+            located(geo(51.5, -0.12, Some("London"), 150.0), 1299),
+        );
+
+        let hops = state.hops();
+        assert_eq!(hops[1].latency.min_rtt_ms, Some(3.0));
+        let best = hops[1]
+            .location
+            .best
+            .as_ref()
+            .expect("London is possible at 130 ms");
+        let check = best.rtt.as_ref().unwrap();
+        assert_eq!(check.verdict, RttVerdict::Feasible);
+        assert_eq!(check.bound_rtt_ms, 130.0);
     }
 
     #[test]

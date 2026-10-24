@@ -1,0 +1,127 @@
+# Hostname hint fixtures for geoloc::hostname.
+# Format: host name | context country (ISO, or -) | expected "IATA rule confidence", or - for no hint.
+# The context country stands in for the GeoLite2 or registry country of the address.
+
+# Carrier backbone routers, in the naming formats seen in public traceroutes.
+ae-1.r21.lsanca07.us.bb.gin.ntt.net | - | LAX city-region-code high
+ae-2.r24.asbnva02.us.bb.gin.ntt.net | - | IAD city-region-code high
+ae-5.r20.frnkge13.de.bb.gin.ntt.net | - | FRA city-region-code high
+ae-16.r24.londen12.uk.bb.gin.ntt.net | - | LCY city-region-code high
+ae-7.r21.sttlwa01.us.bb.gin.ntt.net | - | SEA city-region-code high
+be3187.ccr41.fra03.atlas.cogentco.com | - | FRA airport-code high
+be2813.ccr41.ams03.atlas.cogentco.com | - | AMS airport-code high
+be3627.ccr41.jfk02.atlas.cogentco.com | - | JFK airport-code high
+be2490.ccr42.lon13.atlas.cogentco.com | - | LCY airport-code high
+te0-0-2-0.rcr21.b015534-1.lon13.atlas.cogentco.com | - | LCY airport-code high
+ffm-bb2-link.ip.twelve99.net | - | FRA carrier-code high
+ldn-bb1-link.ip.twelve99.net | - | LCY carrier-code high
+nyk-bb2-link.ip.twelve99.net | - | LGA carrier-code high
+s-bb1-link.ip.twelve99.net | - | BMA carrier-code high
+sjo-b23-link.ip.twelve99.net | - | SJC carrier-code high
+las-b24-link.ip.twelve99.net | - | LAX carrier-code high
+ash-bb4-link.telia.net | - | IAD carrier-code high
+100ge0-33.core2.fmt2.he.net | - | SJC carrier-code high
+port-channel8.core3.fra1.he.net | - | FRA airport-code high
+100ge14-1.core1.ash1.he.net | - | IAD carrier-code high
+10ge3-1.core1.lon2.he.net | - | LCY airport-code high
+bom07s29-in-f14.1e100.net | - | BOM carrier-code high
+maa03s36-in-f14.1e100.net | - | MAA carrier-code high
+lhr25s34-in-f14.1e100.net | - | LHR carrier-code high
+nrt12s30-in-f14.1e100.net | - | NRT carrier-code high
+ae-1-3502.ear2.Frankfurt1.Level3.net | - | FRA city-name high
+ae-2-3602.ear4.London2.Level3.net | - | LCY city-name high
+ae-11-11.car1.NewYork1.Level3.net | - | LGA city-name high
+if-ae-2.2.tcore1.fr0-frankfurt.as6453.net | - | FRA city-name high
+if-ae-12.2.tcore1.mlv-mumbai.as6453.net | - | BOM city-name high
+if-ae-5.2.tcore2.l78-london.as6453.net | - | LCY city-name high
+ae5.cs1.lhr15.uk.eth.zayo.com | - | LHR airport-code high
+ae11.cs1.iad93.us.eth.zayo.com | - | IAD airport-code high
+ae3.cr1-fra2.ip4.gtt.net | - | FRA airport-code high
+et-0-0-0.cr4-lon2.ip4.gtt.net | - | LCY airport-code high
+0.ae1.br2.iad8.alter.net | - | IAD airport-code high
+pool-71-105-4-5.nycmny.fios.verizon.net | - | LGA city-region-code high
+be-1101-cr01.ashburn.va.ibone.comcast.net | - | IAD city-name high
+be-33657-cr02.sunnyvale.ca.ibone.comcast.net | - | SJC city-name high
+
+# Seen in the smoke traces for this change (2026-10-24). ISP access names are
+# replaced by synthetic ones with the same shape.
+be6391.rcr21.b015591-1.lon05.atlas.cogentco.com | - | LCY airport-code high
+be9653.ccr82.lon05.atlas.cogentco.com | US | LCY airport-code high
+be9036.ccr42.ams03.atlas.cogentco.com | US | AMS airport-code high
+be2816.ccr42.ham01.atlas.cogentco.com | US | HAM airport-code high
+be2504.rcr21.cph01.atlas.cogentco.com | US | CPH airport-code high
+be3090.rcr71.mmx01.atlas.cogentco.com | US | MMX airport-code high
+be41.core3.lax1.he.net | US | LAX airport-code high
+port-channel21.core1.fmt2.he.net | US | SJC carrier-code high
+port-channel80.core1.fmt1.he.net | US | SJC carrier-code high
+avk1-peer-1.ae1-unit0.tele2.net | EE | -
+brn-core-1.bundle-ether26.tele2.net | EE | -
+jkg-core-2.bundle-ether2.tele2.net | EE | -
+d90-130-70-73.cust.tele2.se | SE | -
+de-cix.openpeering.nl | DE | -
+telecity-cr.openpeering.nl | NL | -
+jointtransit.fryslan.nl | NL | -
+gw.amsix.eqix3rtr.ripe.net | NL | -
+router-sov-c.mythic-beasts.com | GB | -
+vds-sov-x.mythic-beasts.com | GB | -
+cust-dynamic-1.2.0.192.broadband.example.in | IN | -
+nsg-corporate-1.2.0.192.example.in | IN | -
+dsldevice.lan | - | -
+
+# Role labels next to the site label (code review): only the label before
+# Cogent's `atlas` and Microsoft's `ntwk` is read.
+te8-3.mag01.man01.atlas.cogentco.com | - | MAN airport-code high
+gi9-5.mag01.mad05.atlas.cogentco.com | - | MAD airport-code high
+be-7-0.ibr01.par21.ntwk.msn.net | - | ORY airport-code high
+ae22-0.icr01.lon24.ntwk.msn.net | - | LCY airport-code high
+38.122.40.1.cogentco.com | US | -
+
+# Generic rules (no known carrier domain).
+xe-0-0-0.lon10.core | - | LCY airport-code medium
+ae1.fra03.example.net | - | FRA airport-code medium
+ae1.avk1.example.net | MN | AVK airport-code medium
+router1.paris.example.com | - | ORY city-name medium
+lsanca07.us.example.net | - | LAX city-region-code high
+par.example.net | FR | ORY bare-airport-code low
+core1.lax.example.net | US | LAX bare-airport-code low
+
+# Negative cases: no hint must come out.
+par.example.net | - | -
+par.example.net | DE | -
+ae1.fra03.us.example.net | - | -
+ae1.avk1.example.net | - | -
+mag01.example.net | PG | -
+ibr01.par21.example.net | - | ORY airport-code medium
+fra-ams.example.net | - | -
+ae1.fra2-ams3.example.net | - | -
+c-73-158-12-34.hsd1.ca.comcast.net | US | -
+dsl-187-155-12-1-dyn.prod-infinitum.com.mx | MX | -
+customer-187-141-12-5.megared.net.mx | MX | -
+host-212-12-34-56.customer.example.net | - | -
+static.vnpt.vn | VN | -
+ec2-3-4-5-6.compute-1.amazonaws.com | US | -
+lo0.bbr01.example.net | - | -
+gw1.man.isp.example.net | GB | -
+nat.lan.example.org | US | -
+sat-gw.example.net | US | -
+res-1-2-3-4.example.net | AR | -
+cgn1.example.net | DE | -
+ccr41.example.net | US | -
+pos-0-0-0.atm1.example.net | - | -
+tun0.vpn.example.net | - | -
+gig0-1.ten1.example.net | CN | -
+srx1.fw.example.net | LY | -
+xe-1-0-0.cr1.example.net | - | -
+ae-12.edge5.example.net | - | -
+be2xxx.ccr41.atlas.cogentco.com | - | -
+bom07s29-in-f14.example.net | IN | -
+sin.example.com | - | -
+mail.google.com | US | -
+www.example.com | - | -
+dns.google | US | -
+one.one.one.one | AU | -
+atlas.ripe.net | NL | -
+frankfurter.example.com | DE | -
+abc-def-ghi.example.org | - | -
+8.8.8.8 | - | -
+localhost | - | -

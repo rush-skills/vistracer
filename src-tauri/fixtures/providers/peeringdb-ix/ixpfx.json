@@ -1,0 +1,29 @@
+{
+ "data": [
+  {
+   "id": 300,
+   "ixlan_id": 26,
+   "protocol": "IPv6",
+   "prefix": "2001:7f8:1::/64"
+  },
+  {
+   "id": 555,
+   "ixlan_id": 26,
+   "protocol": "IPv4",
+   "prefix": "80.249.208.0/21"
+  },
+  {
+   "id": 54,
+   "ixlan_id": 31,
+   "protocol": "IPv4",
+   "prefix": "80.81.192.0/21"
+  },
+  {
+   "id": 312,
+   "ixlan_id": 31,
+   "protocol": "IPv6",
+   "prefix": "2001:7f8::/64"
+  }
+ ],
+ "meta": {}
+}

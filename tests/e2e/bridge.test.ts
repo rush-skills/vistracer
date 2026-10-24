@@ -240,7 +240,14 @@ describe("Tauri Bridge Layer", () => {
           lossPercent: 0,
           latency: { minRttMs: 1, maxRttMs: 2, avgRttMs: 1.5, jitterMs: 1 },
           isPrivate: true,
-          isAnycastSuspected: false,
+          location: {
+            best: null,
+            alternatives: [],
+            ixp: null,
+            hostnameHint: null,
+            anycast: null,
+            isRttReference: false
+          },
           rawLine: "1  10.0.0.1  1.5 ms",
         },
         completed: false,

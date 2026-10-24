@@ -67,6 +67,8 @@ pub struct IntegrationSettings {
     pub ripe_stat: RipeStatSettings,
     #[serde(rename = "peeringDb")]
     pub peering_db: PeeringDbSettings,
+    #[serde(rename = "ixMatching")]
+    pub ix_matching: IxMatchingSettings,
 }
 
 impl Default for IntegrationSettings {
@@ -85,6 +87,7 @@ impl Default for IntegrationSettings {
                 enabled: false,
                 api_key: None,
             },
+            ix_matching: IxMatchingSettings::default(),
         }
     }
 }
@@ -154,6 +157,22 @@ pub struct PeeringDbSettings {
     pub enabled: bool,
     #[serde(rename = "apiKey")]
     pub api_key: Option<String>,
+}
+
+/// Placing hops at internet exchanges. Separate from the PeeringDB switch:
+/// it downloads PeeringDB's public exchange list and sends nothing about
+/// the user's route, so it is on by default, also for settings files saved
+/// before the switch existed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IxMatchingSettings {
+    pub enabled: bool,
+}
+
+impl Default for IxMatchingSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,6 +440,28 @@ mod tests {
         let mut key = IntegrationSettings::default();
         key.peering_db.api_key = Some("abc\ndef".into());
         assert!(key.validated().is_err());
+    }
+
+    #[test]
+    fn exchange_matching_is_on_by_default_and_for_old_settings_files() {
+        assert!(IntegrationSettings::default().ix_matching.enabled);
+
+        // A settings.json saved before the switch existed.
+        let old: PersistedSettings = serde_json::from_str(
+            r#"{"integrations":{"teamCymru":{"enabled":true},"rdap":{"enabled":true,"baseUrl":null},"ripeStat":{"enabled":true,"sourceApp":"VisTracer"},"peeringDb":{"enabled":false,"apiKey":null}}}"#,
+        )
+        .unwrap();
+        assert!(old.integrations.ix_matching.enabled);
+        assert!(!old.integrations.peering_db.enabled);
+
+        let empty: IntegrationSettings = serde_json::from_str(r#"{"ixMatching":{}}"#).unwrap();
+        assert!(empty.ix_matching.enabled);
+
+        let off: IntegrationSettings =
+            serde_json::from_str(r#"{"ixMatching":{"enabled":false}}"#).unwrap();
+        assert!(!off.ix_matching.enabled);
+        let saved = serde_json::to_value(off.validated().unwrap()).unwrap();
+        assert_eq!(saved["ixMatching"]["enabled"], serde_json::json!(false));
     }
 
     #[test]

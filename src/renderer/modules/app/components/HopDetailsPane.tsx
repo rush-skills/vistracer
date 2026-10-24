@@ -1,8 +1,9 @@
 import React, { useMemo } from "react";
-import type { HopResolution, TracerouteRun } from "@common/ipc";
+import type { TracerouteRun } from "@common/ipc";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { hopIndexToColor } from "@renderer/lib/globe";
 import { describeFailures, failedProviders } from "../lib/providers";
+import { SOURCE_LABELS, formatRadius, locationLabel } from "../lib/location";
 import { HopInspector } from "./HopInspector";
 import "./HopDetailsPane.css";
 
@@ -17,22 +18,6 @@ const statusLabelMap: Record<HopDetailsPaneProps["status"], string> = {
   running: "Running",
   success: "Completed",
   error: "Error"
-};
-
-const locationLabel = (hop: HopResolution): string => {
-  if (hop.geo) {
-    return `${hop.geo.city ? `${hop.geo.city}, ` : ""}${hop.geo.country ?? ""}`.trim() || "Unknown";
-  }
-  if (hop.isPrivate) {
-    return "Private";
-  }
-  if (hop.lookupState === "pending") {
-    return "Resolving…";
-  }
-  if (hop.asn?.country) {
-    return `${hop.asn.country} (registry)`;
-  }
-  return "Unknown";
 };
 
 export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, selectedHopIndex, status }) => {
@@ -159,7 +144,39 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                         </div>
                       </td>
                       <td>{hop.lossPercent == null ? "–" : `${hop.lossPercent}%`}</td>
-                      <td>{location}</td>
+                      <td>
+                        <div className="hop-details__location">
+                          <span>
+                            {location}
+                            {hop.location.anycast && (
+                              <span
+                                className="hop-details__tag hop-details__tag--anycast"
+                                title="Many sites announce this address; the nearest one answered. No single point is drawn."
+                              >
+                                anycast
+                              </span>
+                            )}
+                            {hop.location.best?.rtt?.verdict === "conflict" && (
+                              <span
+                                className="hop-details__tag hop-details__tag--conflict"
+                                title="The RTT check against the reference hop disagrees with this location; one of the two is wrong."
+                              >
+                                conflict
+                              </span>
+                            )}
+                          </span>
+                          {hop.location.best && (
+                            <small title={`Source: ${SOURCE_LABELS[hop.location.best.source]}`}>
+                              <span
+                                className={`hop-details__confidence hop-details__confidence--${hop.location.best.confidence}`}
+                              >
+                                {hop.location.best.confidence}
+                              </span>{" "}
+                              {formatRadius(hop.location.best.radiusKm)}
+                            </small>
+                          )}
+                        </div>
+                      </td>
                       <td>
                         <div className="hop-details__asn-cell">
                           <div>{hop.asn?.asn ? `AS${hop.asn.asn}` : "–"}</div>

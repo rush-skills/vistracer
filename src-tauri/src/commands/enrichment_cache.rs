@@ -4,9 +4,11 @@
 use crate::types::{PeeringDbDetails, ProviderId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use super::integrations::{CymruRecord, RdapRecord, RipeStatRecord};
+use crate::geoloc::ixp::IxDataset;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,10 +38,14 @@ impl<V> TtlMap<V> {
     }
 
     pub fn get(&self, key: &str, now_ms: i64, ttl_ms: i64) -> Option<&V> {
+        self.get_entry(key, now_ms, ttl_ms)
+            .map(|entry| &entry.value)
+    }
+
+    pub fn get_entry(&self, key: &str, now_ms: i64, ttl_ms: i64) -> Option<&TtlEntry<V>> {
         self.entries
             .get(key)
             .filter(|entry| Self::is_fresh(entry.stored_at_ms, now_ms, ttl_ms))
-            .map(|entry| &entry.value)
     }
 
     pub fn insert(&mut self, key: String, value: V, now_ms: i64) {
@@ -85,6 +91,7 @@ pub enum CachedRecord {
     Rdap(Option<RdapRecord>),
     RipeStat(Option<RipeStatRecord>),
     PeeringDb(Option<PeeringDbDetails>),
+    PeeringDbIx(Option<IxDataset>),
 }
 
 /// Maps a provider record type to its cache slot.
@@ -115,6 +122,7 @@ cached_provider!(CymruRecord, ProviderId::TeamCymru, TeamCymru);
 cached_provider!(RdapRecord, ProviderId::Rdap, Rdap);
 cached_provider!(RipeStatRecord, ProviderId::RipeStat, RipeStat);
 cached_provider!(PeeringDbDetails, ProviderId::PeeringDb, PeeringDb);
+cached_provider!(IxDataset, ProviderId::PeeringDbIx, PeeringDbIx);
 
 const CACHE_FORMAT_VERSION: u32 = 1;
 pub const MAX_CACHE_ENTRIES: usize = 4000;
@@ -164,6 +172,19 @@ impl EnrichmentCache {
         self.entries
             .get(&cache_key(T::PROVIDER, key), now_ms, ttl_ms)
             .and_then(T::unwrap)
+    }
+
+    /// Like `get`, with the time the entry was stored.
+    pub fn get_stored<T: CachedProvider>(
+        &self,
+        key: &str,
+        now_ms: i64,
+        ttl_ms: i64,
+    ) -> Option<(Option<T>, i64)> {
+        let entry = self
+            .entries
+            .get_entry(&cache_key(T::PROVIDER, key), now_ms, ttl_ms)?;
+        Some((T::unwrap(&entry.value)?, entry.stored_at_ms))
     }
 
     pub fn insert<T: CachedProvider>(&mut self, key: &str, record: Option<T>, now_ms: i64) {
@@ -229,6 +250,103 @@ impl EnrichmentCache {
 
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+    }
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+/// The provider cache shared by the lookups and the IX list download,
+/// with its file on disk.
+pub struct ProviderCache {
+    path: Option<PathBuf>,
+    ttl_ms: i64,
+    /// Entries younger than this are kept on load and save, even when they
+    /// are past `ttl_ms`. Callers use it to keep entries with a longer life
+    /// than the provider TTL (the IX list is used for up to 7 days).
+    retain_ms: i64,
+    entries: Mutex<EnrichmentCache>,
+    /// Held from snapshot to rename, so two writers (two runs that finish
+    /// together, or a run and an IX list download) write in snapshot order
+    /// and never share the temporary file.
+    persist_lock: Mutex<()>,
+}
+
+impl ProviderCache {
+    /// Loads the file at `path`; `None` keeps the cache in memory only.
+    /// `retain_ms` is raised to at least `ttl_ms`.
+    pub fn new(path: Option<PathBuf>, ttl_ms: i64, retain_ms: i64) -> Self {
+        let retain_ms = retain_ms.max(ttl_ms);
+        let entries = match &path {
+            Some(path) => EnrichmentCache::load(path, now_ms(), retain_ms),
+            None => EnrichmentCache::default(),
+        };
+        Self {
+            path,
+            ttl_ms,
+            retain_ms,
+            entries: Mutex::new(entries),
+            persist_lock: Mutex::new(()),
+        }
+    }
+
+    fn entries(&self) -> std::sync::MutexGuard<'_, EnrichmentCache> {
+        self.entries.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn get<T: CachedProvider>(&self, key: &str) -> Option<Option<T>> {
+        self.entries().get::<T>(key, now_ms(), self.ttl_ms)
+    }
+
+    /// An entry up to `max_age_ms` old, with the time it was stored.
+    pub fn get_stored<T: CachedProvider>(
+        &self,
+        key: &str,
+        max_age_ms: i64,
+    ) -> Option<(Option<T>, i64)> {
+        self.entries().get_stored::<T>(key, now_ms(), max_age_ms)
+    }
+
+    pub fn insert<T: CachedProvider>(&self, key: &str, record: Option<T>) {
+        self.insert_at(key, record, now_ms());
+    }
+
+    pub fn insert_at<T: CachedProvider>(&self, key: &str, record: Option<T>, stored_at_ms: i64) {
+        self.entries().insert(key, record, stored_at_ms);
+    }
+
+    /// Writes changed entries to disk. Errors are logged; a lost cache only
+    /// costs extra lookups.
+    pub fn persist(&self) {
+        self.persist_with(write_atomic);
+    }
+
+    fn persist_with(&self, write: impl FnOnce(&Path, &[u8]) -> std::io::Result<()>) {
+        let Some(path) = &self.path else {
+            return;
+        };
+        let _writer = self.persist_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // Serialise under the entries lock; write after it is released so
+        // lookups are not blocked by disk I/O.
+        let snapshot = self.entries().snapshot_if_dirty(now_ms(), self.retain_ms);
+        let bytes = match snapshot {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return,
+            Err(err) => {
+                log::warn!("Failed to serialise enrichment cache: {err}");
+                return;
+            }
+        };
+        if let Err(err) = write(path, &bytes) {
+            log::warn!("Failed to write enrichment cache {}: {err}", path.display());
+            self.entries().mark_dirty();
+        }
+    }
+
+    #[cfg(test)]
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.entries().dirty
     }
 }
 
@@ -318,6 +436,64 @@ mod tests {
         std::fs::write(&path, "{not json").unwrap();
         assert_eq!(EnrichmentCache::load(&path, 0, HOUR).len(), 0);
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_persists_never_write_an_older_snapshot_last() {
+        use std::sync::mpsc;
+
+        let dir = std::env::temp_dir().join(format!("vistracer-persist-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("enrichment-cache.json");
+        let cache = ProviderCache::new(Some(path.clone()), HOUR, HOUR);
+        cache.insert("1.1.1.1", Some(cymru(13335)));
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        std::thread::scope(|scope| {
+            let cache = &cache;
+            // The first run's write is slow (busy disk) and holds an older
+            // snapshot while the second run finishes.
+            scope.spawn(move || {
+                cache.persist_with(move |path, bytes| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    write_atomic(path, bytes)
+                });
+            });
+            entered_rx.recv().unwrap();
+            cache.insert("8.8.8.8", Some(cymru(15169)));
+            let second = scope.spawn(move || cache.persist());
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            release_tx.send(()).unwrap();
+            second.join().unwrap();
+        });
+
+        let loaded = EnrichmentCache::load(&path, now_ms(), HOUR);
+        assert_eq!(
+            loaded.get::<CymruRecord>("8.8.8.8", now_ms(), HOUR),
+            Some(Some(cymru(15169))),
+            "the newer snapshot must be the one on disk"
+        );
+        assert!(!path.with_extension("json.tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn retained_entries_outlive_a_short_provider_ttl() {
+        let dir = std::env::temp_dir().join(format!("vistracer-retain-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("enrichment-cache.json");
+        // A one-hour provider TTL must not drop a 25-hour-old entry that a
+        // caller keeps for up to 7 days.
+        let cache = ProviderCache::new(Some(path.clone()), HOUR, 7 * 24 * HOUR);
+        cache.insert_at("8.8.8.8", Some(cymru(15169)), now_ms() - 25 * HOUR);
+        cache.persist();
+
+        let reloaded = ProviderCache::new(Some(path), HOUR, 7 * 24 * HOUR);
+        assert_eq!(reloaded.get::<CymruRecord>("8.8.8.8"), None, "past the TTL");
+        assert!(reloaded
+            .get_stored::<CymruRecord>("8.8.8.8", 7 * 24 * HOUR)
+            .is_some());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

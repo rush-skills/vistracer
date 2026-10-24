@@ -985,6 +985,169 @@ mod tests {
             assert!(rx.recv().await.is_none());
         }
 
+        /// Runs real traceroutes through the real lookup pipeline (GeoLite2,
+        /// providers, PeeringDB IX list) and prints, per hop, the phase 1
+        /// location (the raw GeoLite2 record) next to the chosen estimate.
+        ///
+        /// ```text
+        /// VISTRACER_SMOKE_TARGETS=8.8.8.8,1.1.1.1 \
+        /// VISTRACER_CITY_DB=/path/GeoLite2-City.mmdb VISTRACER_ASN_DB=/path/GeoLite2-ASN.mmdb \
+        /// cargo test smoke_real_traceroute -- --ignored --nocapture
+        /// ```
+        ///
+        /// `VISTRACER_SMOKE_PROTOCOL=ICMP`, `VISTRACER_SMOKE_MAX_HOPS`,
+        /// `VISTRACER_SMOKE_JSON_DIR` (writes the hops of each target) and
+        /// `VISTRACER_SMOKE_CACHE` (provider cache file to keep) are optional.
+        #[tokio::test]
+        #[ignore = "network: runs real traceroutes and queries the providers"]
+        async fn smoke_real_traceroute() {
+            use crate::commands::geo::GeoReaders;
+            use crate::commands::integrations::EnrichmentConfig;
+            use crate::commands::persistence::AppStore;
+
+            let targets =
+                std::env::var("VISTRACER_SMOKE_TARGETS").unwrap_or_else(|_| "8.8.8.8".to_string());
+            let protocol = match std::env::var("VISTRACER_SMOKE_PROTOCOL").as_deref() {
+                Ok("ICMP") => TracerouteProtocol::Icmp,
+                _ => TracerouteProtocol::Udp,
+            };
+            let max_hops = std::env::var("VISTRACER_SMOKE_MAX_HOPS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30);
+            let mut app_store = AppStore::default();
+            app_store.geo.city_db_path = std::env::var("VISTRACER_CITY_DB").ok();
+            app_store.geo.asn_db_path = std::env::var("VISTRACER_ASN_DB").ok();
+            app_store.integrations.peering_db.enabled = true;
+            let settings = app_store.integrations.clone();
+            // A kept cache avoids PeeringDB's one-per-hour limit on repeated
+            // large anonymous requests when the smoke test runs again.
+            let kept_cache = std::env::var("VISTRACER_SMOKE_CACHE")
+                .ok()
+                .map(PathBuf::from);
+            let cache_dir =
+                std::env::temp_dir().join(format!("vistracer-smoke-{}", uuid::Uuid::new_v4()));
+            let ctx = Arc::new(LookupContext {
+                store: Arc::new(Mutex::new(app_store)),
+                readers: Arc::new(Mutex::new(GeoReaders::default())),
+                enrichment: Arc::new(EnrichmentService::new(EnrichmentConfig::production(
+                    kept_cache
+                        .clone()
+                        .unwrap_or_else(|| cache_dir.join("enrichment-cache.json")),
+                    Duration::from_secs(3600),
+                ))),
+                settings,
+                force_fresh: false,
+            });
+
+            for target in targets.split(',') {
+                let request = normalize_request(&TracerouteRequest {
+                    target: target.trim().to_string(),
+                    protocol,
+                    max_hops,
+                    timeout_ms: 2000,
+                    packet_count: 3,
+                    force_fresh: false,
+                })
+                .unwrap();
+                let platform = Platform::current();
+                let plan = plan_command(&request, platform, &SystemLocator::new(platform)).unwrap();
+                let mut state = RunState::new(plan.probes_per_hop);
+                let runs = create_active_runs();
+                let outcome = execute_attempt(&plan, "smoke", &|_| {}, &runs, &ctx, &mut state)
+                    .await
+                    .unwrap();
+                println!("\n## {target} (exit {:?})", outcome.exit_code);
+                println!("| hop | address | host name | min RTT | phase 1 (GeoLite2) | phase 2 best | RTT check | other candidates |");
+                println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
+                let hops = state.hops();
+                if let Ok(dir) = std::env::var("VISTRACER_SMOKE_JSON_DIR") {
+                    let path = std::path::Path::new(&dir).join(format!("{}.json", target.trim()));
+                    std::fs::write(&path, serde_json::to_vec_pretty(&hops).unwrap()).unwrap();
+                }
+                let ix_status = hops
+                    .iter()
+                    .filter_map(|hop| hop.providers.as_ref())
+                    .flatten()
+                    .find(|p| {
+                        p.provider == ProviderId::PeeringDbIx && p.status != ProviderState::Skipped
+                    });
+                if let Some(status) = ix_status {
+                    println!(
+                        "PeeringDB IX list: {:?} {:?}",
+                        status.status, status.message
+                    );
+                }
+                for hop in hops {
+                    let before = match &hop.geo {
+                        Some(geo) => format!(
+                            "{} {} ±{} km",
+                            if geo.city.is_some() {
+                                "geolite-city"
+                            } else {
+                                "geolite-country"
+                            },
+                            geo.city
+                                .clone()
+                                .or(geo.iso_code.clone())
+                                .unwrap_or_default(),
+                            geo.confidence.unwrap_or_default()
+                        ),
+                        None => "-".to_string(),
+                    };
+                    let describe = |e: &crate::types::LocationEstimate| {
+                        format!(
+                            "{:?} {} ({:?}, ±{} km)",
+                            e.source, e.label, e.confidence, e.radius_km
+                        )
+                    };
+                    let location = &hop.location;
+                    let after = match (&location.best, &location.anycast) {
+                        (_, Some(anycast)) => {
+                            format!("anycast: {} ({:?})", anycast.service, anycast.evidence)
+                        }
+                        (Some(best), None) => describe(best),
+                        (None, None) if !location.alternatives.is_empty() => {
+                            "none: RTT rules out every candidate".to_string()
+                        }
+                        (None, None) => "-".to_string(),
+                    };
+                    let rtt = location
+                        .best
+                        .iter()
+                        .chain(&location.alternatives)
+                        .find_map(|e| e.rtt.as_ref())
+                        .map(|c| {
+                            format!(
+                                "{:?} vs hop {} (≤ {} km)",
+                                c.verdict, c.reference_hop_index, c.max_distance_km
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            if location.is_rtt_reference {
+                                "reference".to_string()
+                            } else {
+                                "-".to_string()
+                            }
+                        });
+                    let others: Vec<String> = location.alternatives.iter().map(describe).collect();
+                    println!(
+                        "| {} | {} | {} | {} | {before} | {after} | {rtt} | {} |",
+                        hop.hop_index,
+                        hop.ip_address.as_deref().unwrap_or("*"),
+                        hop.host_name.as_deref().unwrap_or(""),
+                        hop.latency
+                            .min_rtt_ms
+                            .map(|r| format!("{r} ms"))
+                            .unwrap_or_default(),
+                        others.join("; ")
+                    );
+                }
+            }
+            ctx.enrichment.persist();
+            let _ = std::fs::remove_dir_all(cache_dir);
+        }
+
         #[tokio::test]
         async fn failing_process_reports_exit_code_and_stderr() {
             let (dir, plan) =

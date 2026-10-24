@@ -1,0 +1,254 @@
+{
+ "data": [
+  {
+   "id": 18,
+   "latitude": 52.356394,
+   "longitude": 4.950837,
+   "website": "https://www.nikhef.nl/"
+  },
+  {
+   "id": 58,
+   "latitude": 50.11925,
+   "longitude": 8.735199,
+   "website": "https://www.digitalrealty.com"
+  },
+  {
+   "id": 59,
+   "latitude": 50.099697,
+   "longitude": 8.631763,
+   "website": "https://www.itenos.de/en/"
+  },
+  {
+   "id": 60,
+   "latitude": 50.09885,
+   "longitude": 8.632004,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 61,
+   "latitude": 52.356353,
+   "longitude": 4.951609,
+   "website": "https://www.digitalrealty.com"
+  },
+  {
+   "id": 62,
+   "latitude": 52.303078,
+   "longitude": 4.938009,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 63,
+   "latitude": 52.343984,
+   "longitude": 4.828711,
+   "website": "http://www.globalswitch.com"
+  },
+  {
+   "id": 64,
+   "latitude": 52.28415,
+   "longitude": 4.770855,
+   "website": "https://www.digitalrealty.com"
+  },
+  {
+   "id": 74,
+   "latitude": 50.096869,
+   "longitude": 8.644169,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 104,
+   "latitude": 52.356671,
+   "longitude": 4.952501,
+   "website": "https://www.digitalrealty.com"
+  },
+  {
+   "id": 108,
+   "latitude": 50.096962,
+   "longitude": 8.630057,
+   "website": "http://www.telehouse.com"
+  },
+  {
+   "id": 119,
+   "latitude": 50.081709,
+   "longitude": 8.623156,
+   "website": "https://www.digitalrealty.com"
+  },
+  {
+   "id": 277,
+   "latitude": 50.128192,
+   "longitude": 8.601436,
+   "website": "https://services.global.ntt/en-us/services-and-products/global-data-centers"
+  },
+  {
+   "id": 291,
+   "latitude": 50.101713,
+   "longitude": 8.63429,
+   "website": ""
+  },
+  {
+   "id": 374,
+   "latitude": 52.391165,
+   "longitude": 4.665267,
+   "website": "https://www.ironmountain.com/data-centers"
+  },
+  {
+   "id": 375,
+   "latitude": 52.299929,
+   "longitude": 4.943121,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 457,
+   "latitude": 50.141895,
+   "longitude": 8.741764,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 683,
+   "latitude": 50.097939,
+   "longitude": 8.587964,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 808,
+   "latitude": 50.099697,
+   "longitude": 8.631763,
+   "website": "https://newtelco.com/location/germany/"
+  },
+  {
+   "id": 813,
+   "latitude": 50.129995,
+   "longitude": 8.598073,
+   "website": "http://www.globalswitch.com"
+  },
+  {
+   "id": 848,
+   "latitude": 51.923689,
+   "longitude": 4.432138,
+   "website": "https://www.smartdc.net/"
+  },
+  {
+   "id": 1083,
+   "latitude": 52.392977,
+   "longitude": 4.849211,
+   "website": "https://www.northcdatacenters.com/"
+  },
+  {
+   "id": 1236,
+   "latitude": 52.293351,
+   "longitude": 4.945054,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 1320,
+   "latitude": 52.354686,
+   "longitude": 4.958827,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 2437,
+   "latitude": 51.930144,
+   "longitude": 4.414046,
+   "website": "https://www.eurofiber.nl/"
+  },
+  {
+   "id": 2832,
+   "latitude": 50.12082,
+   "longitude": 8.738529,
+   "website": "https://services.global.ntt/en-us/services-and-products/global-data-centers"
+  },
+  {
+   "id": 2906,
+   "latitude": 52.3377,
+   "longitude": 4.934929,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 3323,
+   "latitude": 49.02726,
+   "longitude": 8.47312,
+   "website": ""
+  },
+  {
+   "id": 4077,
+   "latitude": 50.12162,
+   "longitude": 8.74006,
+   "website": "https://www.colt.net"
+  },
+  {
+   "id": 4147,
+   "latitude": 50.128105,
+   "longitude": 8.583001,
+   "website": "http://www.cyrusone.com"
+  },
+  {
+   "id": 4483,
+   "latitude": 50.195395,
+   "longitude": 8.639651,
+   "website": "https://www.keppeldatacentres.com/"
+  },
+  {
+   "id": 4704,
+   "latitude": 50.097939,
+   "longitude": 8.587964,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 4796,
+   "latitude": 50.127174,
+   "longitude": 8.585565,
+   "website": "https://www.digitalrealty.com"
+  },
+  {
+   "id": 5427,
+   "latitude": 50.1093,
+   "longitude": 8.74229,
+   "website": "https://www.maincubes.com"
+  },
+  {
+   "id": 6593,
+   "latitude": 52.001552,
+   "longitude": 4.209184,
+   "available_voltage_services": [
+    "400 VAC"
+   ],
+   "website": "https://www.greenhousedatacenters.nl/"
+  },
+  {
+   "id": 7427,
+   "latitude": 50.063868,
+   "longitude": 8.48535,
+   "website": "https://services.global.ntt/en-us/services-and-products/global-data-centers"
+  },
+  {
+   "id": 7627,
+   "latitude": 49.42065,
+   "longitude": 8.350287,
+   "website": "https://www.pfalzkom.de"
+  },
+  {
+   "id": 7628,
+   "latitude": 49.42591,
+   "longitude": 8.360248,
+   "website": "https://www.pfalzkom.de"
+  },
+  {
+   "id": 9434,
+   "latitude": 50.128106,
+   "longitude": 8.583001,
+   "website": "http://www.cyrusone.com"
+  },
+  {
+   "id": 11840,
+   "latitude": 50.097357,
+   "longitude": 8.58628,
+   "website": "http://www.equinix.com"
+  },
+  {
+   "id": 13559,
+   "latitude": 50.196109,
+   "longitude": 8.640094,
+   "website": "https://www.ironmountain.com/data-centers"
+  }
+ ],
+ "meta": {}
+}

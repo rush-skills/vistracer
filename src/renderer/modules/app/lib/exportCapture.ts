@@ -1,5 +1,5 @@
 import type { TracerouteRun } from "@common/ipc";
-import { hopIndexToColor } from "@renderer/lib/globe";
+import { hopIndexToColor, hopPosition } from "@renderer/lib/globe";
 import { createGif } from "@renderer/lib/gifjs";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 
@@ -89,16 +89,20 @@ const drawOverlay = (
     appendWrapped(hop.hostName, bodySmallFont, "rgba(215, 219, 255, 0.7)");
   }
 
-  const location = hop.geo
-    ? `${hop.geo.city ? `${hop.geo.city}, ` : ""}${hop.geo.country ?? hop.geo.isoCode ?? "Unknown"}`
-    : hop.isPrivate
-      ? "Private network"
-      : "Unknown";
+  const position = hopPosition(hop);
+  const anycast = hop.location.anycast;
+  const location = anycast
+    ? `Anycast (${anycast.service}), no single location`
+    : position
+      ? `${position.label} (±${Math.round(position.radiusKm)} km, ${position.confidence} confidence)`
+      : hop.isPrivate
+        ? "Private network"
+        : "Unknown";
   appendWrapped(`Location: ${location}`, bodySmallFont, "rgba(215, 219, 255, 0.7)");
 
-  if (hop.geo) {
+  if (position) {
     appendWrapped(
-      `Coords: ${hop.geo.latitude.toFixed(4)}, ${hop.geo.longitude.toFixed(4)}`,
+      `Coords: ${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`,
       bodySmallFont,
       "rgba(215, 219, 255, 0.6)"
     );
@@ -228,7 +232,7 @@ const captureGif = async (
 
   try {
     for (const hop of hops) {
-      if (hop.geo) {
+      if (hopPosition(hop)) {
         setSelectedHop(hop.hopIndex);
         await waitNextFrame();
       } else {
@@ -304,7 +308,7 @@ const captureWebm = async (
 
   try {
     for (const hop of hops) {
-      if (hop.geo) {
+      if (hopPosition(hop)) {
         setSelectedHop(hop.hopIndex);
         await waitNextFrame();
       } else {
@@ -345,7 +349,7 @@ export const runExport = async (options: ExportOptions, run: TracerouteRun): Pro
   const originalSelected = store.selectedHopIndex;
 
   const sortedHops = run.hops.slice().sort((a, b) => a.hopIndex - b.hopIndex);
-  const hopsWithGeo = sortedHops.filter((hop) => hop.geo);
+  const hopsWithGeo = sortedHops.filter((hop) => hopPosition(hop));
   const firstGeoHop = hopsWithGeo[0] ?? sortedHops[0];
   const cameraHopIndex = firstGeoHop?.hopIndex ?? sortedHops[0]?.hopIndex;
 
