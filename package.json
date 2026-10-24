@@ -32,8 +32,6 @@
     "typecheck": "tsc -p tsconfig.renderer.json --noEmit"
   },
   "dependencies": {
-    "@react-three/drei": "^9.101.3",
-    "@react-three/fiber": "^8.15.17",
     "@tanstack/react-query": "^5.29.0",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
@@ -41,10 +39,10 @@
     "@tauri-apps/plugin-process": "~2.3.1",
     "@tauri-apps/plugin-shell": "^2.2.0",
     "@tauri-apps/plugin-updater": "~2.10.1",
+    "cesium": "~1.146.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.1.0",
-    "three": "^0.163.0",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

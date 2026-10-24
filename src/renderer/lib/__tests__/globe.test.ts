@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { Vector3 } from "three";
 import {
+  CAMERA_LIMITS,
+  INITIAL_CAMERA_TRACKER,
   MAX_RING_RADIUS_KM,
   RING_STYLES,
-  buildArcDescriptors,
-  buildConfidenceRings,
-  circlePoints,
+  arcPositions,
+  borderRings,
+  buildArcs,
+  buildGlobeScene,
+  buildMarkers,
+  buildRings,
+  circlePositions,
+  flyHeight,
+  greatCircleKm,
   hopIndexToColor,
   latencyToColor,
-  latLngToVector3
+  nextCameraFocus
 } from "@renderer/lib/globe";
-import type { HopLocation, HopResolution, LocationConfidence } from "@common/ipc";
+import type { AnycastInfo, HopLocation, HopResolution, LocationConfidence } from "@common/ipc";
 
 const noLocation: HopLocation = {
   best: null,
@@ -25,7 +32,8 @@ const at = (
   latitude: number,
   longitude: number,
   confidence: LocationConfidence = "high",
-  radiusKm = 50
+  radiusKm = 50,
+  label = "Somewhere"
 ): HopLocation => ({
   ...noLocation,
   best: {
@@ -34,8 +42,20 @@ const at = (
     longitude,
     radiusKm,
     confidence,
-    label: "Somewhere",
+    label,
     rtt: null
+  }
+});
+
+const anycastAt = (overrides: Partial<AnycastInfo> = {}): HopLocation => ({
+  ...noLocation,
+  anycast: {
+    evidence: "known-prefix",
+    service: "Google Public DNS",
+    geoliteRuledOut: true,
+    maxDistanceKm: 740,
+    referenceHopIndex: 1,
+    ...overrides
   }
 });
 
@@ -55,83 +75,117 @@ const baseHop = (overrides: Partial<HopResolution>): HopResolution => ({
   ...overrides
 });
 
-/** Great-circle distance in km between the ring centre and a ring point. */
-const surfaceKm = (centre: Vector3, point: Vector3) =>
-  centre.clone().normalize().angleTo(point.clone().normalize()) * 6371;
+const FRANKFURT = { latitude: 50.11, longitude: 8.68 };
+const NEW_YORK = { latitude: 40.71, longitude: -74.01 };
 
 describe("latencyToColor", () => {
-  it("maps low latency to success colour", () => {
+  it("maps latency bands to colours", () => {
     expect(latencyToColor(25)).toBe("#4bd67f");
-  });
-
-  it("maps mid latency to warning colour", () => {
     expect(latencyToColor(120)).toBe("#ffc773");
-  });
-
-  it("maps high latency to danger colour", () => {
     expect(latencyToColor(250)).toBe("#ff5f5f");
-  });
-
-  it("handles missing latency gracefully", () => {
     expect(latencyToColor(null)).toBe("#4F5D75");
   });
 });
 
-describe("buildArcDescriptors", () => {
-  it("skips hops without a best estimate", () => {
-    const hops: HopResolution[] = [
-      baseHop({ hopIndex: 1, location: noLocation }),
-      baseHop({ hopIndex: 2, location: at(10, 10) })
-    ];
-
-    expect(buildArcDescriptors(hops)).toHaveLength(0);
+describe("greatCircleKm", () => {
+  it("measures known distances", () => {
+    expect(greatCircleKm(FRANKFURT, NEW_YORK)).toBeCloseTo(6205, -1);
+    expect(greatCircleKm({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 180 })).toBeCloseTo(
+      Math.PI * 6371,
+      3
+    );
   });
+});
 
-  it("builds arcs between consecutive located hops", () => {
-    const hops: HopResolution[] = [
-      baseHop({ hopIndex: 1, location: at(0, 0) }),
-      baseHop({ hopIndex: 2, location: at(10, 20) }),
-      baseHop({ hopIndex: 3, location: at(30, 40) })
-    ];
-
-    const arcs = buildArcDescriptors(hops);
-    expect(arcs).toHaveLength(2);
-    expect(arcs[0].id).toBe("1-2");
-    expect(arcs[0].points.length).toBeGreaterThan(10);
-  });
-
-  it("does not draw an anycast hop even when GeoLite2 has a record", () => {
-    const anycast: HopLocation = {
-      ...noLocation,
-      anycast: {
-        evidence: "known-prefix",
-        service: "Google Public DNS",
-        geoliteRuledOut: true,
-        maxDistanceKm: 740,
-        referenceHopIndex: 1
-      }
-    };
+describe("arcs", () => {
+  it("skips hops without a best estimate and hops at the same place", () => {
     const hops = [
-      baseHop({ hopIndex: 1, location: at(19, 72) }),
-      baseHop({ hopIndex: 2, location: anycast, geo: { latitude: 37.7, longitude: -97.8 } })
+      baseHop({ hopIndex: 1, location: noLocation }),
+      baseHop({ hopIndex: 2, location: at(10, 10) }),
+      baseHop({ hopIndex: 3, location: at(10, 10) })
     ];
-    expect(buildArcDescriptors(hops)).toHaveLength(0);
-    expect(buildConfidenceRings(hops)).toHaveLength(1);
+    expect(buildArcs(hops)).toHaveLength(0);
+  });
+
+  it("connects consecutive located hops across a gap, coloured by latency", () => {
+    const hops = [
+      baseHop({ hopIndex: 1, location: at(FRANKFURT.latitude, FRANKFURT.longitude) }),
+      baseHop({ hopIndex: 2, location: noLocation }),
+      baseHop({
+        hopIndex: 3,
+        location: at(NEW_YORK.latitude, NEW_YORK.longitude),
+        latency: { minRttMs: 90, maxRttMs: 95, avgRttMs: 92, jitterMs: 1 }
+      }),
+      baseHop({ hopIndex: 4, location: at(34.05, -118.24) })
+    ];
+    const arcs = buildArcs(hops);
+    expect(arcs.map((arc) => [arc.fromHopIndex, arc.toHopIndex])).toEqual([
+      [1, 3],
+      [3, 4]
+    ]);
+    expect(arcs[0].color).toBe(latencyToColor(11));
+    expect(arcs[1].color).toBe(latencyToColor(92));
+  });
+
+  it("follows the great circle, starts and ends on the hops and rises in the middle", () => {
+    const points = arcPositions(FRANKFURT, NEW_YORK);
+    const first = points[0];
+    const last = points[points.length - 1];
+    expect(greatCircleKm(first, FRANKFURT)).toBeLessThan(0.01);
+    expect(greatCircleKm(last, NEW_YORK)).toBeLessThan(0.01);
+    expect(first.height).toBeCloseTo(0, 6);
+    expect(last.height).toBeCloseTo(0, 6);
+    // Every point lies on the great circle: the two legs add up.
+    const total = greatCircleKm(FRANKFURT, NEW_YORK);
+    for (const point of points) {
+      expect(greatCircleKm(FRANKFURT, point) + greatCircleKm(point, NEW_YORK)).toBeCloseTo(total, 3);
+    }
+    const peak = Math.max(...points.map((point) => point.height));
+    expect(peak).toBeCloseTo(total * 1000 * 0.12, -3);
+    // The great circle from Frankfurt to New York passes north of both.
+    expect(Math.max(...points.map((point) => point.latitude))).toBeGreaterThan(51);
+  });
+
+  it("keeps short hops visible and long hops below the cap", () => {
+    const short = arcPositions(FRANKFURT, { latitude: 50.2, longitude: 8.7 });
+    expect(Math.max(...short.map((point) => point.height))).toBeCloseTo(2000, 0);
+    const long = arcPositions({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 170 });
+    expect(Math.max(...long.map((point) => point.height))).toBeLessThanOrEqual(1_500_000);
+  });
+
+  it("does not break on the same point or antipodal points", () => {
+    for (const points of [
+      arcPositions(FRANKFURT, FRANKFURT),
+      arcPositions({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 180 })
+    ]) {
+      expect(points.every((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))).toBe(
+        true
+      );
+    }
   });
 });
 
 describe("confidence rings", () => {
-  it("places every ring point at the radius, on the surface", () => {
-    const centre = latLngToVector3(50.11, 8.68, 1);
-    const points = circlePoints(50.11, 8.68, 111, 32, 5.03);
-    expect(points).toHaveLength(33);
+  it("places every ring point at the radius on the surface and closes the ring", () => {
+    const points = circlePositions(FRANKFURT.latitude, FRANKFURT.longitude, 111);
+    expect(points.length).toBeGreaterThanOrEqual(49);
+    expect(points[0]).toEqual(points[points.length - 1]);
     for (const point of points) {
-      expect(point.length()).toBeCloseTo(5.03, 6);
-      expect(surfaceKm(centre, point)).toBeCloseTo(111, 3);
+      expect(point.height).toBe(0);
+      expect(greatCircleKm(FRANKFURT, point)).toBeCloseTo(111, 6);
     }
-    // Near the pole the basis must not collapse.
-    const polar = circlePoints(89.99, 0, 500, 16);
-    expect(polar.every((p) => Number.isFinite(p.x) && Number.isFinite(p.z))).toBe(true);
+  });
+
+  it("keeps large rings round and works at the pole and the antimeridian", () => {
+    const large = circlePositions(0, 0, 4000);
+    expect(large.length).toBeGreaterThan(400);
+    const polar = circlePositions(89.99, 0, 500);
+    expect(polar.every((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))).toBe(true);
+    const dateLine = circlePositions(0, 179.9, 300);
+    expect(dateLine.every((p) => p.longitude >= -180 && p.longitude <= 180)).toBe(true);
+    expect(dateLine.every((p) => Math.abs(greatCircleKm({ latitude: 0, longitude: 179.9 }, p) - 300) < 1e-6)).toBe(
+      true
+    );
   });
 
   it("scales rings to km and styles them by confidence", () => {
@@ -140,7 +194,7 @@ describe("confidence rings", () => {
       baseHop({ hopIndex: 2, location: at(52.4, 4.9, "medium", 200) }),
       baseHop({ hopIndex: 3, location: at(20.6, 79, "low", 1000) })
     ];
-    const rings = buildConfidenceRings(hops);
+    const rings = buildRings(hops);
     expect(rings.map((r) => [r.hopIndex, r.radiusKm, r.confidence])).toEqual([
       [1, 25, "high"],
       [2, 200, "medium"],
@@ -153,19 +207,16 @@ describe("confidence rings", () => {
     expect(RING_STYLES.low.dashed).toBe(true);
     expect(RING_STYLES.high.opacity).toBeGreaterThan(RING_STYLES.medium.opacity);
     expect(RING_STYLES.medium.opacity).toBeGreaterThan(RING_STYLES.low.opacity);
-
-    const centre = latLngToVector3(52.4, 4.9, 1);
-    expect(surfaceKm(centre, rings[1].points[7])).toBeCloseTo(200, 3);
+    expect(greatCircleKm({ latitude: 52.4, longitude: 4.9 }, rings[1].positions[7])).toBeCloseTo(200, 6);
   });
 
   it("draws a conflicting estimate with the low-confidence style", () => {
     const location = at(28.6, 77.2, "high", 50);
-    const best = location.best;
-    if (!best) throw new Error("fixture has a best estimate");
+    if (!location.best) throw new Error("fixture has a best estimate");
     const conflicting: HopLocation = {
       ...location,
       best: {
-        ...best,
+        ...location.best,
         rtt: {
           verdict: "conflict",
           distanceKm: 1139,
@@ -178,29 +229,160 @@ describe("confidence rings", () => {
         }
       }
     };
-    const [ring] = buildConfidenceRings([baseHop({ hopIndex: 2, location: conflicting })]);
+    const [ring] = buildRings([baseHop({ hopIndex: 2, location: conflicting })]);
     expect(ring.confidence).toBe("high");
     expect(ring.radiusKm).toBe(50);
     expect(ring).toMatchObject(RING_STYLES.low);
   });
 
-  it("emphasises the selected hop and skips useless or missing radii", () => {
+  it("emphasises the selected and hovered hop and skips useless or missing radii", () => {
     const hops = [
       baseHop({ hopIndex: 1, location: at(0, 0, "medium", 100) }),
       baseHop({ hopIndex: 2, location: at(0, 10, "low", MAX_RING_RADIUS_KM + 1) }),
       baseHop({ hopIndex: 3, location: at(0, 20, "high", 0) }),
-      baseHop({ hopIndex: 4, location: noLocation })
+      baseHop({ hopIndex: 4, location: noLocation }),
+      baseHop({ hopIndex: 5, location: at(0, 30, "low", 300) }),
+      baseHop({ hopIndex: 6, location: at(0, 40, "low", 300) })
     ];
-    const rings = buildConfidenceRings(hops, 1);
-    expect(rings.map((r) => r.hopIndex)).toEqual([1]);
-    expect(rings[0].opacity).toBe(1);
-    expect(rings[0].lineWidth).toBeGreaterThan(RING_STYLES.medium.lineWidth);
+    const rings = buildRings(hops, 1, 5);
+    expect(rings.map((r) => r.hopIndex)).toEqual([1, 5, 6]);
+    expect(rings[0]).toMatchObject({ opacity: 1, lineWidth: RING_STYLES.medium.lineWidth + 1 });
+    expect(rings[1]).toMatchObject({ opacity: 1, lineWidth: RING_STYLES.low.lineWidth + 1 });
+    expect(rings[2]).toMatchObject(RING_STYLES.low);
   });
 });
 
-describe("latLngToVector3", () => {
-  it("maps latitude/longitude to 3D coordinates", () => {
-    const vector = latLngToVector3(0, 0, 5);
-    expect(vector.length()).toBeCloseTo(5, 5);
+describe("markers and labels", () => {
+  it("draws one marker per located hop with the selected and hovered hops on top", () => {
+    const hops = [1, 2, 3, 4].map((hopIndex) =>
+      baseHop({ hopIndex, location: hopIndex === 4 ? noLocation : at(hopIndex, hopIndex) })
+    );
+    const markers = buildMarkers(hops, 1, 2);
+    expect(markers.map((m) => [m.hopIndex, m.emphasis])).toEqual([
+      [3, "normal"],
+      [2, "hovered"],
+      [1, "selected"]
+    ]);
+    expect(markers[0]).toMatchObject({
+      color: hopIndexToColor(3),
+      position: { latitude: 3, longitude: 3, height: 0 }
+    });
+  });
+
+  it("labels the selected and the hovered hop with its place", () => {
+    const hops = [
+      baseHop({ hopIndex: 1, location: at(50.1, 8.7, "high", 25, "Frankfurt, DE") }),
+      baseHop({ hopIndex: 2, location: at(52.4, 4.9, "high", 25, "Amsterdam, NL") }),
+      baseHop({ hopIndex: 3, location: noLocation })
+    ];
+    const scene = buildGlobeScene(hops, 1, 2);
+    expect(scene.labels.map((label) => label.text)).toEqual(["1 · Frankfurt, DE", "2 · Amsterdam, NL"]);
+    expect(buildGlobeScene(hops, 3).labels).toEqual([]);
+    expect(buildGlobeScene(hops, 1, 1).labels).toHaveLength(1);
+  });
+});
+
+describe("anycast hops", () => {
+  const hops = [
+    baseHop({ hopIndex: 1, location: at(19.08, 72.88, "medium", 20, "Mumbai, IN") }),
+    baseHop({ hopIndex: 2, location: anycastAt(), geo: { latitude: 37.75, longitude: -97.82 } })
+  ];
+
+  it("get no marker, ring or arc, even when GeoLite2 has a record", () => {
+    const scene = buildGlobeScene(hops);
+    expect(scene.markers.map((m) => m.hopIndex)).toEqual([1]);
+    expect(scene.rings.map((r) => r.hopIndex)).toEqual([1]);
+    expect(scene.arcs).toEqual([]);
+  });
+
+  it("show the RTT reach around the reference hop instead of a point", () => {
+    const [reach] = buildGlobeScene(hops).reaches;
+    expect(reach).toMatchObject({ hopIndex: 2, referenceHopIndex: 1, radiusKm: 740, opacity: 0.5 });
+    for (const point of reach.positions) {
+      expect(greatCircleKm({ latitude: 19.08, longitude: 72.88 }, point)).toBeCloseTo(740, 6);
+    }
+    const selected = buildGlobeScene(hops, 2);
+    expect(selected.reaches[0].opacity).toBeGreaterThan(0.5);
+    expect(selected.labels).toEqual([
+      expect.objectContaining({
+        hopIndex: 2,
+        text: "2 · anycast (Google Public DNS), within 740 km of hop 1",
+        position: selected.reaches[0].positions[0]
+      })
+    ]);
+  });
+
+  it("show nothing when the bound or the reference location is missing", () => {
+    for (const location of [
+      anycastAt({ maxDistanceKm: null }),
+      anycastAt({ referenceHopIndex: null }),
+      anycastAt({ referenceHopIndex: 9 })
+    ]) {
+      expect(buildGlobeScene([hops[0], baseHop({ hopIndex: 2, location })]).reaches).toEqual([]);
+    }
+  });
+});
+
+describe("camera", () => {
+  const hop = (hopIndex: number, located = true) =>
+    baseHop({ hopIndex, location: located ? at(hopIndex * 5, hopIndex * 5, "high", 30) : noLocation });
+
+  it("flies to each hop that gets a location during a run, and not on enrichment updates", () => {
+    let step = nextCameraFocus(INITIAL_CAMERA_TRACKER, "run-a", [hop(1, false)], undefined);
+    expect(step.focus).toBeNull();
+    step = nextCameraFocus(step.tracker, "run-a", [hop(1, false), hop(2)], undefined);
+    expect(step.focus).toEqual({ latitude: 10, longitude: 10, radiusKm: 30 });
+    step = nextCameraFocus(step.tracker, "run-a", [hop(1, false), hop(2)], undefined);
+    expect(step.focus).toBeNull();
+  });
+
+  it("flies to a newly selected hop, including an anycast hop's reach", () => {
+    const hops = [hop(1), hop(2), baseHop({ hopIndex: 3, location: anycastAt() })];
+    let step = nextCameraFocus(INITIAL_CAMERA_TRACKER, "run-a", hops, 1);
+    expect(step.focus).toEqual({ latitude: 5, longitude: 5, radiusKm: 30 });
+    step = nextCameraFocus(step.tracker, "run-a", hops, 1);
+    expect(step.focus).toBeNull();
+    step = nextCameraFocus(step.tracker, "run-a", hops, 3);
+    expect(step.focus).toEqual({ latitude: 5, longitude: 5, radiusKm: 740 });
+  });
+
+  it("starts over for a new run", () => {
+    const first = nextCameraFocus(INITIAL_CAMERA_TRACKER, "run-a", [hop(1)], 1);
+    const next = nextCameraFocus(first.tracker, "run-b", [hop(1)], 1);
+    expect(next.focus).toEqual({ latitude: 5, longitude: 5, radiusKm: 30 });
+  });
+
+  it("keeps the zoom but fits the ring", () => {
+    expect(flyHeight(5_000_000, 25)).toBe(5_000_000);
+    expect(flyHeight(200_000, 1000)).toBe(4_000_000);
+    expect(flyHeight(1_000, 1)).toBe(CAMERA_LIMITS.minHeight);
+    expect(flyHeight(90_000_000, 1)).toBe(CAMERA_LIMITS.maxHeight);
+  });
+});
+
+describe("borderRings", () => {
+  it("reads polygon and multipolygon rings and skips anything else", () => {
+    const geojson = {
+      type: "FeatureCollection",
+      features: [
+        { geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } },
+        {
+          geometry: {
+            type: "MultiPolygon",
+            coordinates: [[[[2, 2], [3, 2], [2, 2]]], [[[4, 4], [5, 4], [4, 4]]]]
+          }
+        },
+        { geometry: { type: "Point", coordinates: [1, 1] } },
+        { geometry: null },
+        { geometry: { type: "Polygon", coordinates: [[[0, "x"], [1, 0]]] } }
+      ]
+    };
+    expect(borderRings(geojson)).toEqual([
+      [[0, 0], [1, 0], [1, 1], [0, 0]],
+      [[2, 2], [3, 2], [2, 2]],
+      [[4, 4], [5, 4], [4, 4]]
+    ]);
+    expect(borderRings(null)).toEqual([]);
+    expect(borderRings({ features: "nope" })).toEqual([]);
   });
 });
