@@ -119,11 +119,30 @@ cached_provider!(PeeringDbDetails, ProviderId::PeeringDb, PeeringDb);
 const CACHE_FORMAT_VERSION: u32 = 1;
 pub const MAX_CACHE_ENTRIES: usize = 4000;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CacheFile {
     version: u32,
     entries: TtlMap<CachedRecord>,
+}
+
+/// Same layout as `CacheFile`, borrowed, so a snapshot needs no clone.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CacheFileRef<'a> {
+    version: u32,
+    entries: &'a TtlMap<CachedRecord>,
+}
+
+/// Writes through a temporary file and a rename, so a crash during the
+/// write cannot leave a truncated cache behind.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
 }
 
 #[derive(Debug, Default)]
@@ -188,26 +207,28 @@ impl EnrichmentCache {
         }
     }
 
-    /// Writes the cache through a temporary file and a rename, so a crash
-    /// during the write cannot leave a truncated cache behind.
-    pub fn save_if_dirty(&mut self, path: &Path, now_ms: i64, ttl_ms: i64) -> std::io::Result<()> {
+    /// Prunes and serialises the cache when it changed since the last
+    /// snapshot. The caller writes the bytes without holding the cache lock
+    /// and calls `mark_dirty` if that write fails.
+    pub fn snapshot_if_dirty(
+        &mut self,
+        now_ms: i64,
+        ttl_ms: i64,
+    ) -> serde_json::Result<Option<Vec<u8>>> {
         if !self.dirty {
-            return Ok(());
+            return Ok(None);
         }
         self.entries.prune(now_ms, ttl_ms, MAX_CACHE_ENTRIES);
-        let file = CacheFile {
+        let bytes = serde_json::to_vec(&CacheFileRef {
             version: CACHE_FORMAT_VERSION,
-            entries: self.entries.clone(),
-        };
-        let json = serde_json::to_vec(&file).map_err(std::io::Error::other)?;
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, json)?;
-        std::fs::rename(&tmp, path)?;
+            entries: &self.entries,
+        })?;
         self.dirty = false;
-        Ok(())
+        Ok(Some(bytes))
+    }
+
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 }
 
@@ -275,8 +296,13 @@ mod tests {
         let mut cache = EnrichmentCache::default();
         cache.insert("1.1.1.1", Some(cymru(13335)), 0);
         cache.insert("8.8.8.8", Some(cymru(15169)), 2 * HOUR);
-        cache.save_if_dirty(&path, 2 * HOUR, 24 * HOUR).unwrap();
+        let bytes = cache
+            .snapshot_if_dirty(2 * HOUR, 24 * HOUR)
+            .unwrap()
+            .unwrap();
+        write_atomic(&path, &bytes).unwrap();
         assert!(!path.with_extension("json.tmp").exists());
+        assert_eq!(cache.snapshot_if_dirty(2 * HOUR, 24 * HOUR).unwrap(), None);
 
         let loaded = EnrichmentCache::load(&path, 25 * HOUR, 24 * HOUR);
         assert_eq!(loaded.len(), 1);
@@ -296,11 +322,10 @@ mod tests {
     }
 
     #[test]
-    fn save_is_skipped_when_nothing_changed() {
-        let dir = std::env::temp_dir().join(format!("vistracer-cache-{}", uuid::Uuid::new_v4()));
-        let path = dir.join("enrichment-cache.json");
+    fn snapshot_is_skipped_when_nothing_changed() {
         let mut cache = EnrichmentCache::default();
-        cache.save_if_dirty(&path, 0, HOUR).unwrap();
-        assert!(!path.exists());
+        assert_eq!(cache.snapshot_if_dirty(0, HOUR).unwrap(), None);
+        cache.mark_dirty();
+        assert!(cache.snapshot_if_dirty(0, HOUR).unwrap().is_some());
     }
 }

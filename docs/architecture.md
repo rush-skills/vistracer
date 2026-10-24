@@ -100,13 +100,18 @@ Rules:
   limit, then the cache again (another hop may have filled it), then
   `with_retry`. Retries happen on HTTP 429, 5xx, timeouts and connection
   errors: 3 attempts, exponential backoff from 500 ms to 8 s with jitter, and
-  a server `Retry-After` is honoured. One provider lookup has a 25 s budget,
-  which includes the wait for a free provider slot.
-- After 3 failed lookups in a row, a provider is skipped for 60 s (its
+  a server `Retry-After` is honoured. The request, retries included, has a
+  25 s budget.
+- A lookup waits at most 25 s for a free provider slot. If none frees up, the
+  provider is marked `skipped` ("Not queried: …"). This wait does not count
+  as a provider failure.
+- After 3 failed requests in a row, a provider is skipped for 60 s (its
   status says so). A provider that is down therefore costs a few timeouts per
   run instead of one timeout per hop.
 - "No record" answers are cached too, so repeated misses do not hit the
   network. Errors are not cached. "Force fresh lookups" skips cache reads.
+  RDAP answers are cached per base URL, so switching RDAP servers takes
+  effect at once.
 - A failed provider reports `status: "error"` with a message. The hop keeps
   the GeoLite2 data and the data of the other providers. The hop pane shows
   "N sources failed" and the message for each.

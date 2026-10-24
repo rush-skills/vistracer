@@ -4,7 +4,7 @@
 //! limit, and retry with backoff. A failed provider never blocks the hop:
 //! it reports an error status and the merge uses the data that arrived.
 
-use super::enrichment_cache::{CachedProvider, EnrichmentCache};
+use super::enrichment_cache::{write_atomic, CachedProvider, EnrichmentCache};
 use super::geo::GeoLiteResult;
 use super::persistence::IntegrationSettings;
 use super::retry::{with_retry, ProviderError, RetryPolicy};
@@ -266,8 +266,10 @@ pub fn choose_asn(inputs: &MergeInputs) -> Option<u32> {
         .or_else(|| inputs.geolite_asn.and_then(|g| g.asn))
 }
 
-/// Merges ASN details field by field. A name is only taken from a source
-/// that agrees on the chosen ASN, so the number and name always match.
+/// Merges ASN details field by field. The name comes first from a source
+/// that agrees on the chosen ASN (GeoLite2, RIPEstat, Team Cymru), then from
+/// PeeringDB (looked up by that ASN), and last from the RDAP registrant,
+/// which holds the IP block and can differ from the AS holder.
 pub fn merge_asn(inputs: &MergeInputs) -> Option<AsnDetails> {
     let asn = choose_asn(inputs);
     let agrees = |candidate: Option<u32>| asn.is_some() && candidate == asn;
@@ -389,7 +391,8 @@ pub struct EnrichmentConfig {
     pub endpoints: ProviderEndpoints,
     pub retry: RetryPolicy,
     pub breaker: BreakerPolicy,
-    /// Upper bound for one provider lookup, retries included.
+    /// Upper bound for the wait for a provider slot, and separately for the
+    /// request itself, retries included.
     pub provider_budget: Duration,
     pub ttl: Duration,
     pub cache_path: Option<PathBuf>,
@@ -510,9 +513,26 @@ impl EnrichmentService {
         let Some(path) = &self.cache_path else {
             return;
         };
-        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(err) = cache.save_if_dirty(path, now_ms(), self.ttl_ms) {
+        // Serialise under the lock; write after it is released so lookups
+        // are not blocked by disk I/O.
+        let snapshot = {
+            let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.snapshot_if_dirty(now_ms(), self.ttl_ms)
+        };
+        let bytes = match snapshot {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return,
+            Err(err) => {
+                log::warn!("Failed to serialise enrichment cache: {err}");
+                return;
+            }
+        };
+        if let Err(err) = write_atomic(path, &bytes) {
             log::warn!("Failed to write enrichment cache {}: {err}", path.display());
+            self.cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .mark_dirty();
         }
     }
 
@@ -579,23 +599,36 @@ impl EnrichmentService {
         }
 
         let label = format!("{provider:?} {key}");
-        // The budget includes the wait for a provider slot, so queued hops
-        // cannot stretch a run beyond it.
-        let lookup = async {
-            let _permit = limit.acquire().await.ok();
-            // Another hop may have fetched the same key while this one waited.
-            if !force_fresh {
-                if let Some(hit) = self.cache_get::<T>(key) {
-                    return Ok((hit, true));
-                }
-            }
-            with_retry(&self.retry, &label, fetch)
-                .await
-                .map(|record| (record, false))
+        // Waiting for a slot says nothing about the provider's health, so a
+        // wait that runs out is reported as "not queried" and does not count
+        // toward the breaker.
+        let Ok(permit) = tokio::time::timeout(self.provider_budget, limit.acquire()).await else {
+            log::debug!("{label}: no free slot within {:?}", self.provider_budget);
+            return ProviderOutcome::skipped(
+                provider,
+                &format!(
+                    "Not queried: other lookups kept this provider busy for {} s.",
+                    self.provider_budget.as_secs()
+                ),
+            );
         };
-        match tokio::time::timeout(self.provider_budget, lookup).await {
-            Ok(Ok((record, true))) => ProviderOutcome::answered(provider, record, true),
-            Ok(Ok((record, false))) => {
+        // Another hop may have filled the cache or tripped the breaker while
+        // this one waited.
+        if !force_fresh {
+            if let Some(hit) = self.cache_get::<T>(key) {
+                return ProviderOutcome::answered(provider, hit, true);
+            }
+        }
+        if let Some(message) = self.breaker_open_message(provider) {
+            return ProviderOutcome::failed(provider, message);
+        }
+
+        let result =
+            tokio::time::timeout(self.provider_budget, with_retry(&self.retry, &label, fetch))
+                .await;
+        drop(permit);
+        match result {
+            Ok(Ok(record)) => {
                 self.cache_insert(key, record.clone());
                 self.record_result(provider, true);
                 ProviderOutcome::answered(provider, record, false)
@@ -774,7 +807,10 @@ impl EnrichmentService {
                 return ProviderOutcome::skipped(ProviderId::Rdap, DISABLED_MESSAGE);
             }
             let base_url = settings.rdap.base_url();
-            self.cached_lookup(&key, force_fresh, &self.limits.rdap, || {
+            // Answers from one RDAP server must not be served after the user
+            // switches to another.
+            let rdap_key = format!("{base_url}|{key}");
+            self.cached_lookup(&rdap_key, force_fresh, &self.limits.rdap, || {
                 self.fetch_rdap(ip, base_url)
             })
             .await
@@ -1025,6 +1061,8 @@ mod tests {
 
     type Response = (u16, Vec<(&'static str, &'static str)>, String);
 
+    const DELAY_HEADER: &str = "x-test-delay-ms";
+
     #[derive(Clone, Default)]
     struct Hits(Arc<std::sync::Mutex<HashMap<String, Vec<String>>>>);
 
@@ -1075,8 +1113,14 @@ mod tests {
                             }
                             None => (404, vec![], "{}".to_string()),
                         };
+                    // A DELAY_HEADER entry makes the mock answer slowly; it is
+                    // not sent to the client.
+                    if let Some((_, ms)) = headers.iter().find(|(k, _)| *k == DELAY_HEADER) {
+                        tokio::time::sleep(Duration::from_millis(ms.parse().unwrap())).await;
+                    }
                     let extra: String = headers
                         .iter()
+                        .filter(|(k, _)| *k != DELAY_HEADER)
                         .map(|(k, v)| format!("{k}: {v}\r\n"))
                         .collect();
                     let response = format!(
@@ -1121,6 +1165,15 @@ mod tests {
         whois: SocketAddr,
         cache_path: Option<PathBuf>,
     ) -> EnrichmentService {
+        service_with_budget(http, whois, cache_path, Duration::from_secs(10))
+    }
+
+    fn service_with_budget(
+        http: SocketAddr,
+        whois: SocketAddr,
+        cache_path: Option<PathBuf>,
+        provider_budget: Duration,
+    ) -> EnrichmentService {
         EnrichmentService::new(EnrichmentConfig {
             client: reqwest::Client::builder().no_proxy().build().unwrap(),
             endpoints: ProviderEndpoints {
@@ -1138,7 +1191,7 @@ mod tests {
                 threshold: 3,
                 cooldown: Duration::from_millis(300),
             },
-            provider_budget: Duration::from_secs(10),
+            provider_budget,
             ttl: Duration::from_secs(3600),
             cache_path,
         })
@@ -1355,6 +1408,131 @@ mod tests {
             12,
             "lookups resume after the cooldown"
         );
+    }
+
+    fn rdap_only(http: SocketAddr) -> IntegrationSettings {
+        let mut settings = settings(http);
+        settings.team_cymru.enabled = false;
+        settings.ripe_stat.enabled = false;
+        settings.peering_db.enabled = false;
+        settings
+    }
+
+    #[tokio::test]
+    async fn waiting_for_a_provider_slot_is_not_a_provider_failure() {
+        // RDAP allows 2 requests at a time and each answer takes 600 ms, so
+        // of 6 parallel lookups the last 2 wait longer than the 1 s budget.
+        let (http, hits) = mock_http(vec![(
+            "/rdap/ip",
+            vec![(200, vec![(DELAY_HEADER, "600")], RDAP_ARIN.to_string())],
+        )])
+        .await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service_with_budget(http, whois, None, Duration::from_secs(1));
+        let settings = rdap_only(http);
+        let lookup = |addr: &'static str| service.enrich(ip(addr), no_geolite(), &settings, false);
+
+        let results = tokio::join!(
+            lookup("8.8.8.1"),
+            lookup("8.8.8.2"),
+            lookup("8.8.8.3"),
+            lookup("8.8.8.4"),
+            lookup("8.8.8.5"),
+            lookup("8.8.8.6")
+        );
+        let rdap: Vec<&ProviderStatus> = [
+            &results.0, &results.1, &results.2, &results.3, &results.4, &results.5,
+        ]
+        .into_iter()
+        .map(|r| status(r, ProviderId::Rdap))
+        .collect();
+        let answered = rdap
+            .iter()
+            .filter(|s| s.status == ProviderState::Success)
+            .count();
+        let waited: Vec<_> = rdap
+            .iter()
+            .filter(|s| s.status == ProviderState::Skipped)
+            .collect();
+        assert_eq!(answered, 4, "{rdap:?}");
+        assert_eq!(waited.len(), 2, "{rdap:?}");
+        assert!(waited.iter().all(|s| s
+            .message
+            .as_deref()
+            .unwrap()
+            .starts_with("Not queried: other lookups")));
+        assert_eq!(hits.count("/rdap/ip"), 4);
+
+        // The breaker stayed closed: the next lookup reaches the server.
+        let next = service
+            .enrich(ip("8.8.8.7"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(
+            status(&next, ProviderId::Rdap).status,
+            ProviderState::Success
+        );
+        assert_eq!(hits.count("/rdap/ip"), 5);
+    }
+
+    #[tokio::test]
+    async fn rdap_cache_is_keyed_by_base_url() {
+        let (http, hits) = mock_http(vec![
+            ("/first/ip", vec![(200, vec![], RDAP_ARIN.to_string())]),
+            ("/second/ip", vec![(200, vec![], RDAP_RIPE.to_string())]),
+        ])
+        .await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+        let mut settings = rdap_only(http);
+
+        settings.rdap.base_url = Some(format!("http://{http}/first/ip"));
+        service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        settings.rdap.base_url = Some(format!("http://{http}/second/ip"));
+        let switched = service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        assert!(!status(&switched, ProviderId::Rdap).cached);
+        assert_eq!(hits.count("/second/ip"), 1);
+
+        settings.rdap.base_url = Some(format!("http://{http}/first/ip"));
+        let back = service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        assert!(status(&back, ProviderId::Rdap).cached);
+        assert_eq!(hits.count("/first/ip"), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_cache_write_keeps_changes_for_the_next_persist() {
+        let (http, _) = mock_http(vec![(
+            "/rdap/ip",
+            vec![(200, vec![], RDAP_ARIN.to_string())],
+        )])
+        .await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let blocker =
+            std::env::temp_dir().join(format!("vistracer-blocker-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&blocker, "a file, so its child path cannot be a directory").unwrap();
+        let service = service(
+            http,
+            whois,
+            Some(blocker.join("cache").join("enrichment-cache.json")),
+        );
+
+        service
+            .enrich(ip("8.8.8.8"), no_geolite(), &rdap_only(http), false)
+            .await;
+        service.persist();
+
+        let mut cache = service.cache.lock().unwrap();
+        assert!(cache
+            .snapshot_if_dirty(now_ms(), service.ttl_ms)
+            .unwrap()
+            .is_some());
+        drop(cache);
+        std::fs::remove_file(&blocker).unwrap();
     }
 
     #[tokio::test]
