@@ -28,22 +28,23 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit tests (39 tests across 4 files)
+npm run test           # Run unit + component tests (59 tests across 8 files)
 npm run test:e2e       # Run e2e tests (72 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
-# Rust tests
-cd src-tauri && cargo test   # 15 tests
+# Rust
+cd src-tauri && cargo test                                # 94 tests
+cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
 **Required:** Node.js >= 22.0.0, Rust toolchain (rustup)
 
 ## CI/CD
 
-- **CI** (`.github/workflows/ci.yml`): Runs on every push/PR. Lint, typecheck, test (TS + Rust), then builds Tauri platform artifacts in parallel.
-- **Release** (`.github/workflows/release.yml`): Triggered by `v*` tag push. Runs CI checks, builds all platforms, creates a GitHub Release with artifacts attached.
+- **CI** (`.github/workflows/ci.yml`): Runs on every push/PR. Lint, typecheck, test (TS + Rust), clippy, then builds Tauri platform artifacts in parallel (macOS universal DMG, Windows, Linux). CI builds create no updater artifacts and need no secrets.
+- **Release** (`.github/workflows/release.yml`): Triggered by `v*` tag push. Preflight checks (real updater pubkey, signing secrets, tag = app version), draft release, signed builds via `tauri-apps/tauri-action@v1` with `src-tauri/tauri.updater.conf.json`, then publish after `latest.json` has all four platforms.
 
-To create a release: `git tag -a v1.1.0 -m "v1.1.0" && git push origin v1.1.0`
+Release steps and the one-time signing key setup: [docs/releasing.md](./docs/releasing.md).
 
 ## Project Architecture
 
@@ -52,7 +53,7 @@ To create a release: `git tag -a v1.1.0 -m "v1.1.0" && git push origin v1.1.0`
 VisTracer follows Tauri's architecture with a Rust backend and web frontend:
 
 - **Rust backend** (`src-tauri/`): System-level operations
-  - Spawns native traceroute binaries (`traceroute`/`traceroute6` on Unix, `tracert`/`tracert -6` on Windows)
+  - Spawns native traceroute binaries found via PATH (`traceroute`/`traceroute6`/`tcptraceroute` on Unix, `tracert` on Windows)
   - Manages GeoIP/ASN lookups via MaxMind databases (`maxminddb` crate)
   - Handles IPC via Tauri commands, persistence, DNS resolution, and logging
   - Auto-downloads GeoLite2 databases via MaxMind license key
@@ -89,6 +90,7 @@ Key Tauri Commands:
 - `download_geo_db`: Trigger auto-download of GeoLite2 databases
 - `get_settings` / `set_settings`: Read/write application settings
 - `emit_telemetry`: Log telemetry events
+- `get_app_info`: App version and whether the updater public key is configured
 
 Key Events (Tauri emit/listen):
 - `vistracer:traceroute:progress`: Streamed hop progress events
@@ -98,35 +100,30 @@ Key Events (Tauri emit/listen):
 
 - `main.rs`: Tauri app setup, command registration, state management
 - `types.rs`: Shared data types (serialized to/from frontend)
-- `net.rs`: IPv4/IPv6 private IP detection (mirrors `src/common/net.ts`)
-- `commands/traceroute.rs`: Traceroute execution, parsing, enrichment
-- `commands/dns.rs`: Reverse DNS lookups with caching
-- `commands/geo.rs`: MaxMind GeoLite2 database reader management
-- `commands/integrations.rs`: External enrichment providers
+- `net.rs`: Private IP detection (mirrors `src/common/net.ts`) and `is_publicly_routable` (gate for provider lookups)
+- `commands/traceroute.rs`: Run orchestration: spawn, reader task, `select!` loop, lookup tasks, cancel, Linux UDP fallback
+- `commands/traceroute_command.rs`: Binary lookup (`SystemLocator`, trusted lookup for elevated runs), per-platform arguments, target validation
+- `commands/traceroute_parse.rs`: Line parser (all responders per hop, continuation lines, Windows layout)
+- `commands/run_state.rs`: Per-run hop state; renders `HopResolution`s and emits only changed hops
+- `commands/lookup.rs`: Per-address lookup worker (`HopLookup` trait): reverse DNS + GeoLite2 + providers
+- `commands/integrations.rs`: Provider parsers, `EnrichmentService` (cache, limits, retry), `merge_asn`
+- `commands/enrichment_cache.rs`: TTL cache persisted to `$APPCACHE/enrichment-cache.json`
+- `commands/retry.rs`: `ProviderError`, backoff with jitter, `with_retry`
+- `commands/dns.rs`: Reverse DNS on the blocking pool with timeout and caching
+- `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup
+- `commands/app_info.rs`: App version and updater key state
 - `commands/geodb_downloader.rs`: MaxMind database auto-download
-- `commands/persistence.rs`: In-memory store for settings, cache, runs
+- `commands/persistence.rs`: In-memory store for settings, DNS cache, runs; settings validation
 
 ### Traceroute Execution Pipeline
 
-1. **Command construction** (`src-tauri/src/commands/traceroute.rs:build_command`):
-   - Platform-aware: `traceroute` on Unix with `-I` for ICMP, `tracert` on Windows
-   - IPv6-aware: uses `traceroute6` on Unix, `tracert -6` on Windows
-   - Spawns child process with streaming stdout via `tokio::process::Command`
+Full description and mermaid diagram: [docs/architecture.md](./docs/architecture.md).
 
-2. **Line parsing** (`parse_hop_line`):
-   - Regex-based extraction of hop index, IP, RTT values, and packet loss
-   - Handles both IPv4 and IPv6 addresses (in parentheses, brackets, or bare)
-   - Handles timeouts (`* * *`), private IPs, and various output formats
-
-3. **Enrichment** (async per hop):
-   - Reverse DNS lookup via `dns-lookup` crate with caching
-   - GeoIP/ASN lookup via `maxminddb` crate
-   - Optional external enrichment via Team Cymru, RDAP, RIPE Stat, and PeeringDB
-   - Results cached in the in-memory `AppStore`
-
-4. **Progress streaming**:
-   - Each hop resolution triggers a `TracerouteProgressEvent` emitted to frontend
-   - Frontend updates Zustand store incrementally for real-time UI updates
+1. **Plan** (`traceroute_command.rs`): find the binary via PATH plus fallbacks; macOS TCP needs root and only uses a root-owned binary in `/usr/sbin`, `/usr/bin`, `/sbin`, `/bin`. Linux TCP uses `tcptraceroute` (IPv4) or `traceroute -T`.
+2. **Read** (`traceroute.rs`): a reader task forwards lines over a channel; the run loop parses each line and emits the hop immediately (`lookupState: "pending"`).
+3. **Look up** (`lookup.rs`): each new address gets a task (max 8 per run): reverse DNS, GeoLite2, then providers through `EnrichmentService`. Finished lookups emit hop updates. A slow lookup never delays later hops.
+4. **Fallback**: on Linux, a permission error for ICMP/TCP before any hop reruns the trace with UDP and adds a notice to `summary.notices`.
+5. **Finish**: after the process exits and lookups finish, emit the completed run and persist the provider cache.
 
 ### Globe Visualization
 
@@ -165,17 +162,24 @@ GeoLite2 databases can be configured two ways:
 - **Team Cymru**: IP-to-ASN mapping via TCP whois (no credentials required)
 - **RDAP**: Registry owner/country data (default `https://rdap.org/ip`)
 - **RIPE Stat**: Prefix and ASN holder context
-- **PeeringDB**: Facility/operator details for known ASNs (optional API key)
+- **PeeringDB**: Network type, policy, IXP/facility counts for known ASNs (optional API key, `Authorization: Api-Key`)
+
+Each call: cache (7 days; RDAP keyed by base URL) → wait up to 25 s for a provider slot (else `skipped`, not a failure) → cache and circuit-breaker check → `with_retry` (429/5xx/timeouts, backoff + jitter). Failures become `status: "error"`, count toward the breaker (3 in a row pause the provider for 60 s) and never drop GeoLite2 data. Only publicly routable addresses are sent. Parsers are tested against real responses in `src-tauri/fixtures/providers/`.
 
 ## Testing
 
 ### TypeScript Tests (Vitest)
 
-- **Unit tests** (`vitest.config.ts`): 39 tests across 4 files
+- **Unit and component tests** (`vitest.config.ts`): 59 tests across 8 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 9 tests: store behavior
+  - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
   - `src/renderer/lib/__tests__/globe.test.ts` — 7 tests: globe utility functions
   - `src/renderer/lib/__tests__/sun-calculation.test.ts` — 5 tests: solar position
+  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 5 tests: multipath, PeeringDB, provider failures
+  - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 6 tests: provider toggles, key, URL validation
+  - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
+  - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
 
 - **E2E tests** (`vitest.e2e.config.ts`): 72 tests across 6 files
   - `tests/e2e/bridge.test.ts` — 17 tests: Tauri bridge invoke/listen integration
@@ -187,21 +191,25 @@ GeoLite2 databases can be configured two ways:
 
 ### Rust Tests
 
-- 15 tests in `src-tauri/src/` covering:
-  - Traceroute parsing (hop lines, latency values, IPv4/IPv6)
-  - Command building (cross-platform, IPv6)
-  - Request normalization
-  - Network utilities (private IP detection)
+- 94 tests in `src-tauri/src/` covering:
+  - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
+  - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
+  - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
+  - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
+  - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
+  - Settings validation, updater key detection
 
 ## Key Implementation Details
 
 - **Platform detection**: Rust `cfg!(target_os = ...)` for platform-specific behavior
-- **Traceroute binary paths**: Unix uses `/usr/sbin/traceroute`, Windows uses `tracert` from PATH
+- **Traceroute binary paths**: PATH first, then `/usr/sbin`, `/usr/bin`, `/sbin`, `/bin`, `/usr/local/*` (Windows: `%SystemRoot%\System32`); elevated runs use only root-owned system binaries
 - **IPv6 detection**: `is_ipv6()` checks for colon-separated addresses (in both TS and Rust)
-- **Private IP handling**: `is_private_ip()` detects RFC1918 + link-local/ULA addresses
+- **Private IP handling**: `is_private_ip()` detects RFC1918 + link-local/ULA addresses (UI label); `is_publicly_routable()` decides what may be sent to providers
 - **Cancellation**: Active runs tracked in `Arc<Mutex<HashMap>>`, cancel sends kill signal
 - **Snapshot export**: Client-side canvas capture (no server-side `capturePage`)
-- **State persistence**: In-memory `AppStore` with `Mutex` for thread-safe access
+- **State persistence**: In-memory `AppStore` with `Mutex` for thread-safe access; settings in `$APPDATA/settings.json`, provider cache in `$APPCACHE/enrichment-cache.json`
+- **CSP**: strict policy in `tauri.conf.json` (`script-src 'self'`); never inject inline scripts (gif.js loads as a `?url` asset)
+- **Updater**: `plugins.updater.pubkey` is a placeholder until the signing key is set up; `get_app_info` reports `updaterConfigured`
 
 ## Build & Package
 
@@ -222,6 +230,7 @@ npm run tauri:build
 
 ### Rust (src-tauri/Cargo.toml)
 - `tauri` v2: Application framework
+- `tauri-plugin-updater` (~2.10) / `tauri-plugin-process` (~2.3): in-app updates and relaunch (pinned to match tauri 2.10)
 - `maxminddb`: GeoIP database reader
 - `tokio`: Async runtime
 - `reqwest`: HTTP client (for external providers, MaxMind downloads)
@@ -232,6 +241,7 @@ npm run tauri:build
 
 ### Frontend (package.json)
 - `@tauri-apps/api`: Tauri IPC bridge
+- `@tauri-apps/plugin-updater` / `@tauri-apps/plugin-process`: update check, install, relaunch
 - `react` / `react-dom`: UI framework
 - `three` / `@react-three/fiber` / `@react-three/drei`: 3D globe
 - `zustand`: State management

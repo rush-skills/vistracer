@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   ci:
     name: Lint, typecheck & test (Node ${{ matrix.node-version }})
@@ -25,7 +28,10 @@ jobs:
           cache: "npm"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -68,6 +74,10 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
   build:
     name: Build (${{ matrix.name }})
     needs: ci
@@ -77,16 +87,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          - name: macOS (universal)
             os: macos-latest
-            pattern: "src-tauri/target/release/bundle/**/*.dmg"
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+            pattern: "src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg"
 
           - name: Windows
             os: windows-latest
+            rust-targets: ""
+            args: ""
             pattern: "src-tauri/target/release/bundle/**/*.exe"
 
           - name: Linux
             os: ubuntu-latest
+            rust-targets: ""
+            args: ""
             pattern: |
               src-tauri/target/release/bundle/**/*.AppImage
               src-tauri/target/release/bundle/**/*.deb
@@ -102,7 +118,10 @@ jobs:
           cache: "npm"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-targets }}
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -126,8 +145,10 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # CI builds use the base config (no updater artifacts), so they
+      # need no signing key and also work for pull requests from forks.
       - name: Build Tauri app
-        run: npx tauri build
+        run: npx tauri build ${{ matrix.args }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

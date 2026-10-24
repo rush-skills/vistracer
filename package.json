@@ -5,8 +5,8 @@
   "private": true,
   "type": "module",
   "author": {
-    "name": "VisTracer Team",
-    "email": "vistracer@rush-skills.dev"
+    "name": "Ankur Singh",
+    "email": "hello@anks.in"
   },
   "license": "MIT",
   "repository": {
@@ -22,9 +22,9 @@
     "dev:renderer": "vite --config vite.config.ts",
     "build": "npm run build:renderer",
     "build:renderer": "tsc -p tsconfig.renderer.json && vite build --config vite.config.ts",
-    "tauri": "cargo tauri",
-    "tauri:dev": "cargo tauri dev",
-    "tauri:build": "cargo tauri build",
+    "tauri": "npx tauri",
+    "tauri:dev": "npx tauri dev",
+    "tauri:build": "npx tauri build",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "vitest run",
     "test:watch": "vitest watch",
@@ -38,7 +38,9 @@
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-fs": "^2.2.0",
+    "@tauri-apps/plugin-process": "~2.3.1",
     "@tauri-apps/plugin-shell": "^2.2.0",
+    "@tauri-apps/plugin-updater": "~2.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.1.0",

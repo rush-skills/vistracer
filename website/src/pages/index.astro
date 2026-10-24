@@ -37,8 +37,14 @@ const features = [
 const version = '1.0.0';
 const releaseBase = `https://github.com/rush-skills/vistracer/releases/download/v${version}`;
 
+// v1.0.0 shipped an Apple Silicon-only DMG. Releases after it ship one
+// universal DMG (Apple Silicon and Intel). Bump `version` with each release.
+const macUniversal = version !== '1.0.0';
+const macDmg = macUniversal ? `VisTracer_${version}_universal.dmg` : `VisTracer_${version}_aarch64.dmg`;
+const macFormat = macUniversal ? '.dmg · Apple Silicon & Intel' : '.dmg · Apple Silicon';
+
 const platforms = [
-  { name: 'macOS', format: '.dmg', icon: '&#x1F34E;', href: `${releaseBase}/VisTracer_${version}_aarch64.dmg` },
+  { name: 'macOS', format: macFormat, icon: '&#x1F34E;', href: `${releaseBase}/${macDmg}` },
   { name: 'Windows', format: '.exe', icon: '&#x1FA9F;', href: `${releaseBase}/VisTracer_${version}_x64-setup.exe` },
   { name: 'Linux', format: '.AppImage', icon: '&#x1F427;', href: `${releaseBase}/VisTracer_${version}_amd64.AppImage` },
 ];
@@ -191,7 +197,7 @@ const platforms = [
         on the releases page.
       </p>
       <p class="mt-3 text-xs text-[var(--color-text-dim)]">
-        <strong>macOS:</strong> The app is not notarized with Apple. On first launch, <strong>right-click</strong> (or Control+click) VisTracer &rarr; click <strong>Open</strong> &rarr; then click <strong>Open</strong> again in the dialog.
+        <strong>macOS:</strong> {macUniversal ? 'One DMG runs natively on Apple Silicon and Intel Macs.' : 'This release runs on Apple Silicon Macs.'} The app is not notarized with Apple. On first launch, <strong>right-click</strong> (or Control+click) VisTracer &rarr; click <strong>Open</strong> &rarr; then click <strong>Open</strong> again in the dialog.
         Alternatively, run
         <code class="rounded bg-[var(--color-bg)] px-1.5 py-0.5 text-[var(--color-teal)]">xattr -cr VisTracer.app</code>
         in Terminal before opening.

@@ -1,0 +1,315 @@
+{
+  "handle": "193.0.0.0 - 193.0.7.255",
+  "startAddress": "193.0.0.0",
+  "endAddress": "193.0.7.255",
+  "ipVersion": "v4",
+  "name": "RIPE-NCC",
+  "type": "ASSIGNED PA",
+  "country": "NL",
+  "parentHandle": "193.0.0.0 - 193.0.23.255",
+  "cidr0_cidrs": [
+    {
+      "v4prefix": "193.0.0.0",
+      "length": 21
+    }
+  ],
+  "status": [
+    "active"
+  ],
+  "entities": [
+    {
+      "handle": "MDIR-RIPE",
+      "vcardArray": [
+        "vcard",
+        [
+          [
+            "version",
+            {},
+            "text",
+            "4.0"
+          ],
+          [
+            "fn",
+            {},
+            "text",
+            "Managing Director"
+          ],
+          [
+            "kind",
+            {},
+            "text",
+            "group"
+          ],
+          [
+            "adr",
+            {
+              "label": "RIPE Network Coordination Centre\nP.O. Box 10096\n1001 EB Amsterdam\nthe Netherlands"
+            },
+            "text",
+            [
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ]
+          ],
+          [
+            "tel",
+            {
+              "type": "voice"
+            },
+            "text",
+            "+31 20 535 4444"
+          ],
+          [
+            "org",
+            {},
+            "text",
+            "ORG-NCC1-RIPE"
+          ]
+        ]
+      ],
+      "roles": [
+        "administrative"
+      ],
+      "objectClassName": "entity"
+    },
+    {
+      "handle": "OPS4-RIPE",
+      "vcardArray": [
+        "vcard",
+        [
+          [
+            "version",
+            {},
+            "text",
+            "4.0"
+          ],
+          [
+            "fn",
+            {},
+            "text",
+            "RIPE NCC Operations"
+          ],
+          [
+            "kind",
+            {},
+            "text",
+            "group"
+          ],
+          [
+            "adr",
+            {
+              "label": "Stationsplein 11\n1012 AB Amsterdam\nThe Netherlands"
+            },
+            "text",
+            [
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ]
+          ],
+          [
+            "tel",
+            {
+              "type": "voice"
+            },
+            "text",
+            "+31 20 535 4444"
+          ],
+          [
+            "tel",
+            {
+              "type": "fax"
+            },
+            "text",
+            "+31 20 535 4445"
+          ],
+          [
+            "email",
+            {
+              "type": "abuse"
+            },
+            "text",
+            "abuse@ripe.net"
+          ]
+        ]
+      ],
+      "roles": [
+        "technical"
+      ],
+      "objectClassName": "entity"
+    },
+    {
+      "handle": "ORG-RIEN1-RIPE",
+      "vcardArray": [
+        "vcard",
+        [
+          [
+            "version",
+            {},
+            "text",
+            "4.0"
+          ],
+          [
+            "fn",
+            {},
+            "text",
+            "Reseaux IP Europeens Network Coordination Centre (RIPE NCC)"
+          ],
+          [
+            "kind",
+            {},
+            "text",
+            "org"
+          ],
+          [
+            "adr",
+            {
+              "label": "P.O. Box 10096\n1001 EB\nAmsterdam\nNETHERLANDS"
+            },
+            "text",
+            [
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ]
+          ],
+          [
+            "tel",
+            {
+              "type": "voice"
+            },
+            "text",
+            "+31205354444"
+          ],
+          [
+            "tel",
+            {
+              "type": "fax"
+            },
+            "text",
+            "+31205354445"
+          ]
+        ]
+      ],
+      "roles": [
+        "registrant"
+      ],
+      "objectClassName": "entity"
+    },
+    {
+      "handle": "RIPE-NCC-MNT",
+      "vcardArray": [
+        "vcard",
+        [
+          [
+            "version",
+            {},
+            "text",
+            "4.0"
+          ],
+          [
+            "fn",
+            {},
+            "text",
+            "RIPE-NCC-MNT"
+          ],
+          [
+            "kind",
+            {},
+            "text",
+            "individual"
+          ]
+        ]
+      ],
+      "roles": [
+        "registrant"
+      ],
+      "objectClassName": "entity"
+    },
+    {
+      "handle": "OPS4-RIPE",
+      "vcardArray": [
+        "vcard",
+        [
+          [
+            "version",
+            {},
+            "text",
+            "4.0"
+          ],
+          [
+            "fn",
+            {},
+            "text",
+            "RIPE NCC Operations"
+          ],
+          [
+            "kind",
+            {},
+            "text",
+            "group"
+          ],
+          [
+            "adr",
+            {
+              "label": "Stationsplein 11\n1012 AB Amsterdam\nThe Netherlands"
+            },
+            "text",
+            [
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              ""
+            ]
+          ],
+          [
+            "tel",
+            {
+              "type": "voice"
+            },
+            "text",
+            "+31 20 535 4444"
+          ],
+          [
+            "tel",
+            {
+              "type": "fax"
+            },
+            "text",
+            "+31 20 535 4445"
+          ],
+          [
+            "email",
+            {
+              "type": "abuse"
+            },
+            "text",
+            "abuse@ripe.net"
+          ]
+        ]
+      ],
+      "roles": [
+        "abuse"
+      ],
+      "objectClassName": "entity"
+    }
+  ],
+  "port43": "whois.ripe.net",
+  "objectClassName": "ip network"
+}

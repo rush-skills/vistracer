@@ -6,6 +6,8 @@ import { GlobeViewport } from "./components/GlobeViewport";
 import { HopDetailsPane } from "./components/HopDetailsPane";
 import { FooterBar } from "./components/FooterBar";
 import { OnboardingModal } from "./components/OnboardingModal";
+import { UpdateBanner } from "./components/UpdateBanner";
+import { useUpdateStore } from "@renderer/state/updateStore";
 import { UI_EVENTS } from "./lib/uiEvents";
 import "./app.css";
 
@@ -14,6 +16,8 @@ interface OnboardingPreferences {
   lastCompletedAt?: number;
   lastDismissedAt?: number;
 }
+
+const UPDATE_CHECK_DELAY_MS = 5000;
 
 export const App: React.FC = () => {
   useTracerouteSubscription();
@@ -24,6 +28,14 @@ export const App: React.FC = () => {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(true);
   const [showOnLaunch, setShowOnLaunch] = useState(true);
   const onboardingPrefsRef = useRef<OnboardingPreferences>({});
+
+  // Check for updates in the background after start-up settles.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void useUpdateStore.getState().check();
+    }, UPDATE_CHECK_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -120,6 +132,7 @@ export const App: React.FC = () => {
         <HopDetailsPane run={currentRun} selectedHopIndex={selectedHopIndex} status={status} />
       </div>
       <FooterBar />
+      <UpdateBanner />
       <OnboardingModal
         isOpen={isOnboardingOpen}
         onComplete={handleOnboardingComplete}

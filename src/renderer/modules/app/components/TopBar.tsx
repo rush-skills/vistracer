@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type {
-  GeoDatabaseMeta,
-  IntegrationSettings,
-  ProviderId,
-  TracerouteProtocol
+import {
+  DEFAULT_RDAP_BASE_URL,
+  type GeoDatabaseMeta,
+  type IntegrationSettings,
+  type ProviderId,
+  type TracerouteProtocol
 } from "@common/ipc";
 import { useRecentRuns } from "@renderer/hooks/useRecentRuns";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
@@ -34,13 +35,13 @@ const defaultState: TracerouteFormState = {
 
 const numericConstraints = {
   maxHops: { min: 1, max: 64 },
-  timeoutMs: { min: 500, max: 20000 },
+  timeoutMs: { min: 1000, max: 10000 },
   packetCount: { min: 1, max: 5 }
 } as const;
 
 const integrationDefaults: IntegrationSettings = {
   teamCymru: { enabled: true },
-  rdap: { enabled: true, baseUrl: "https://rdap.org/ip" },
+  rdap: { enabled: true, baseUrl: DEFAULT_RDAP_BASE_URL },
   ripeStat: { enabled: true, sourceApp: "VisTracer" },
   peeringDb: { enabled: false }
 };
@@ -201,18 +202,10 @@ export const TopBar: React.FC = () => {
         continue;
       }
 
+      // "error" only means a failed lookup; a provider with no record reports "success".
       for (const provider of hop.providers) {
-        // Skip if not an error, or if already have an error for this provider
-        if (provider.status !== "error" || errors[provider.provider]) {
-          continue;
-        }
-
-        // Filter out "no data" messages - these are not real errors
-        const message = provider.message ?? "Provider returned an error.";
-        const isNoDataMessage = message.toLowerCase().includes("no data");
-
-        if (!isNoDataMessage) {
-          errors[provider.provider] = message;
+        if (provider.status === "error" && !errors[provider.provider]) {
+          errors[provider.provider] = provider.message ?? "Lookup failed.";
         }
       }
     }
@@ -478,8 +471,8 @@ export const TopBar: React.FC = () => {
             Timeout (ms)
             <input
               type="number"
-              min={500}
-              max={20000}
+              min={1000}
+              max={10000}
               step={250}
               value={form.timeoutMs}
               onChange={handleChange("timeoutMs")}

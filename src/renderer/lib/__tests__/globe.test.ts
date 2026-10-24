@@ -13,6 +13,8 @@ const baseHop = (overrides: Partial<HopResolution>): HopResolution => ({
   isPrivate: false,
   isAnycastSuspected: false,
   rawLine: "",
+  responders: [],
+  lookupState: "complete",
   ...overrides
 });
 

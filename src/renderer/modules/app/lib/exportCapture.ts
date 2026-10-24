@@ -116,10 +116,12 @@ const drawOverlay = (
 
   if (hop.peeringDb) {
     const peeringLabel = hop.peeringDb.name ?? "PeeringDB entry";
-    const peeringLocation = hop.peeringDb.city
-      ? ` (${hop.peeringDb.city}${hop.peeringDb.country ? `, ${hop.peeringDb.country}` : ""})`
-      : "";
-    appendWrapped(`PeeringDB: ${peeringLabel}${peeringLocation}`, bodySmallFont, "rgba(215, 219, 255, 0.6)");
+    const peeringFacts = [
+      hop.peeringDb.infoType,
+      hop.peeringDb.ixCount != null ? `${hop.peeringDb.ixCount} IXPs` : undefined
+    ].filter(Boolean);
+    const peeringSuffix = peeringFacts.length > 0 ? ` (${peeringFacts.join(", ")})` : "";
+    appendWrapped(`PeeringDB: ${peeringLabel}${peeringSuffix}`, bodySmallFont, "rgba(215, 219, 255, 0.6)");
   }
 
   if (hop.providers && hop.providers.length > 0) {
@@ -209,7 +211,7 @@ const captureGif = async (
   overlayCtx: CanvasRenderingContext2D,
   dwellSeconds: number
 ): Promise<Blob> => {
-  const gif = createGif({ workers: 4, quality: 20, repeat: 0, background: "#000" });
+  const gif = await createGif({ workers: 4, quality: 20, repeat: 0, background: "#000" });
   const store = useTracerouteStore.getState();
   const { setSelectedHop } = store;
 
