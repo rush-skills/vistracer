@@ -9,6 +9,7 @@ pub mod lookup;
 pub mod persistence;
 pub mod retry;
 pub mod run_state;
+pub mod tile_cache;
 pub mod traceroute;
 pub mod traceroute_command;
 pub mod traceroute_parse;
