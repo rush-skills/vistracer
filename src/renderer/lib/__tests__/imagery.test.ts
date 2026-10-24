@@ -11,7 +11,9 @@ describe("onlineTileTemplate", () => {
     const mac = (path: string, protocol: string) => `${protocol}://localhost/${path}`;
     const windows = (path: string, protocol: string) => `http://${protocol}.localhost/${path}`;
     expect(onlineTileTemplate(mac)).toBe("vistiles://localhost/blue-marble/{z}/{y}/{x}.jpg");
-    expect(onlineTileTemplate(windows)).toBe("http://vistiles.localhost/blue-marble/{z}/{y}/{x}.jpg");
+    expect(onlineTileTemplate(windows)).toBe(
+      "http://vistiles.localhost/blue-marble/{z}/{y}/{x}.jpg"
+    );
   });
 
   it("has no online layer outside the desktop app", () => {

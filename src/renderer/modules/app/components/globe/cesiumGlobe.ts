@@ -57,11 +57,12 @@ const HOVER_PICK_MS = 50;
 const PICK_DEPTH = 4;
 const MINIMIZED_CHECK_MS = 150;
 
-const MARKER_STYLE: Record<Emphasis, { pixelSize: number; outline: Color; outlineWidth: number }> = {
-  normal: { pixelSize: 9, outline: MARKER_OUTLINE, outlineWidth: 1.5 },
-  hovered: { pixelSize: 12, outline: Color.WHITE, outlineWidth: 2 },
-  selected: { pixelSize: 14, outline: Color.WHITE, outlineWidth: 2.5 }
-};
+const MARKER_STYLE: Record<Emphasis, { pixelSize: number; outline: Color; outlineWidth: number }> =
+  {
+    normal: { pixelSize: 9, outline: MARKER_OUTLINE, outlineWidth: 1.5 },
+    hovered: { pixelSize: 12, outline: Color.WHITE, outlineWidth: 2 },
+    selected: { pixelSize: 14, outline: Color.WHITE, outlineWidth: 2.5 }
+  };
 
 interface HopId {
   hopIndex: number;
@@ -73,7 +74,10 @@ function pickedHopIndex(picked: unknown): number | undefined {
     return undefined;
   }
   const id: unknown = picked.id;
-  return typeof id === "object" && id !== null && "hopIndex" in id && typeof id.hopIndex === "number"
+  return typeof id === "object" &&
+    id !== null &&
+    "hopIndex" in id &&
+    typeof id.hopIndex === "number"
     ? id.hopIndex
     : undefined;
 }
@@ -152,7 +156,9 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     nightAlpha: 1,
     brightness: NIGHT_BRIGHTNESS
   });
-  const dayLayers = [new ImageryLayer(bundled(BUNDLED_IMAGERY.day), { dayAlpha: 1, nightAlpha: 0 })];
+  const dayLayers = [
+    new ImageryLayer(bundled(BUNDLED_IMAGERY.day), { dayAlpha: 1, nightAlpha: 0 })
+  ];
   scene.imageryLayers.add(nightLayer);
   scene.imageryLayers.add(dayLayers[0]);
   const onlineTemplate = onlineTileTemplate(isTauri() ? convertFileSrc : undefined);

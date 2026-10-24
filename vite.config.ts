@@ -51,7 +51,10 @@ function cesiumRuntimeFiles(): Plugin {
           next();
           return;
         }
-        res.setHeader("Content-Type", CONTENT_TYPES[path.extname(file)] ?? "application/octet-stream");
+        res.setHeader(
+          "Content-Type",
+          CONTENT_TYPES[path.extname(file)] ?? "application/octet-stream"
+        );
         fs.createReadStream(file).pipe(res);
       });
     },
@@ -60,7 +63,10 @@ function cesiumRuntimeFiles(): Plugin {
       for (const entry of CESIUM_RUNTIME_FILES) {
         fs.cpSync(path.join(CESIUM_BUILD, entry), path.join(target, entry), { recursive: true });
       }
-      fs.copyFileSync(path.resolve(CESIUM_BUILD, "..", "..", "LICENSE.md"), path.join(target, "LICENSE.md"));
+      fs.copyFileSync(
+        path.resolve(CESIUM_BUILD, "..", "..", "LICENSE.md"),
+        path.join(target, "LICENSE.md")
+      );
     }
   };
 }

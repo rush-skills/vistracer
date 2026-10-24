@@ -213,7 +213,10 @@ export function arcPositions(
   to: { latitude: number; longitude: number }
 ): GeoPoint[] {
   const distanceKm = greatCircleKm(from, to);
-  const peak = Math.min(ARC_MAX_PEAK_M, Math.max(ARC_MIN_PEAK_M, distanceKm * 1000 * ARC_HEIGHT_RATIO));
+  const peak = Math.min(
+    ARC_MAX_PEAK_M,
+    Math.max(ARC_MIN_PEAK_M, distanceKm * 1000 * ARC_HEIGHT_RATIO)
+  );
   const segments = Math.min(128, Math.max(16, Math.ceil(distanceKm / ARC_SEGMENT_KM)));
   const angle = distanceKm / EARTH_RADIUS_KM;
   const toUnit = (point: { latitude: number; longitude: number }) => {
@@ -431,7 +434,11 @@ function hopFocus(
   }
   const position = hopPosition(hop);
   if (position) {
-    return { latitude: position.latitude, longitude: position.longitude, radiusKm: position.radiusKm };
+    return {
+      latitude: position.latitude,
+      longitude: position.longitude,
+      radiusKm: position.radiusKm
+    };
   }
   const reach = buildReaches(hops).find((candidate) => candidate.hopIndex === hopIndex);
   if (!reach) {
@@ -492,7 +499,11 @@ export function nextCameraFocus(
 }
 
 /** Camera heights in metres above the ellipsoid. */
-export const CAMERA_LIMITS = { minHeight: 20_000, maxHeight: 40_000_000, initialHeight: 14_000_000 };
+export const CAMERA_LIMITS = {
+  minHeight: 20_000,
+  maxHeight: 40_000_000,
+  initialHeight: 14_000_000
+};
 
 /**
  * Keeps the user's zoom when flying to a hop, but high enough to show the
@@ -500,7 +511,10 @@ export const CAMERA_LIMITS = { minHeight: 20_000, maxHeight: 40_000_000, initial
  */
 export function flyHeight(currentHeightM: number, radiusKm: number): number {
   const fitRing = radiusKm * 1000 * 4;
-  return Math.min(CAMERA_LIMITS.maxHeight, Math.max(CAMERA_LIMITS.minHeight, currentHeightM, fitRing));
+  return Math.min(
+    CAMERA_LIMITS.maxHeight,
+    Math.max(CAMERA_LIMITS.minHeight, currentHeightM, fitRing)
+  );
 }
 
 /** Country outlines from a GeoJSON FeatureCollection, as [lon, lat] rings. */

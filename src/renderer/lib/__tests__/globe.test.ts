@@ -90,10 +90,9 @@ describe("latencyToColor", () => {
 describe("greatCircleKm", () => {
   it("measures known distances", () => {
     expect(greatCircleKm(FRANKFURT, NEW_YORK)).toBeCloseTo(6205, -1);
-    expect(greatCircleKm({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 180 })).toBeCloseTo(
-      Math.PI * 6371,
-      3
-    );
+    expect(
+      greatCircleKm({ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 180 })
+    ).toBeCloseTo(Math.PI * 6371, 3);
   });
 });
 
@@ -138,7 +137,10 @@ describe("arcs", () => {
     // Every point lies on the great circle: the two legs add up.
     const total = greatCircleKm(FRANKFURT, NEW_YORK);
     for (const point of points) {
-      expect(greatCircleKm(FRANKFURT, point) + greatCircleKm(point, NEW_YORK)).toBeCloseTo(total, 3);
+      expect(greatCircleKm(FRANKFURT, point) + greatCircleKm(point, NEW_YORK)).toBeCloseTo(
+        total,
+        3
+      );
     }
     const peak = Math.max(...points.map((point) => point.height));
     expect(peak).toBeCloseTo(total * 1000 * 0.12, -3);
@@ -180,12 +182,16 @@ describe("confidence rings", () => {
     const large = circlePositions(0, 0, 4000);
     expect(large.length).toBeGreaterThan(400);
     const polar = circlePositions(89.99, 0, 500);
-    expect(polar.every((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))).toBe(true);
-    const dateLine = circlePositions(0, 179.9, 300);
-    expect(dateLine.every((p) => p.longitude >= -180 && p.longitude <= 180)).toBe(true);
-    expect(dateLine.every((p) => Math.abs(greatCircleKm({ latitude: 0, longitude: 179.9 }, p) - 300) < 1e-6)).toBe(
+    expect(polar.every((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude))).toBe(
       true
     );
+    const dateLine = circlePositions(0, 179.9, 300);
+    expect(dateLine.every((p) => p.longitude >= -180 && p.longitude <= 180)).toBe(true);
+    expect(
+      dateLine.every(
+        (p) => Math.abs(greatCircleKm({ latitude: 0, longitude: 179.9 }, p) - 300) < 1e-6
+      )
+    ).toBe(true);
   });
 
   it("scales rings to km and styles them by confidence", () => {
@@ -207,7 +213,10 @@ describe("confidence rings", () => {
     expect(RING_STYLES.low.dashed).toBe(true);
     expect(RING_STYLES.high.opacity).toBeGreaterThan(RING_STYLES.medium.opacity);
     expect(RING_STYLES.medium.opacity).toBeGreaterThan(RING_STYLES.low.opacity);
-    expect(greatCircleKm({ latitude: 52.4, longitude: 4.9 }, rings[1].positions[7])).toBeCloseTo(200, 6);
+    expect(greatCircleKm({ latitude: 52.4, longitude: 4.9 }, rings[1].positions[7])).toBeCloseTo(
+      200,
+      6
+    );
   });
 
   it("draws a conflicting estimate with the low-confidence style", () => {
@@ -276,7 +285,10 @@ describe("markers and labels", () => {
       baseHop({ hopIndex: 3, location: noLocation })
     ];
     const scene = buildGlobeScene(hops, 1, 2);
-    expect(scene.labels.map((label) => label.text)).toEqual(["1 · Frankfurt, DE", "2 · Amsterdam, NL"]);
+    expect(scene.labels.map((label) => label.text)).toEqual([
+      "1 · Frankfurt, DE",
+      "2 · Amsterdam, NL"
+    ]);
     expect(buildGlobeScene(hops, 3).labels).toEqual([]);
     expect(buildGlobeScene(hops, 1, 1).labels).toHaveLength(1);
   });
@@ -325,7 +337,10 @@ describe("anycast hops", () => {
 
 describe("camera", () => {
   const hop = (hopIndex: number, located = true) =>
-    baseHop({ hopIndex, location: located ? at(hopIndex * 5, hopIndex * 5, "high", 30) : noLocation });
+    baseHop({
+      hopIndex,
+      location: located ? at(hopIndex * 5, hopIndex * 5, "high", 30) : noLocation
+    });
 
   it("flies to each hop that gets a location during a run, and not on enrichment updates", () => {
     let step = nextCameraFocus(INITIAL_CAMERA_TRACKER, "run-a", [hop(1, false)], undefined);
@@ -365,22 +380,72 @@ describe("borderRings", () => {
     const geojson = {
       type: "FeatureCollection",
       features: [
-        { geometry: { type: "Polygon", coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } },
+        {
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [0, 0],
+                [1, 0],
+                [1, 1],
+                [0, 0]
+              ]
+            ]
+          }
+        },
         {
           geometry: {
             type: "MultiPolygon",
-            coordinates: [[[[2, 2], [3, 2], [2, 2]]], [[[4, 4], [5, 4], [4, 4]]]]
+            coordinates: [
+              [
+                [
+                  [2, 2],
+                  [3, 2],
+                  [2, 2]
+                ]
+              ],
+              [
+                [
+                  [4, 4],
+                  [5, 4],
+                  [4, 4]
+                ]
+              ]
+            ]
           }
         },
         { geometry: { type: "Point", coordinates: [1, 1] } },
         { geometry: null },
-        { geometry: { type: "Polygon", coordinates: [[[0, "x"], [1, 0]]] } }
+        {
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [0, "x"],
+                [1, 0]
+              ]
+            ]
+          }
+        }
       ]
     };
     expect(borderRings(geojson)).toEqual([
-      [[0, 0], [1, 0], [1, 1], [0, 0]],
-      [[2, 2], [3, 2], [2, 2]],
-      [[4, 4], [5, 4], [4, 4]]
+      [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 0]
+      ],
+      [
+        [2, 2],
+        [3, 2],
+        [2, 2]
+      ],
+      [
+        [4, 4],
+        [5, 4],
+        [4, 4]
+      ]
     ]);
     expect(borderRings(null)).toEqual([]);
     expect(borderRings({ features: "nope" })).toEqual([]);

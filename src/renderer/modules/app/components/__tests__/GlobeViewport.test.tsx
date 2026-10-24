@@ -60,8 +60,21 @@ const located = (hopIndex: number, latitude: number, longitude: number): HopReso
 };
 
 const runWith = (hops: HopResolution[]): TracerouteRun => ({
-  request: { target: "example.com", protocol: "ICMP", maxHops: 30, timeoutMs: 4000, packetCount: 3, forceFresh: false },
-  summary: { target: "example.com", startedAt: 1, hopCount: hops.length, protocolsTried: ["ICMP"], notices: [] },
+  request: {
+    target: "example.com",
+    protocol: "ICMP",
+    maxHops: 30,
+    timeoutMs: 4000,
+    packetCount: 3,
+    forceFresh: false
+  },
+  summary: {
+    target: "example.com",
+    startedAt: 1,
+    hopCount: hops.length,
+    protocolsTried: ["ICMP"],
+    notices: []
+  },
   hops
 });
 
@@ -72,7 +85,11 @@ describe("GlobeViewport", () => {
     fake.fail = false;
     fake.callbacks = undefined;
     Object.values(fake.controller).forEach((mock) => mock.mockClear());
-    useTracerouteStore.setState({ selectedHopIndex: undefined, hoveredHopIndex: undefined, captureActive: false });
+    useTracerouteStore.setState({
+      selectedHopIndex: undefined,
+      hoveredHopIndex: undefined,
+      captureActive: false
+    });
   });
 
   afterEach(() => {
@@ -89,10 +106,18 @@ describe("GlobeViewport", () => {
       [1, "selected"]
     ]);
     expect(lastScene()?.arcs).toHaveLength(1);
-    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({ latitude: 50.1, longitude: 8.7, radiusKm: 50 });
+    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({
+      latitude: 50.1,
+      longitude: 8.7,
+      radiusKm: 50
+    });
 
     rerender(<GlobeViewport run={run} selectedHopIndex={2} />);
-    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({ latitude: 52.4, longitude: 4.9, radiusKm: 50 });
+    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({
+      latitude: 52.4,
+      longitude: 4.9,
+      radiusKm: 50
+    });
     const flights = fake.controller.flyTo.mock.calls.length;
     // An enrichment update with the same hops does not move the camera.
     rerender(<GlobeViewport run={runWith([...run.hops])} selectedHopIndex={2} />);

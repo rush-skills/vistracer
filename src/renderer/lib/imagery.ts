@@ -43,7 +43,11 @@ export const NIGHT_BRIGHTNESS = 3;
  * direction only, so without this a zoomed-in view of the dark side would
  * show blurred night tiles while the shading says "lit".
  */
-export function nightImageryShare(cameraDistanceM: number, fadeOutM: number, fadeInM: number): number {
+export function nightImageryShare(
+  cameraDistanceM: number,
+  fadeOutM: number,
+  fadeInM: number
+): number {
   if (!(fadeInM > fadeOutM)) {
     return 1;
   }
