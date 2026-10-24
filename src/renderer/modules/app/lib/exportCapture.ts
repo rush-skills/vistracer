@@ -209,7 +209,7 @@ const captureGif = async (
   overlayCtx: CanvasRenderingContext2D,
   dwellSeconds: number
 ): Promise<Blob> => {
-  const gif = createGif({ workers: 4, quality: 20, repeat: 0, background: "#000" });
+  const gif = await createGif({ workers: 4, quality: 20, repeat: 0, background: "#000" });
   const store = useTracerouteStore.getState();
   const { setSelectedHop } = store;
 
