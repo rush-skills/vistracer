@@ -2,9 +2,9 @@
 
 All notable changes to VisTracer will be documented in this file.
 
-## [1.0.0] - 2026-04-10
+## [1.0.0] - 2026-04-11
 
-Complete rewrite from Electron to Tauri v2 with a Rust backend.
+Port from Electron to Tauri v2. A Rust backend replaces the Electron main process; the React + Three.js renderer is kept.
 
 ### Changed
 
@@ -30,7 +30,7 @@ Complete rewrite from Electron to Tauri v2 with a Rust backend.
 
 ## [0.2.0] - 2026-03-31
 
-Quality, reliability, and accessibility improvements.
+Quality, reliability, and accessibility improvements to the Electron application.
 
 ### Fixed
 
@@ -53,9 +53,9 @@ Quality, reliability, and accessibility improvements.
 - **Animation performance**: CameraController eliminates ~8 Three.js object allocations per frame (Quaternion/Vector3) via persistent `useRef` objects
 - **Dead code cleanup**: Removed commented-out JSX block and debug `console.log` statements from GlobeViewport
 
-## [0.1.0] - 2025-03-26
+## [0.1.0] - 2026-03-30
 
-Initial public release.
+Initial public release. This version is an Electron application.
 
 ### Features
 
@@ -69,5 +69,5 @@ Initial public release.
 - Snapshot export (PNG/JPG/WebP) and animation export (WebM/GIF)
 - Configurable dwell time per hop for animated exports
 - Onboarding modal with GeoLite2 status and integration review
-- Tauri v2 packaging for macOS (DMG), Windows (NSIS), and Linux (AppImage/deb)
-- Settings persistence with no-restart database reload
+- Electron packaging with `electron-builder` for macOS (DMG), Windows (NSIS), and Linux (AppImage/deb)
+- Settings persistence (`electron-store`) with no-restart database reload

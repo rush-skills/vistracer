@@ -2,7 +2,7 @@
 name = "vistracer"
 version = "1.0.0"
 description = "Visual traceroute desktop application"
-authors = ["VisTracer Team"]
+authors = ["Ankur Singh <hello@anks.in>"]
 license = "MIT"
 repository = "https://github.com/rush-skills/vistracer"
 edition = "2021"

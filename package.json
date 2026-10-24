@@ -5,8 +5,8 @@
   "private": true,
   "type": "module",
   "author": {
-    "name": "VisTracer Team",
-    "email": "vistracer@rush-skills.dev"
+    "name": "Ankur Singh",
+    "email": "hello@anks.in"
   },
   "license": "MIT",
   "repository": {
@@ -22,9 +22,9 @@
     "dev:renderer": "vite --config vite.config.ts",
     "build": "npm run build:renderer",
     "build:renderer": "tsc -p tsconfig.renderer.json && vite build --config vite.config.ts",
-    "tauri": "cargo tauri",
-    "tauri:dev": "cargo tauri dev",
-    "tauri:build": "cargo tauri build",
+    "tauri": "npx tauri",
+    "tauri:dev": "npx tauri dev",
+    "tauri:build": "npx tauri build",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "test": "vitest run",
     "test:watch": "vitest watch",
