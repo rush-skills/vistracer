@@ -34,10 +34,12 @@ const CONTENT_TYPES: Record<string, string> = {
  */
 function cesiumRuntimeFiles(): Plugin {
   let outDir = "";
+  let isBuild = false;
   return {
     name: "vistracer-cesium-runtime-files",
     configResolved(config) {
       outDir = path.resolve(config.root, config.build.outDir);
+      isBuild = config.command === "build";
     },
     configureServer(server) {
       server.middlewares.use("/cesium", (req, res, next) => {
@@ -59,6 +61,10 @@ function cesiumRuntimeFiles(): Plugin {
       });
     },
     closeBundle() {
+      // Vite also calls this when the dev server stops.
+      if (!isBuild) {
+        return;
+      }
       const target = path.join(outDir, "cesium");
       for (const entry of CESIUM_RUNTIME_FILES) {
         fs.cpSync(path.join(CESIUM_BUILD, entry), path.join(target, entry), { recursive: true });

@@ -247,12 +247,13 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       if (destroyed) {
         return;
       }
-      const material = solid(BORDER_COLOR);
       for (const ring of borderRings(geojson)) {
         borders.add({
           positions: Cartesian3.fromDegreesArray(ring.flat()),
           width: 1,
-          material
+          // One material per line: each polyline destroys its own material,
+          // so a shared one would make widget.destroy() throw.
+          material: solid(BORDER_COLOR)
         });
       }
       scene.requestRender();

@@ -26,6 +26,9 @@ const EVICT_TO_PERCENT: u64 = 90;
 /// GIBS tiles are 5 to 50 KB; anything far larger is not a tile.
 const MAX_TILE_BYTES: usize = 2 * 1024 * 1024;
 const ALLOWED_UPSTREAM_HOSTS: &[&str] = &["gibs.earthdata.nasa.gov"];
+/// `clear` moves the cache folder to a sibling with this prefix, then
+/// deletes it.
+const TRASH_PREFIX: &str = "tiles-trash-";
 /// Consecutive upstream failures (network, timeout, 5xx, 429) after which
 /// the cache stops asking upstream for `BREAKER_PAUSE`. Offline, this turns
 /// one timeout per tile into a few timeouts per pause.
@@ -243,11 +246,13 @@ impl TileStore {
         }
     }
 
-    /// Locks the index, scanning the folder the first time. A scan also
-    /// removes temporary files left by a crash.
+    /// Locks the index, scanning the folder the first time. The first scan
+    /// also removes temporary files and moved-aside folders that a crash or
+    /// an interrupted `clear` left behind.
     fn index(&self) -> MutexGuard<'_, Index> {
         let mut index = self.index.lock().unwrap_or_else(|e| e.into_inner());
         if !index.loaded {
+            self.remove_trash();
             let mut found = Vec::new();
             scan(&self.root, &self.root, &mut found);
             // Across restarts, the write time stands in for the last use.
@@ -258,6 +263,28 @@ impl TileStore {
             index.loaded = true;
         }
         index
+    }
+
+    fn remove_trash(&self) {
+        let Some(parent) = self.root.parent() else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(parent) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(TRASH_PREFIX)
+                && path.is_dir()
+            {
+                if let Err(err) = std::fs::remove_dir_all(&path) {
+                    log::warn!("Failed to delete {}: {err}", path.display());
+                }
+            }
+        }
     }
 
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
@@ -328,7 +355,7 @@ impl TileStore {
         let mut index = self.index();
         let trash = self
             .root
-            .with_file_name(format!("tiles-trash-{}", uuid::Uuid::new_v4().simple()));
+            .with_file_name(format!("{TRASH_PREFIX}{}", uuid::Uuid::new_v4().simple()));
         match std::fs::rename(&self.root, &trash) {
             Ok(()) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
@@ -339,8 +366,12 @@ impl TileStore {
             ..Index::default()
         };
         drop(index);
+        // The cache is already empty; a folder that cannot be deleted now is
+        // deleted at the next start.
         if trash.exists() {
-            std::fs::remove_dir_all(&trash)?;
+            if let Err(err) = std::fs::remove_dir_all(&trash) {
+                log::warn!("Failed to delete {}: {err}", trash.display());
+            }
         }
         Ok(self.info())
     }
@@ -1041,6 +1072,27 @@ mod tests {
         assert_eq!(store.info().size_bytes, 300);
         assert_eq!(temp_files(&root), 0);
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn first_use_deletes_folders_an_interrupted_clear_left_behind() {
+        let root = temp_root("tiles-trash");
+        let parent = root.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(root.join("blue-marble/1/0")).unwrap();
+        std::fs::write(root.join("blue-marble/1/0/0.jpg"), jpeg(300, 1)).unwrap();
+        let trash = parent.join(format!("{TRASH_PREFIX}0123abcd"));
+        std::fs::create_dir_all(trash.join("blue-marble/2/0")).unwrap();
+        std::fs::write(trash.join("blue-marble/2/0/0.jpg"), jpeg(300, 2)).unwrap();
+        std::fs::write(parent.join("enrichment-cache.json"), b"{}").unwrap();
+
+        let store = TileStore::new(root.clone(), DEFAULT_CAP_BYTES);
+        assert_eq!(store.info().tile_count, 1);
+        assert!(!trash.exists());
+        assert!(
+            parent.join("enrichment-cache.json").exists(),
+            "other files stay"
+        );
+        std::fs::remove_dir_all(&parent).unwrap();
     }
 
     #[tokio::test]

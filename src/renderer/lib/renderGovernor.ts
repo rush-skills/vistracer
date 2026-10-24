@@ -9,8 +9,9 @@
  *   request from Cesium) and stop after `idleTicksBeforeSleep` ticks that
  *   drew nothing.
  * - At most `maxFps` ticks per second, `batteryFps` on battery.
- * - No ticks while the window is hidden or minimized; a wake while hidden
- *   is kept and runs when the window shows again.
+ * - No ticks while the window is hidden or minimized. Showing the window
+ *   again wakes the loop, so a camera flight or a wake that arrived while
+ *   hidden continues.
  */
 
 export interface GovernorRules {
@@ -54,7 +55,6 @@ export class RenderGovernor {
   private idleTicks = 0;
   private visible = true;
   private onBattery = false;
-  private pendingWake = false;
   private disposed = false;
   readonly stats: GovernorStats = { ticks: 0, frames: 0, sleeps: 0 };
 
@@ -74,11 +74,7 @@ export class RenderGovernor {
 
   /** Asks for ticks until the scene settles. */
   wake(): void {
-    if (this.disposed) {
-      return;
-    }
-    if (!this.visible) {
-      this.pendingWake = true;
+    if (this.disposed || !this.visible) {
       return;
     }
     this.idleTicks = 0;
@@ -92,13 +88,10 @@ export class RenderGovernor {
       return;
     }
     this.visible = visible;
-    if (!visible) {
-      this.stop();
-      return;
-    }
-    if (this.pendingWake) {
-      this.pendingWake = false;
+    if (visible) {
       this.wake();
+    } else {
+      this.stop();
     }
   }
 

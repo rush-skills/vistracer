@@ -146,6 +146,25 @@ describe("RenderGovernor", () => {
     expect(scene.ticks).toBeGreaterThan(hiddenAt);
   });
 
+  it("resumes a loop that was running when the window was hidden", () => {
+    const display = new FakeDisplay();
+    const { scene, tick } = fakeScene();
+    const governor = new RenderGovernor(tick, display);
+
+    // A camera flight is under way; no wake arrives while hidden.
+    scene.dirtyFrames = 1_000;
+    governor.wake();
+    display.advance(100);
+    governor.setVisible(false);
+    const hiddenAt = scene.drawn;
+    display.advance(1_000);
+    expect(scene.drawn).toBe(hiddenAt);
+
+    governor.setVisible(true);
+    display.advance(100);
+    expect(scene.drawn).toBeGreaterThan(hiddenAt);
+  });
+
   it("stops for good when disposed", () => {
     const display = new FakeDisplay();
     const { scene, tick } = fakeScene();

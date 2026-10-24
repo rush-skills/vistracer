@@ -28,12 +28,12 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (105 tests across 12 files)
+npm run test           # Run unit + component tests (106 tests across 12 files)
 npm run test:e2e       # Run e2e tests (74 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
 # Rust
-cd src-tauri && cargo test                                # 161 tests (+2 ignored network smoke tests)
+cd src-tauri && cargo test                                # 162 tests (+2 ignored network smoke tests)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -193,12 +193,12 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 105 tests across 12 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 106 tests across 12 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 10 tests: store behavior, hovered hop
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
   - `src/renderer/lib/__tests__/globe.test.ts` — 22 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders
-  - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 7 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible, dispose, render quality
+  - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 8 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible (resumes a running flight), dispose, render quality
   - `src/renderer/lib/__tests__/imagery.test.ts` — 5 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade
   - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 5 tests: scene and fly-to through a mocked `GlobeController`, hover/select sync, input lock during export, WebGL failure message, imagery notice
   - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 14 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, hover sync, scroll to selection
@@ -218,7 +218,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 161 tests in `src-tauri/src/` (plus two ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache) covering:
+- 162 tests in `src-tauri/src/` (plus two ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
@@ -226,7 +226,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
   - Settings validation (including `ixMatching` defaults for old settings files), updater key detection
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
-  - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers, clear, single flight for one tile, concurrent writes of many tiles, failure pause, `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
+  - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers and interrupted clears, clear, single flight for one tile, concurrent writes of many tiles, failure pause, `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
 
 ## Key Implementation Details
 
