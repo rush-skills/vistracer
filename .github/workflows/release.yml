@@ -24,8 +24,9 @@ jobs:
           cache: "npm"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: clippy
 
       - name: Cache Rust dependencies
@@ -169,8 +170,12 @@ jobs:
             args: ""
 
     steps:
+      # This job has a write token and the signing secrets; keep the token
+      # out of .git/config so later steps cannot reuse it.
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -179,8 +184,9 @@ jobs:
           cache: "npm"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.rust-targets }}
 
       - name: Cache Rust dependencies
@@ -206,7 +212,7 @@ jobs:
       # build signs the bundles and the action uploads .sig files and
       # merges this platform into latest.json on the draft release.
       - name: Build, sign and upload
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
