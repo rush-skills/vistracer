@@ -66,7 +66,10 @@ flowchart LR
 6. **Finish**. After the process exits and the lookups finish, the backend
    emits the completed run and writes the provider cache to disk. Cancel
    kills the process and aborts the lookups in flight, also when the process
-   has already exited and only lookups are left.
+   has already exited and only lookups are left. Exception: a macOS TCP run
+   is started as root through `osascript`. Cancel kills `osascript`, but the
+   root `traceroute` keeps running until it ends (stopping it needs root);
+   its output is ignored.
 
 ### Linux privileges
 

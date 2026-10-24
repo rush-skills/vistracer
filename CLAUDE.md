@@ -33,7 +33,7 @@ npm run test:e2e       # Run e2e tests (72 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
 # Rust
-cd src-tauri && cargo test                                # 89 tests
+cd src-tauri && cargo test                                # 94 tests
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -164,7 +164,7 @@ GeoLite2 databases can be configured two ways:
 - **RIPE Stat**: Prefix and ASN holder context
 - **PeeringDB**: Network type, policy, IXP/facility counts for known ASNs (optional API key, `Authorization: Api-Key`)
 
-Each call: cache (7 days) → per-provider semaphore → cache again → `with_retry` (429/5xx/timeouts, backoff + jitter). Failures become `status: "error"` and never drop GeoLite2 data. Only publicly routable addresses are sent. Parsers are tested against real responses in `src-tauri/fixtures/providers/`.
+Each call: cache (7 days; RDAP keyed by base URL) → wait up to 25 s for a provider slot (else `skipped`, not a failure) → cache and circuit-breaker check → `with_retry` (429/5xx/timeouts, backoff + jitter). Failures become `status: "error"`, count toward the breaker (3 in a row pause the provider for 60 s) and never drop GeoLite2 data. Only publicly routable addresses are sent. Parsers are tested against real responses in `src-tauri/fixtures/providers/`.
 
 ## Testing
 
@@ -191,7 +191,7 @@ Each call: cache (7 days) → per-provider semaphore → cache again → `with_r
 
 ### Rust Tests
 
-- 89 tests in `src-tauri/src/` covering:
+- 94 tests in `src-tauri/src/` covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
