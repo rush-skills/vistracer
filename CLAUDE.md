@@ -28,12 +28,12 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (59 tests across 8 files)
+npm run test           # Run unit + component tests (69 tests across 8 files)
 npm run test:e2e       # Run e2e tests (72 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
 # Rust
-cd src-tauri && cargo test                                # 94 tests
+cd src-tauri && cargo test                                # 137 tests (+1 ignored real-traceroute smoke test)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -57,7 +57,8 @@ VisTracer follows Tauri's architecture with a Rust backend and web frontend:
   - Manages GeoIP/ASN lookups via MaxMind databases (`maxminddb` crate)
   - Handles IPC via Tauri commands, persistence, DNS resolution, and logging
   - Auto-downloads GeoLite2 databases via MaxMind license key
-  - External enrichment providers (Team Cymru, RDAP, RIPE Stat, PeeringDB)
+  - External enrichment providers (Team Cymru, RDAP, RIPE Stat, PeeringDB, PeeringDB IX list)
+  - Hop location estimates (`geoloc/`): IX LAN, host name hint, GeoLite2; speed-of-light check; anycast
   - Entry point: `src-tauri/src/main.rs`
 
 - **Frontend** (`src/renderer/`): React application in WebView
@@ -107,13 +108,20 @@ Key Events (Tauri emit/listen):
 - `commands/run_state.rs`: Per-run hop state; renders `HopResolution`s and emits only changed hops
 - `commands/lookup.rs`: Per-address lookup worker (`HopLookup` trait): reverse DNS + GeoLite2 + providers
 - `commands/integrations.rs`: Provider parsers, `EnrichmentService` (cache, limits, retry), `merge_asn`
-- `commands/enrichment_cache.rs`: TTL cache persisted to `$APPCACHE/enrichment-cache.json`
+- `commands/enrichment_cache.rs`: TTL cache and `ProviderCache` (shared by lookups and the IX download, write lock from snapshot to rename), persisted to `$APPCACHE/enrichment-cache.json`
+- `commands/ix_list.rs`: PeeringDB IX list download in a detached task, stale-while-refresh, 24 h TTL
 - `commands/retry.rs`: `ProviderError`, backoff with jitter, `with_retry`
 - `commands/dns.rs`: Reverse DNS on the blocking pool with timeout and caching
 - `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup
 - `commands/app_info.rs`: App version and updater key state
 - `commands/geodb_downloader.rs`: MaxMind database auto-download
 - `commands/persistence.rs`: In-memory store for settings, DNS cache, runs; settings validation
+- `geoloc/estimate.rs`: per-run location of every hop: candidates, RTT bound, reference hop, anycast, precedence
+- `geoloc/rtt.rs`: speed-of-light check (infeasible / tightened / widened / feasible); never moves an estimate
+- `geoloc/hostname.rs` + `geoloc/places.rs`: location hints in router host names; bundled airport table `data/airports.csv` (OurAirports, public domain; see `data/README.md`)
+- `geoloc/ixp.rs`: PeeringDB IX dataset (ixpfx, ixlan, ix, ixfac, fac) and IX LAN lookup
+- `geoloc/prefix.rs`: IPv4/IPv6 prefix table (sorted ranges, most specific match)
+- `geoloc/anycast.rs`: documented anycast prefixes and anycast operator ASNs
 
 ### Traceroute Execution Pipeline
 
@@ -123,7 +131,8 @@ Full description and mermaid diagram: [docs/architecture.md](./docs/architecture
 2. **Read** (`traceroute.rs`): a reader task forwards lines over a channel; the run loop parses each line and emits the hop immediately (`lookupState: "pending"`).
 3. **Look up** (`lookup.rs`): each new address gets a task (max 8 per run): reverse DNS, GeoLite2, then providers through `EnrichmentService`. Finished lookups emit hop updates. A slow lookup never delays later hops.
 4. **Fallback**: on Linux, a permission error for ICMP/TCP before any hop reruns the trace with UDP and adds a notice to `summary.notices`.
-5. **Finish**: after the process exits and lookups finish, emit the completed run and persist the provider cache.
+5. **Locate** (`geoloc/estimate.rs`): every render estimates `HopLocation` for all hops; a new hop can change earlier ones (RTT bound) and re-emit them.
+6. **Finish**: after the process exits and lookups finish, emit the completed run and persist the provider cache.
 
 ### Globe Visualization
 
@@ -164,19 +173,25 @@ GeoLite2 databases can be configured two ways:
 - **RIPE Stat**: Prefix and ASN holder context
 - **PeeringDB**: Network type, policy, IXP/facility counts for known ASNs (optional API key, `Authorization: Api-Key`)
 
+- **PeeringDB IX list** (`peeringdb-ix`, on with PeeringDB): five list requests 2 s apart in a background task, cached 24 h in the provider cache and written to disk when the download ends; a list up to 7 days old is served at once while a refresh runs; lookups wait (max 25 s, else `skipped`) only when there is no list; not refetched by "Force fresh" (PeeringDB allows one identical large anonymous request per hour); 15 min backoff after a failure
+
 Each call: cache (7 days; RDAP keyed by base URL) → wait up to 25 s for a provider slot (else `skipped`, not a failure) → cache and circuit-breaker check → `with_retry` (429/5xx/timeouts, backoff + jitter). Failures become `status: "error"`, count toward the breaker (3 in a row pause the provider for 60 s) and never drop GeoLite2 data. Only publicly routable addresses are sent. Parsers are tested against real responses in `src-tauri/fixtures/providers/`.
+
+### Hop locations
+
+Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `ixp`, `hostnameHint`, `anycast`, `isRttReference`); `geo` stays the raw GeoLite2 record. Draw from `location.best` (`hopPosition` in `src/renderer/lib/globe.ts`), never from `geo`. Precedence: feasible → confidence → IXP > host name > GeoLite2 city > country → smaller radius. Anycast hops have no `best`. Details and known limits: [docs/architecture.md#hop-locations](./docs/architecture.md#hop-locations).
 
 ## Testing
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 59 tests across 8 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 69 tests across 8 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 9 tests: store behavior
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
-  - `src/renderer/lib/__tests__/globe.test.ts` — 7 tests: globe utility functions
+  - `src/renderer/lib/__tests__/globe.test.ts` — 11 tests: arcs, confidence rings (radius on the sphere, styles), utilities
   - `src/renderer/lib/__tests__/sun-calculation.test.ts` — 5 tests: solar position
-  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 5 tests: multipath, PeeringDB, provider failures
+  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 11 tests: multipath, PeeringDB, provider failures, location fields, anycast, empty states
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 6 tests: provider toggles, key, URL validation
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
@@ -191,13 +206,14 @@ Each call: cache (7 days; RDAP keyed by base URL) → wait up to 25 s for a prov
 
 ### Rust Tests
 
-- 94 tests in `src-tauri/src/` covering:
+- 137 tests in `src-tauri/src/` (plus one ignored smoke test, `smoke_real_traceroute`, that runs real traceroutes through the real pipeline) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
   - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
   - Settings validation, updater key detection
+  - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh, concurrent cache writes
 
 ## Key Implementation Details
 

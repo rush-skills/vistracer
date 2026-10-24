@@ -13,18 +13,24 @@ All notable changes to VisTracer will be documented in this file.
 - In-app updates through the Tauri updater (needs the signing key setup in docs/releasing.md)
 - Universal macOS DMG (Apple Silicon and Intel)
 - Linux: ICMP/TCP traces that fail for lack of raw-socket privileges run again with UDP and show how to enable them
+- Hop locations from PeeringDB exchange (IX) peering LANs, router host names (NTT, Cogent, Arelion, Hurricane Electric, Lumen, Tata, Zayo, GTT, Google, Microsoft, Verizon, Comcast and generic airport/city codes) and GeoLite2, ranked by a documented precedence
+- Speed-of-light check: locations that the measured RTT makes impossible are not drawn; radii are tightened or widened
+- Anycast detection for public DNS resolvers, DNS root servers and anycast CDN networks; anycast hops are marked and not drawn at a fake point
+- Uncertainty rings on the globe, true to scale and styled by confidence; Location section in the hop details with source, confidence, radius, RTT check, IXP, host name hint and other candidates
 
 ### Changed
 
 - Hops appear as soon as traceroute prints them; DNS, GeoIP and provider lookups run in the background and update the hop
 - Traceroute binaries are found through PATH with system fallbacks; a missing binary shows an install command
 - Content Security Policy enabled; file system scope limited to the app data, app cache and Downloads folders
+- The globe, camera and export draw each hop at its best location estimate instead of the raw GeoLite2 record; hop markers keep the same size on screen when zooming
 
 ### Fixed
 
 - Team Cymru lookups could never connect, PeeringDB sent the API key in the wrong header, and RIPEstat/PeeringDB fields that do not exist were read
 - macOS TCP traces only run root-owned system binaries with administrator rights
 - A partial settings file no longer resets all settings
+- Two runs that finish together can no longer write an older provider cache over a newer one
 
 ## [1.0.0] - 2026-04-11
 
