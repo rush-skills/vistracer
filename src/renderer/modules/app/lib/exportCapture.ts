@@ -90,7 +90,7 @@ const drawOverlay = (
   }
 
   const position = hopPosition(hop);
-  const anycast = hop.location?.anycast;
+  const anycast = hop.location.anycast;
   const location = anycast
     ? `Anycast (${anycast.service}), no single location`
     : position

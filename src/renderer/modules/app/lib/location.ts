@@ -7,6 +7,14 @@ export const SOURCE_LABELS: Record<LocationSource, string> = {
   "geolite-country": "GeoLite2 country"
 };
 
+/** Source names inside a sentence: "hop 2's GeoLite2 city estimate". */
+const REFERENCE_NOUNS: Record<LocationSource, string> = {
+  ixp: "internet exchange",
+  "hostname-hint": "host name",
+  "geolite-city": "GeoLite2 city",
+  "geolite-country": "GeoLite2 country"
+};
+
 export const HINT_RULE_LABELS: Record<HintRule, string> = {
   "carrier-code": "carrier site code",
   "city-region-code": "city and region code",
@@ -35,7 +43,7 @@ export const locationLabel = (hop: HopResolution): string => {
     return "Resolving…";
   }
   if (alternatives.length > 0) {
-    return "Unknown (RTT rules out every source)";
+    return "Unknown (fails the RTT check)";
   }
   if (hop.asn?.country) {
     return `${hop.asn.country} (registry)`;
@@ -62,11 +70,14 @@ export const describeRtt = (
     }
     return "Not checked: no reference hop or no RTT yet.";
   }
-  const limit = `at most ${km(check.maxDistanceKm)} from hop ${check.referenceHopIndex}`;
+  // The reference is an estimate too, so every statement names it.
+  const reference = `hop ${check.referenceHopIndex}'s ${REFERENCE_NOUNS[check.referenceSource]} estimate`;
+  const limit = `at most ${km(check.maxDistanceKm)} from ${reference}`;
   const bound =
     check.boundHopIndex === hopIndex
       ? `${check.boundRttMs} ms`
       : `${check.boundRttMs} ms (hop ${check.boundHopIndex})`;
+  const apart = `${km(check.distanceKm)} away, but ${bound} allows at most ${km(check.maxDistanceKm)}`;
   switch (check.verdict) {
     case "feasible":
       return `Fits the RTT: ${bound} allows ${limit}.`;
@@ -75,6 +86,8 @@ export const describeRtt = (
     case "widened":
       return `Radius widened from ${km(check.originalRadiusKm)}: ${bound} allows ${limit}, so the hop is beyond the stated radius.`;
     case "infeasible":
-      return `Ruled out: ${km(check.distanceKm)} from hop ${check.referenceHopIndex}, but ${bound} allows ${limit}.`;
+      return `Ruled out against ${reference}: ${apart}.`;
+    case "conflict":
+      return `Conflicts with ${reference}: ${apart}. Kept, because this source is at least as strong as that estimate; one of the two is wrong.`;
   }
 };

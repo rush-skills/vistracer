@@ -156,9 +156,11 @@ flowchart TD
     ref --> check{"Speed-of-light check<br/>distance − hard radius ≤ max?"}
     bound --> check
     cands --> check
-    check -->|no| infeasible["infeasible<br/>kept, never best"]
+    check -->|"no, candidate weaker<br/>than the reference"| infeasible["infeasible<br/>kept, never best"]
+    check -->|"no, candidate at least<br/>as strong as the reference"| conflict["conflict<br/>kept, radius unchanged"]
     check -->|yes| fits["feasible, tightened or widened<br/>radius changes, centre never moves"]
-    infeasible --> anycast{"Anycast?<br/>documented prefix, or operator<br/>ASN + GeoLite2 ruled out"}
+    infeasible --> anycast{"Anycast?<br/>documented prefix, or operator ASN<br/>+ GeoLite2 ruled out + no other<br/>feasible candidate"}
+    conflict --> anycast
     fits --> anycast
     anycast -->|yes| nopoint["best = none<br/>anycast notice, no marker"]
     anycast -->|no| rank["Rank: feasible, confidence,<br/>IXP > host name > city > country,<br/>smaller radius"]
@@ -210,10 +212,29 @@ starts at the user's machine, so for the reference hop `r` and a hop `h`:
 
 `max = reach(rtt_r) + reach(rtt_h) + hard radius of r + 100 km slack`
 
-A candidate is **infeasible** when `distance(r, candidate) − hard radius >
-max`. GeoLite2's `accuracy_radius` is a 67 % radius, so the hard radius of a
-GeoLite2 candidate is twice its radius; for IX and host name candidates it
-is the radius itself. A feasible candidate is **tightened** when the whole
+A candidate fails the check when `distance(r, candidate) − hard radius >
+max`. GeoLite2's `accuracy_radius` is a 67 % radius for end users, not
+routers, so the hard radius of a GeoLite2 candidate is twice its radius as a
+margin; that is a heuristic, not a guarantee. For IX and host name
+candidates the hard radius is the radius itself.
+
+**The reference cannot veto stronger evidence.** The reference location is
+itself an estimate, usually GeoLite2, and GeoLite2 often has a router's
+registered address. So a candidate that fails the check is only
+**infeasible** (kept, never best) when its confidence is lower than the
+reference's. A candidate that is at least as strong as the reference gets
+the **conflict** verdict: it stays in the ranking with its radius and
+confidence unchanged, and the hop details say that it conflicts with the
+reference and that one of the two is wrong. Example: hop 2's GeoLite2 record
+says Mumbai (medium), a Tata router 5 ms away is named `dl1-delhi` (high).
+The Delhi hint fails the check (1,139 km, 840 km allowed) but stays best,
+and the hop stays on the globe. A GeoLite2 country centroid (low), such as
+8.8.8.8 at the US centroid, is still ruled out.
+
+This is the simpler of the two fixes the review offered (the other was to
+validate the reference and replace it). It changes one decision, never hides
+a hop because of a weaker anchor, and keeps the checks that matter most: low
+confidence country centroids and registered addresses far from the path. A feasible candidate is **tightened** when the whole
 area within `max` of the reference lies inside its radius (the radius
 shrinks to `distance + max`), and **widened** when that area starts beyond
 its radius (the radius grows, at most to the hard radius, and confidence
@@ -244,7 +265,8 @@ bundled lists:
 - **Anycast operators**: ASNs that announce their address space from many
   sites (Cloudflare, Fastly, Quad9, OpenDNS, PCH). These networks also have
   unicast router addresses, so the hop counts as anycast only when the RTT
-  rules out its GeoLite2 location as well.
+  rules out its GeoLite2 location and no IX or host name candidate is
+  feasible. A feasible IX or host name candidate means a unicast router.
 
 An anycast hop has no best estimate: no marker, no ring and no arc. The hop
 details say why and give the RTT bound ("the site that answered is at most
@@ -261,9 +283,10 @@ files saved before the switch existed load with it on. When it is on,
 `fac`, with `fields=` to keep them small) one at a time, with the saved
 PeeringDB API key when there is one, the PeeringDB slot, retries, and 2 s
 between requests as PeeringDB asks. The download sends nothing about the
-user's route; matching happens on the user's machine. The joined dataset (on 2026-10-24:
-1,332 exchanges and 2,658 prefixes, about 340 KB of JSON) is kept in the
-provider cache for 24 h and written to disk as soon as the download ends.
+user's route; matching happens on the user's machine. The joined dataset
+(on 2026-10-24: 1,332 exchanges and 2,658 prefixes, about 340 KB of JSON)
+is kept in the provider cache for 24 h and written to disk as soon as the
+download ends.
 
 - The download runs in its own task. A lookup never waits for a refresh: a
   list up to 7 days old is used at once, and the provider status says that
@@ -279,16 +302,30 @@ provider cache for 24 h and written to disk as soon as the download ends.
 - After a failed download there is no new attempt for 15 min. A list up to
   7 days old is used meanwhile; the provider status says the refresh
   failed.
+- An HTTP 429 from PeeringDB is final: no retry within seconds, and no new
+  download for `max(1 h, Retry-After)`, because the limit is per hour.
+- The provider cache keeps entries for at least 7 days, also when the
+  provider TTL (`cacheSettings.enrichmentTtlMs`) is shorter, so a short TTL
+  cannot make the app download the list more than once a day. The cache
+  holds at most 4,000 entries and drops the oldest first; the IX list is one
+  entry and at most a day old in normal use.
 - IX LAN prefixes shorter than /16 (IPv4) or /32 (IPv6) are treated as data
   errors and ignored.
 
 ### Known limits
 
-- A wrong reference location makes correct candidates of other hops look
-  impossible. Example: GeoLite2 places the user's first public hop in
-  Mumbai while the user is in Delhi; Delhi hops 3 ms away then fail the
-  check. The 100 km slack and the doubled GeoLite2 radius only absorb
-  smaller errors.
+- A wrong reference location can still rule out correct candidates that
+  are weaker than the reference. Example: GeoLite2 places the user's first
+  public hop in Mumbai (medium) while the user is in Delhi; a low-confidence
+  GeoLite2 record that correctly says Delhi for a hop 3 ms away is ruled
+  out. Candidates as strong as the reference are kept as conflicts.
+- Remote peering: an address on an IX peering LAN can belong to a router
+  far from the exchange (connected over a long-distance link). The IX
+  candidate is still high confidence up to 150 km.
+- The later-hop bound treats a hop as single-responder after its probes
+  (usually 3). Classic UDP traceroute changes the flow per probe, so with
+  per-flow load balancing (ECMP) a later hop's probe may not have passed
+  this router, and the bound can be too tight.
 - RTT gives only an upper bound on distance. A router 150 ms away can be
   anywhere within 15,000 km, so far hops are rarely filtered.
 - Host name hints depend on naming schemes that carriers can change. The

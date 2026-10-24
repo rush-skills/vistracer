@@ -89,11 +89,14 @@ export type LocationSource = "ixp" | "hostname-hint" | "geolite-city" | "geolite
 export type LocationConfidence = "high" | "medium" | "low";
 
 /**
+ * Checked against the reference hop's estimate (itself often GeoLite2).
  * feasible: possible, radius unchanged. tightened: the RTT limits the hop to a
  * smaller area. widened: possible only beyond the stated radius. infeasible:
- * physically impossible for the measured RTT; never the best estimate.
+ * impossible relative to the reference and weaker than it; never the best
+ * estimate. conflict: impossible relative to the reference but at least as
+ * strong as it; kept, radius unchanged.
  */
-export type RttVerdict = "feasible" | "tightened" | "widened" | "infeasible";
+export type RttVerdict = "feasible" | "tightened" | "widened" | "infeasible" | "conflict";
 
 export interface RttCheck {
   verdict: RttVerdict;
@@ -101,6 +104,8 @@ export interface RttCheck {
   maxDistanceKm: number;
   originalRadiusKm: number;
   referenceHopIndex: number;
+  /** Source of the reference hop's estimate. */
+  referenceSource: LocationSource;
   /** Hop whose RTT set the bound: this hop or a later one. */
   boundHopIndex: number;
   boundRttMs: number;

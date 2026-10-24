@@ -28,6 +28,7 @@ const usCentroidRuledOut = (boundRttMs: number, maxDistanceKm: number): Location
     maxDistanceKm,
     originalRadiusKm: 1000,
     referenceHopIndex: 1,
+    referenceSource: "geolite-city",
     boundHopIndex: 2,
     boundRttMs
   }
@@ -155,6 +156,7 @@ const ixpHop: HopResolution = {
         maxDistanceKm: 14409,
         originalRadiusKm: 111,
         referenceHopIndex: 1,
+        referenceSource: "geolite-city",
         boundHopIndex: 4,
         boundRttMs: 138.88
       }
@@ -208,6 +210,7 @@ const hintHop: HopResolution = {
         maxDistanceKm: 16122,
         originalRadiusKm: 50,
         referenceHopIndex: 1,
+        referenceSource: "geolite-city",
         boundHopIndex: 6,
         boundRttMs: 155.32
       }
@@ -347,7 +350,7 @@ describe("HopDetailsPane", () => {
     expect(row("154.54.56.85").textContent).toContain("London, GB");
     expect(within(row("8.8.8.8")).getByText("Anycast (Google Public DNS)")).toBeTruthy();
     expect(within(row("8.8.8.8")).getByText("anycast")).toBeTruthy();
-    expect(row("72.14.216.192").textContent).toContain("Unknown (RTT rules out every source)");
+    expect(row("72.14.216.192").textContent).toContain("Unknown (fails the RTT check)");
   });
 
   it("explains an IXP placement with source, confidence, radius and RTT check", () => {
@@ -358,7 +361,7 @@ describe("HopDetailsPane", () => {
     expect(fact(location, "Confidence")).toBe("high");
     expect(fact(location, "Radius")).toBe("±111 km");
     expect(fact(location, "RTT check")).toBe(
-      "Fits the RTT: 138.88 ms allows at most 14,409 km from hop 1."
+      "Fits the RTT: 138.88 ms allows at most 14,409 km from hop 1's GeoLite2 city estimate."
     );
     expect(fact(location, "IXP")).toBe(
       "DE-CIX Frankfurt80.81.192.0/21 · Frankfurt, DE · 26 facilities"
@@ -394,9 +397,33 @@ describe("HopDetailsPane", () => {
       "lon05 → London, GBairport code with site number · Cogent naming"
     );
     expect(fact(location, "RTT check")).toBe(
-      "Fits the RTT: 155.32 ms (hop 6) allows at most 16,122 km from hop 1."
+      "Fits the RTT: 155.32 ms (hop 6) allows at most 16,122 km from hop 1's GeoLite2 city estimate."
     );
     expect(location.queryByText(/Other candidates/)).toBeNull();
+  });
+
+  it("keeps a candidate that conflicts with the reference and says why", () => {
+    const best = hintHop.location.best;
+    const rtt = best?.rtt;
+    if (!best || !rtt) throw new Error("fixture has a checked best estimate");
+    const conflicting: HopResolution = {
+      ...hintHop,
+      location: {
+        ...hintHop.location,
+        best: {
+          ...best,
+          rtt: { ...rtt, verdict: "conflict", distanceKm: 1139, maxDistanceKm: 840 }
+        }
+      }
+    };
+    render(
+      <HopDetailsPane run={{ ...run, hops: [conflicting] }} selectedHopIndex={5} status="success" />
+    );
+    const location = locationOf(5);
+    expect(fact(location, "Place")).toBe("London, GB");
+    expect(fact(location, "RTT check")).toBe(
+      "Conflicts with hop 1's GeoLite2 city estimate: 1,139 km away, but 155.32 ms (hop 6) allows at most 840 km. Kept, because this source is at least as strong as that estimate; one of the two is wrong."
+    );
   });
 
   it("marks anycast hops and draws no point for them", () => {
@@ -412,7 +439,7 @@ describe("HopDetailsPane", () => {
     expect(location.getByText("Candidates (1)")).toBeTruthy();
     expect(
       location.getByText(
-        "Ruled out: 13,500 km from hop 1, but 4.1 ms allows at most 1,599 km from hop 1."
+        "Ruled out against hop 1's GeoLite2 city estimate: 13,500 km away, but 4.1 ms allows at most 1,599 km."
       )
     ).toBeTruthy();
   });
@@ -421,7 +448,7 @@ describe("HopDetailsPane", () => {
     const { unmount } = render(<HopDetailsPane run={run} selectedHopIndex={6} status="success" />);
     expect(
       locationOf(6).getByText(
-        "No source fits the measured RTT, so the globe shows no point for this hop."
+        "Every source is weaker than hop 1's estimate and fails the RTT check against it, so the globe shows no point for this hop."
       )
     ).toBeTruthy();
     unmount();

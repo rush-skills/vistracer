@@ -28,12 +28,12 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (73 tests across 9 files)
+npm run test           # Run unit + component tests (74 tests across 9 files)
 npm run test:e2e       # Run e2e tests (72 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
 
 # Rust
-cd src-tauri && cargo test                                # 140 tests (+1 ignored real-traceroute smoke test)
+cd src-tauri && cargo test                                # 144 tests (+1 ignored real-traceroute smoke test)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -179,19 +179,19 @@ Each call: cache (7 days; RDAP keyed by base URL) → wait up to 25 s for a prov
 
 ### Hop locations
 
-Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `ixp`, `hostnameHint`, `anycast`, `isRttReference`); `geo` stays the raw GeoLite2 record. Draw from `location.best` (`hopPosition` in `src/renderer/lib/globe.ts`), never from `geo`. Precedence: feasible → confidence → IXP > host name > GeoLite2 city > country → smaller radius. Anycast hops have no `best`. Details and known limits: [docs/architecture.md#hop-locations](./docs/architecture.md#hop-locations).
+Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `ixp`, `hostnameHint`, `anycast`, `isRttReference`); `geo` stays the raw GeoLite2 record. Draw from `location.best` (`hopPosition` in `src/renderer/lib/globe.ts`), never from `geo`. Precedence: feasible → confidence → IXP > host name > GeoLite2 city > country → smaller radius. The RTT reference only rules out weaker candidates; stronger ones get the `conflict` verdict and stay. Anycast hops have no `best`. Details and known limits: [docs/architecture.md#hop-locations](./docs/architecture.md#hop-locations).
 
 ## Testing
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 73 tests across 9 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 74 tests across 9 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 9 tests: store behavior
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
   - `src/renderer/lib/__tests__/globe.test.ts` — 11 tests: arcs, confidence rings (radius on the sphere, styles), utilities
   - `src/renderer/lib/__tests__/sun-calculation.test.ts` — 5 tests: solar position
-  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 11 tests: multipath, PeeringDB, provider failures, location fields, anycast, empty states
+  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 12 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 7 tests: provider toggles, exchange matching switch, key, URL validation
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
@@ -207,14 +207,14 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 140 tests in `src-tauri/src/` (plus one ignored smoke test, `smoke_real_traceroute`, that runs real traceroutes through the real pipeline) covering:
+- 144 tests in `src-tauri/src/` (plus one ignored smoke test, `smoke_real_traceroute`, that runs real traceroutes through the real pipeline) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
   - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
   - Settings validation (including `ixMatching` defaults for old settings files), updater key detection
-  - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh, exchange matching with PeeringDB off and switched off, concurrent cache writes
+  - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
 
 ## Key Implementation Details
 

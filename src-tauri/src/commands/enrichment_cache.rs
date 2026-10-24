@@ -262,6 +262,10 @@ fn now_ms() -> i64 {
 pub struct ProviderCache {
     path: Option<PathBuf>,
     ttl_ms: i64,
+    /// Entries younger than this are kept on load and save, even when they
+    /// are past `ttl_ms`. Callers use it to keep entries with a longer life
+    /// than the provider TTL (the IX list is used for up to 7 days).
+    retain_ms: i64,
     entries: Mutex<EnrichmentCache>,
     /// Held from snapshot to rename, so two writers (two runs that finish
     /// together, or a run and an IX list download) write in snapshot order
@@ -271,14 +275,17 @@ pub struct ProviderCache {
 
 impl ProviderCache {
     /// Loads the file at `path`; `None` keeps the cache in memory only.
-    pub fn new(path: Option<PathBuf>, ttl_ms: i64) -> Self {
+    /// `retain_ms` is raised to at least `ttl_ms`.
+    pub fn new(path: Option<PathBuf>, ttl_ms: i64, retain_ms: i64) -> Self {
+        let retain_ms = retain_ms.max(ttl_ms);
         let entries = match &path {
-            Some(path) => EnrichmentCache::load(path, now_ms(), ttl_ms),
+            Some(path) => EnrichmentCache::load(path, now_ms(), retain_ms),
             None => EnrichmentCache::default(),
         };
         Self {
             path,
             ttl_ms,
+            retain_ms,
             entries: Mutex::new(entries),
             persist_lock: Mutex::new(()),
         }
@@ -322,7 +329,7 @@ impl ProviderCache {
         let _writer = self.persist_lock.lock().unwrap_or_else(|e| e.into_inner());
         // Serialise under the entries lock; write after it is released so
         // lookups are not blocked by disk I/O.
-        let snapshot = self.entries().snapshot_if_dirty(now_ms(), self.ttl_ms);
+        let snapshot = self.entries().snapshot_if_dirty(now_ms(), self.retain_ms);
         let bytes = match snapshot {
             Ok(Some(bytes)) => bytes,
             Ok(None) => return,
@@ -438,7 +445,7 @@ mod tests {
 
         let dir = std::env::temp_dir().join(format!("vistracer-persist-{}", uuid::Uuid::new_v4()));
         let path = dir.join("enrichment-cache.json");
-        let cache = ProviderCache::new(Some(path.clone()), HOUR);
+        let cache = ProviderCache::new(Some(path.clone()), HOUR, HOUR);
         cache.insert("1.1.1.1", Some(cymru(13335)));
 
         let (entered_tx, entered_rx) = mpsc::channel();
@@ -469,6 +476,24 @@ mod tests {
             "the newer snapshot must be the one on disk"
         );
         assert!(!path.with_extension("json.tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn retained_entries_outlive_a_short_provider_ttl() {
+        let dir = std::env::temp_dir().join(format!("vistracer-retain-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("enrichment-cache.json");
+        // A one-hour provider TTL must not drop a 25-hour-old entry that a
+        // caller keeps for up to 7 days.
+        let cache = ProviderCache::new(Some(path.clone()), HOUR, 7 * 24 * HOUR);
+        cache.insert_at("8.8.8.8", Some(cymru(15169)), now_ms() - 25 * HOUR);
+        cache.persist();
+
+        let reloaded = ProviderCache::new(Some(path), HOUR, 7 * 24 * HOUR);
+        assert_eq!(reloaded.get::<CymruRecord>("8.8.8.8"), None, "past the TTL");
+        assert!(reloaded
+            .get_stored::<CymruRecord>("8.8.8.8", 7 * 24 * HOUR)
+            .is_some());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

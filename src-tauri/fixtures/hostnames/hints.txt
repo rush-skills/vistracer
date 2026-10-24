@@ -43,7 +43,8 @@ pool-71-105-4-5.nycmny.fios.verizon.net | - | LGA city-region-code high
 be-1101-cr01.ashburn.va.ibone.comcast.net | - | IAD city-name high
 be-33657-cr02.sunnyvale.ca.ibone.comcast.net | - | SJC city-name high
 
-# Seen in the smoke traces for this change (2026-10-24, from Bengaluru, India).
+# Seen in the smoke traces for this change (2026-10-24). ISP access names are
+# replaced by synthetic ones with the same shape.
 be6391.rcr21.b015591-1.lon05.atlas.cogentco.com | - | LCY airport-code high
 be9653.ccr82.lon05.atlas.cogentco.com | US | LCY airport-code high
 be9036.ccr42.ams03.atlas.cogentco.com | US | AMS airport-code high
@@ -63,8 +64,8 @@ jointtransit.fryslan.nl | NL | -
 gw.amsix.eqix3rtr.ripe.net | NL | -
 router-sov-c.mythic-beasts.com | GB | -
 vds-sov-x.mythic-beasts.com | GB | -
-abts-kk-dynamic-1.72.76.171.airtelbroadband.in | IN | -
-nsg-corporate-193.159.186.122.airtel.in | IN | -
+cust-dynamic-1.2.0.192.broadband.example.in | IN | -
+nsg-corporate-1.2.0.192.example.in | IN | -
 dsldevice.lan | - | -
 
 # Role labels next to the site label (code review): only the label before

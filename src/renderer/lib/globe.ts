@@ -91,7 +91,7 @@ export function hopIndexToColor(hopIndex: number): string {
  * the RTT rules out have none, so they get no marker, ring or arc.
  */
 export function hopPosition(hop: HopResolution): LocationEstimate | null {
-  const best = hop.location?.best;
+  const best = hop.location.best;
   if (!best || !isFinite(best.latitude) || !isFinite(best.longitude)) {
     return null;
   }

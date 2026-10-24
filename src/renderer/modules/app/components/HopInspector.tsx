@@ -160,9 +160,12 @@ const LocationSection: React.FC<HopInspectorProps> = ({ hop }) => {
   } else if (!hop.ipAddress) {
     summary = <p className="hop-inspector__empty">No address answered at this hop.</p>;
   } else if (alternatives.length > 0) {
+    const referenceHop = alternatives.find((candidate) => candidate.rtt)?.rtt?.referenceHopIndex;
     summary = (
       <p className="hop-inspector__empty hop-inspector__empty--error">
-        No source fits the measured RTT, so the globe shows no point for this hop.
+        {referenceHop != null
+          ? `Every source is weaker than hop ${referenceHop}'s estimate and fails the RTT check against it, so the globe shows no point for this hop.`
+          : "No source can be drawn, so the globe shows no point for this hop."}
       </p>
     );
   } else if (hop.lookupState === "pending") {

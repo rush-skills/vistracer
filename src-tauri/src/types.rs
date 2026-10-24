@@ -182,8 +182,13 @@ pub enum RttVerdict {
     Tightened,
     /// Possible only outside the stated radius, so the radius grows.
     Widened,
-    /// Physically impossible for the measured RTT. Never chosen as best.
+    /// Impossible for the measured RTT relative to the reference estimate,
+    /// and weaker than that estimate. Never chosen as best.
     Infeasible,
+    /// Impossible relative to the reference estimate, but at least as
+    /// strong as it. Kept: one of the two is wrong, and a GeoLite2 reference
+    /// must not hide stronger evidence. The radius is not changed.
+    Conflict,
 }
 
 /// Result of the speed-of-light check of one estimate against the
@@ -199,6 +204,8 @@ pub struct RttCheck {
     /// Radius of the estimate before the check.
     pub original_radius_km: f64,
     pub reference_hop_index: u32,
+    /// Source of the reference hop's estimate, for "hop 2's GeoLite2 city".
+    pub reference_source: LocationSource,
     /// Hop whose RTT set the bound: this hop or a later one on the path.
     pub bound_hop_index: u32,
     pub bound_rtt_ms: f64,

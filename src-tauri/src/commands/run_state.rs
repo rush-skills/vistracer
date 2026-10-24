@@ -525,7 +525,7 @@ mod tests {
         );
         state.apply_lookup(
             &slow[0],
-            located(geo(51.5, -0.12, Some("London"), 20.0), 1299),
+            located(geo(51.5, -0.12, Some("London"), 150.0), 1299),
         );
         state.take_changed();
         assert!(state.hops()[1].location.best.is_some());
@@ -550,7 +550,7 @@ mod tests {
         );
         state.apply_lookup(
             &hop[0],
-            located(geo(51.5, -0.12, Some("London"), 20.0), 1299),
+            located(geo(51.5, -0.12, Some("London"), 150.0), 1299),
         );
 
         let hops = state.hops();

@@ -9,7 +9,7 @@
 
 use super::enrichment_cache::ProviderCache;
 use super::integrations::{get_json, peeringdb_headers};
-use super::retry::{with_retry, RetryPolicy};
+use super::retry::{with_retry, ProviderError, RetryPolicy};
 use crate::geoloc::ixp::{build_dataset, IxDataset, IxIndex, IxResponses};
 use serde_json::Value;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -21,9 +21,12 @@ pub(crate) const IX_CACHE_KEY: &str = "ix-lans";
 /// to one per hour, so the list is downloaded at most once a day and "Force
 /// fresh lookups" does not download it again.
 const IX_TTL_MS: i64 = 24 * 3_600_000;
-/// An older list is used while a refresh runs or after it failed.
-const IX_MAX_STALE_MS: i64 = 7 * 24 * 3_600_000;
+/// An older list is used while a refresh runs or after it failed. The
+/// provider cache keeps entries at least this long (`ProviderCache::new`).
+pub(crate) const IX_MAX_STALE_MS: i64 = 7 * 24 * 3_600_000;
 const IX_FAILURE_BACKOFF: Duration = Duration::from_secs(15 * 60);
+/// A 429 means PeeringDB's one-per-hour rule; asking again sooner fails.
+const IX_RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(3600);
 /// Five requests, each with its own budget and retries, plus the spacing.
 const IX_DOWNLOAD_BUDGET: Duration = Duration::from_secs(150);
 const IX_OBJECTS: [(&str, &str); 5] = [
@@ -38,7 +41,27 @@ const IX_OBJECTS: [(&str, &str); 5] = [
 struct IxState {
     loaded: Option<LoadedIx>,
     downloading: bool,
-    last_failure: Option<(Instant, String)>,
+    last_failure: Option<IxFailure>,
+}
+
+/// A failed download, and when PeeringDB may be asked again.
+struct IxFailure {
+    message: String,
+    retry_at: Instant,
+}
+
+struct FetchError {
+    message: String,
+    backoff: Duration,
+}
+
+impl FetchError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            backoff: IX_FAILURE_BACKOFF,
+        }
+    }
 }
 
 struct LoadedIx {
@@ -120,11 +143,12 @@ impl IxStore {
                     });
                 }
             }
-            let age = state.loaded.as_ref().map(|l| now - l.stored_at_ms);
+            // A clock that moved back gives a negative age; count it as new.
+            let age = state.loaded.as_ref().map(|l| (now - l.stored_at_ms).max(0));
             if let Some(loaded) = state
                 .loaded
                 .as_ref()
-                .filter(|_| age.is_some_and(|a| (0..IX_TTL_MS).contains(&a)))
+                .filter(|_| age.is_some_and(|a| a < IX_TTL_MS))
             {
                 return Ok(IxLoad {
                     index: loaded.index.clone(),
@@ -136,8 +160,8 @@ impl IxStore {
             let recent_failure = state
                 .last_failure
                 .as_ref()
-                .filter(|(at, _)| at.elapsed() < IX_FAILURE_BACKOFF)
-                .map(|(_, message)| message.clone());
+                .filter(|failure| Instant::now() < failure.retry_at)
+                .map(|failure| failure.message.clone());
             if !state.downloading && recent_failure.is_none() {
                 state.downloading = true;
                 tokio::spawn(Arc::clone(self).download(api_key.map(str::to_string)));
@@ -175,12 +199,14 @@ impl IxStore {
         }
         let state = self.state();
         match (&state.loaded, &state.last_failure) {
-            (Some(loaded), _) if now_ms() - loaded.stored_at_ms < IX_TTL_MS => Ok(IxLoad {
-                index: loaded.index.clone(),
-                downloaded_now: true,
-                note: None,
-            }),
-            (_, Some((_, failure))) => Err(IxUnavailable::Failed(failure.clone())),
+            (Some(loaded), _) if (now_ms() - loaded.stored_at_ms).max(0) < IX_TTL_MS => {
+                Ok(IxLoad {
+                    index: loaded.index.clone(),
+                    downloaded_now: true,
+                    note: None,
+                })
+            }
+            (_, Some(failure)) => Err(IxUnavailable::Failed(failure.message.clone())),
             _ => Err(IxUnavailable::Busy),
         }
     }
@@ -188,7 +214,7 @@ impl IxStore {
     async fn download(self: Arc<Self>, api_key: Option<String>) {
         let result = tokio::time::timeout(IX_DOWNLOAD_BUDGET, self.fetch(api_key.as_deref()))
             .await
-            .unwrap_or_else(|_| Err("the download took too long".to_string()));
+            .unwrap_or_else(|_| Err(FetchError::new("the download took too long")));
         let downloaded = result.is_ok();
         {
             let mut state = self.state();
@@ -207,9 +233,12 @@ impl IxStore {
                     });
                     state.last_failure = None;
                 }
-                Err(message) => {
+                Err(FetchError { message, backoff }) => {
                     log::warn!("PeeringDB IX list download failed: {message}");
-                    state.last_failure = Some((Instant::now(), message));
+                    state.last_failure = Some(IxFailure {
+                        message,
+                        retry_at: Instant::now() + backoff,
+                    });
                 }
             }
         }
@@ -223,9 +252,10 @@ impl IxStore {
     }
 
     /// Downloads the five PeeringDB lists one at a time, each with retries
-    /// and the PeeringDB slot.
-    async fn fetch(&self, api_key: Option<&str>) -> Result<IxDataset, String> {
-        let headers = peeringdb_headers(api_key).map_err(|e| e.describe())?;
+    /// and the PeeringDB slot. A 429 is final: no retry, and no new download
+    /// for at least an hour.
+    async fn fetch(&self, api_key: Option<&str>) -> Result<IxDataset, FetchError> {
+        let headers = peeringdb_headers(api_key).map_err(|e| FetchError::new(e.describe()))?;
         let base = self.base_url.trim_end_matches('/');
         let mut bodies = Vec::with_capacity(IX_OBJECTS.len());
         for (position, (object, fields)) in IX_OBJECTS.iter().enumerate() {
@@ -237,30 +267,56 @@ impl IxStore {
             let Ok(Ok(_permit)) =
                 tokio::time::timeout(self.request_budget, self.slot.acquire()).await
             else {
-                return Err("other PeeringDB lookups kept the provider busy".to_string());
+                return Err(FetchError::new(
+                    "other PeeringDB lookups kept the provider busy",
+                ));
+            };
+            // A 429 ends the attempt as a success value, so `with_retry`
+            // does not repeat it within seconds.
+            let fetch_once = || {
+                let headers = headers.clone();
+                let url = url.as_str();
+                async move {
+                    match get_json(&self.client, url, headers).await {
+                        Err(ProviderError::RateLimited { retry_after }) => Ok(Err(retry_after)),
+                        other => other.map(Ok),
+                    }
+                }
             };
             let result = tokio::time::timeout(
                 self.request_budget,
-                with_retry(&self.retry, &label, || {
-                    get_json(&self.client, &url, headers.clone())
-                }),
+                with_retry(&self.retry, &label, fetch_once),
             )
             .await;
             match result {
-                Ok(Ok(Some(body))) => bodies.push(body),
-                Ok(Ok(None)) => return Err(format!("{object} list not found (HTTP 404)")),
+                Ok(Ok(Ok(Some(body)))) => bodies.push(body),
+                Ok(Ok(Ok(None))) => {
+                    return Err(FetchError::new(format!(
+                        "{object} list not found (HTTP 404)"
+                    )))
+                }
+                Ok(Ok(Err(retry_after))) => {
+                    let backoff = IX_RATE_LIMIT_BACKOFF.max(retry_after.unwrap_or_default());
+                    return Err(FetchError {
+                        message: format!(
+                            "{object} list: rate limited by PeeringDB (HTTP 429); next attempt in {} min",
+                            backoff.as_secs().div_ceil(60)
+                        ),
+                        backoff,
+                    });
+                }
                 Ok(Err((err, attempts))) => {
                     let plural = if attempts == 1 { "" } else { "s" };
-                    return Err(format!(
+                    return Err(FetchError::new(format!(
                         "{object} list: {} after {attempts} attempt{plural}",
                         err.describe()
-                    ));
+                    )));
                 }
-                Err(_) => return Err(format!("{object} list timed out")),
+                Err(_) => return Err(FetchError::new(format!("{object} list timed out"))),
             }
         }
-        let [ixpfx, ixlan, ix, ixfac, fac] =
-            <[Value; 5]>::try_from(bodies).map_err(|_| "incomplete IX download".to_string())?;
+        let [ixpfx, ixlan, ix, ixfac, fac] = <[Value; 5]>::try_from(bodies)
+            .map_err(|_| FetchError::new("incomplete IX download"))?;
         build_dataset(&IxResponses {
             ixpfx,
             ixlan,
@@ -268,6 +324,7 @@ impl IxStore {
             ixfac,
             fac,
         })
+        .map_err(FetchError::new)
     }
 
     #[cfg(test)]

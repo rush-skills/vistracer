@@ -11,7 +11,7 @@
 //! not known to the app. The check only filters estimates and changes
 //! their radius. It never moves an estimate.
 
-use crate::types::{RttCheck, RttVerdict};
+use crate::types::{LocationConfidence, LocationSource, RttCheck, RttVerdict};
 
 /// One-way speed of light in optical fibre (about c / 1.47).
 pub const FIBRE_KM_PER_MS: f64 = 200.0;
@@ -42,6 +42,9 @@ pub struct RttReference {
     /// Hard radius of the reference estimate (see `estimate::hard_radius_km`).
     pub radius_km: f64,
     pub rtt_ms: f64,
+    /// The reference can only rule out estimates weaker than itself.
+    pub confidence: LocationConfidence,
+    pub source: LocationSource,
 }
 
 /// The smallest RTT that limits how far a hop can be from the user.
@@ -91,6 +94,7 @@ pub fn check(
         max_distance_km: round1(max),
         original_radius_km: radius_km,
         reference_hop_index: reference.hop_index,
+        reference_source: reference.source,
         bound_hop_index: bound.hop_index,
         bound_rtt_ms: bound.rtt_ms,
     };
@@ -117,6 +121,8 @@ mod tests {
             longitude: MUMBAI.1,
             radius_km,
             rtt_ms,
+            confidence: LocationConfidence::Medium,
+            source: LocationSource::GeoliteCity,
         }
     }
 
@@ -240,6 +246,8 @@ mod tests {
             longitude: 0.0,
             radius_km: 0.0,
             rtt_ms: 0.0,
+            confidence: LocationConfidence::Medium,
+            source: LocationSource::GeoliteCity,
         };
         let distance = haversine_km(0.0, 0.0, 0.0, 10.0);
         let rtt = (distance - 50.0 - SLACK_KM) / 100.0;

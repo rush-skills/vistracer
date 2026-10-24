@@ -9,9 +9,12 @@
 //! 3. Reference: the first public hop whose best candidate has at least
 //!    medium confidence and a radius of at most `REFERENCE_MAX_RADIUS_KM`.
 //!    Every other hop's candidates are checked against it (`rtt::check`).
+//!    The reference is itself an estimate (often GeoLite2), so it can only
+//!    rule out candidates weaker than itself. A candidate that is at least
+//!    as strong gets the `Conflict` verdict and stays.
 //! 4. Anycast: a documented anycast prefix, or an anycast operator's ASN
-//!    with a GeoLite2 location that the RTT rules out. Anycast hops get no
-//!    best estimate.
+//!    with a GeoLite2 location that the RTT rules out and no other feasible
+//!    candidate. Anycast hops get no best estimate.
 //! 5. Precedence (`rank`): feasible before infeasible, then higher
 //!    confidence, then source (IXP, host name, GeoLite2 city, GeoLite2
 //!    country), then smaller radius. An infeasible candidate is never best.
@@ -84,8 +87,10 @@ fn rank(a: &LocationEstimate, b: &LocationEstimate) -> Ordering {
         .then(a.radius_km.total_cmp(&b.radius_km))
 }
 
-/// Radius beyond which the source is certainly wrong. GeoLite2's
-/// `accuracy_radius` is a 67 % radius, so the hard limit doubles it.
+/// Radius the RTT check treats as the edge of the source's area. GeoLite2's
+/// `accuracy_radius` is a 67 % radius for end users, not routers, so this
+/// doubles it as a margin. That is a heuristic, not a guarantee, which is
+/// one reason a reference cannot rule out stronger candidates.
 pub fn hard_radius_km(estimate: &LocationEstimate) -> f64 {
     match estimate.source {
         LocationSource::GeoliteCity | LocationSource::GeoliteCountry => 2.0 * estimate.radius_km,
@@ -235,12 +240,14 @@ fn choose_reference(
                 longitude: best.longitude,
                 radius_km: hard_radius_km(best),
                 rtt_ms: (*bound)?.rtt_ms,
+                confidence: best.confidence,
+                source: best.source,
             })
         })
 }
 
 fn apply_rtt(estimate: &mut LocationEstimate, reference: &RttReference, bound: RttBound) {
-    let (check, radius) = rtt::check(
+    let (mut check, radius) = rtt::check(
         estimate.latitude,
         estimate.longitude,
         estimate.radius_km,
@@ -248,20 +255,32 @@ fn apply_rtt(estimate: &mut LocationEstimate, reference: &RttReference, bound: R
         reference,
         bound,
     );
-    if check.verdict == RttVerdict::Widened {
-        estimate.confidence = LocationConfidence::Low;
+    match check.verdict {
+        // The reference may itself be wrong (GeoLite2 often has a router's
+        // registered address); it must not veto evidence as strong as it.
+        RttVerdict::Infeasible if estimate.confidence >= reference.confidence => {
+            check.verdict = RttVerdict::Conflict;
+        }
+        RttVerdict::Widened => {
+            estimate.confidence = LocationConfidence::Low;
+            estimate.radius_km = radius;
+        }
+        _ => estimate.radius_km = radius,
     }
-    estimate.radius_km = radius;
     estimate.rtt = Some(check);
 }
 
+fn is_geolite(source: LocationSource) -> bool {
+    matches!(
+        source,
+        LocationSource::GeoliteCity | LocationSource::GeoliteCountry
+    )
+}
+
 fn geolite_ruled_out(estimates: &[LocationEstimate]) -> bool {
-    estimates.iter().any(|e| {
-        matches!(
-            e.source,
-            LocationSource::GeoliteCity | LocationSource::GeoliteCountry
-        ) && is_infeasible(e)
-    })
+    estimates
+        .iter()
+        .any(|e| is_geolite(e.source) && is_infeasible(e))
 }
 
 /// Locations for every hop of a run, in the order of `inputs`.
@@ -299,7 +318,14 @@ pub fn locate_hops(inputs: &[HopInput]) -> Vec<HopLocation> {
                     .asn
                     .and_then(|a| a.asn)
                     .and_then(anycast_operator)
-                    .filter(|_| ruled_out)
+                    // A feasible IX or host name candidate means a unicast
+                    // router of that operator, not an anycast address.
+                    .filter(|_| {
+                        ruled_out
+                            && !estimates
+                                .iter()
+                                .any(|e| !is_geolite(e.source) && !is_infeasible(e))
+                    })
                     .map(|operator| (AnycastEvidence::OperatorAsnRtt, operator)),
             };
             location.anycast = evidence.map(|(evidence, service)| AnycastInfo {
@@ -504,8 +530,9 @@ mod tests {
     #[test]
     fn later_lower_rtt_bounds_a_slow_router_unless_load_balanced() {
         let mumbai = geo(MUMBAI.0, MUMBAI.1, Some("Mumbai"), "IN", 20.0);
-        // GeoLite2 places the slow router in London (7,200 km away).
-        let london = geo(51.5, -0.12, Some("London"), "GB", 20.0);
+        // GeoLite2 places the slow router in London (7,200 km away) with a
+        // 150 km radius: low confidence, so the reference may rule it out.
+        let london = geo(51.5, -0.12, Some("London"), "GB", 150.0);
         let mut reference = input(1, "49.44.1.1", 1.0);
         reference.geolite = Some(&mumbai);
         let mut slow = input(2, "62.115.1.1", 130.0);
@@ -525,6 +552,67 @@ mod tests {
         let kept = locations[1].best.as_ref().unwrap();
         assert_eq!(kept.rtt.as_ref().unwrap().verdict, RttVerdict::Feasible);
         assert_eq!(kept.rtt.as_ref().unwrap().bound_hop_index, 2);
+    }
+
+    /// Review B1: hop 2's GeoLite2 record says Mumbai, but the user and the
+    /// first routers are in Delhi. A Tata router 5 ms away is named
+    /// `dl1-delhi`; Mumbai to Delhi (1,139 km) is beyond the 840 km bound.
+    /// The high-confidence carrier hint must stay best and drawn.
+    #[test]
+    fn medium_geolite_reference_cannot_veto_a_stronger_hint() {
+        let mumbai = geo(MUMBAI.0, MUMBAI.1, Some("Mumbai"), "IN", 20.0);
+        let delhi = geo(28.61, 77.21, Some("Delhi"), "IN", 20.0);
+        let mut reference = input(2, "49.44.1.1", 2.0);
+        reference.geolite = Some(&mumbai);
+
+        for hop_geolite in [&mumbai, &delhi] {
+            let mut tata = input(4, "180.87.1.1", 5.0);
+            tata.host_name = Some("if-ae-2.2.tcore1.dl1-delhi.as6453.net");
+            tata.geolite = Some(hop_geolite);
+
+            let location = &locate_hops(&[reference, tata])[1];
+            let best = location.best.as_ref().expect("the hop stays drawn");
+            assert_eq!(best.source, LocationSource::HostnameHint);
+            assert_eq!(best.label, "Delhi, IN");
+            assert_eq!(best.confidence, LocationConfidence::High);
+            let check = best.rtt.as_ref().unwrap();
+            assert_eq!(check.verdict, RttVerdict::Conflict);
+            assert_eq!(check.reference_source, LocationSource::GeoliteCity);
+            assert_eq!(
+                best.radius_km, HINT_RADIUS_KM,
+                "a conflict keeps the radius"
+            );
+        }
+
+        // The GeoLite2 Delhi record is as strong as the reference: it is
+        // kept as a conflicting alternative, not ruled out.
+        let mut tata = input(4, "180.87.1.1", 5.0);
+        tata.host_name = Some("if-ae-2.2.tcore1.dl1-delhi.as6453.net");
+        tata.geolite = Some(&delhi);
+        let location = &locate_hops(&[reference, tata])[1];
+        let alternative = &location.alternatives[0];
+        assert_eq!(alternative.source, LocationSource::GeoliteCity);
+        assert_eq!(
+            alternative.rtt.as_ref().unwrap().verdict,
+            RttVerdict::Conflict
+        );
+    }
+
+    #[test]
+    fn reference_still_rules_out_weaker_candidates() {
+        // A 150 km GeoLite2 city record (low) far from a medium reference.
+        let mumbai = geo(MUMBAI.0, MUMBAI.1, Some("Mumbai"), "IN", 20.0);
+        let far = geo(28.61, 77.21, Some("Delhi"), "IN", 150.0);
+        let mut reference = input(2, "49.44.1.1", 2.0);
+        reference.geolite = Some(&mumbai);
+        let mut hop = input(3, "49.44.3.3", 3.0);
+        hop.geolite = Some(&far);
+        let location = &locate_hops(&[reference, hop])[1];
+        assert!(location.best.is_none());
+        assert_eq!(
+            location.alternatives[0].rtt.as_ref().unwrap().verdict,
+            RttVerdict::Infeasible
+        );
     }
 
     #[test]
@@ -596,6 +684,17 @@ mod tests {
         assert_eq!(anycast.evidence, AnycastEvidence::OperatorAsnRtt);
         assert_eq!(anycast.service, "Cloudflare");
         assert!(location.best.is_none());
+
+        // A feasible host name means a unicast Cloudflare router: no anycast
+        // claim, and the hint is drawn.
+        edge.host_name = Some("ae1.bom01.example.net");
+        let location = &locate_hops(&[reference, edge])[1];
+        assert!(location.anycast.is_none(), "{location:?}");
+        assert_eq!(
+            location.best.as_ref().unwrap().source,
+            LocationSource::HostnameHint
+        );
+        edge.host_name = None;
 
         // 250 ms makes the US location possible: no anycast claim.
         edge.min_rtt_ms = Some(250.0);

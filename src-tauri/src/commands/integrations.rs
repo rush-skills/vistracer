@@ -6,7 +6,7 @@
 
 use super::enrichment_cache::{CachedProvider, ProviderCache};
 use super::geo::GeoLiteResult;
-use super::ix_list::{IxStore, IxUnavailable};
+use super::ix_list::{IxStore, IxUnavailable, IX_MAX_STALE_MS};
 use super::persistence::IntegrationSettings;
 use super::retry::{with_retry, ProviderError, RetryPolicy};
 use crate::geoloc::ixp::IxpHit;
@@ -526,7 +526,13 @@ const DISABLED_MESSAGE: &str = "Disabled in Integration settings.";
 impl EnrichmentService {
     pub fn new(config: EnrichmentConfig) -> Self {
         let ttl_ms = i64::try_from(config.ttl.as_millis()).unwrap_or(i64::MAX);
-        let cache = Arc::new(ProviderCache::new(config.cache_path, ttl_ms));
+        // The IX list is used for up to a week, also when the provider TTL
+        // is shorter, so the cache keeps entries at least that long.
+        let cache = Arc::new(ProviderCache::new(
+            config.cache_path,
+            ttl_ms,
+            IX_MAX_STALE_MS,
+        ));
         let limits = ProviderLimits::default();
         let ix = Arc::new(IxStore::new(
             config.client.clone(),
@@ -1748,6 +1754,46 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         );
         (200, vec![], std::fs::read_to_string(path).unwrap())
+    }
+
+    #[tokio::test]
+    async fn rate_limited_ix_download_is_final_and_backs_off_at_least_an_hour() {
+        for (retry_after, minutes) in [("0", 60), ("7200", 120)] {
+            let mut routes = ix_routes(fac_fixture());
+            routes[0] = (
+                "/api/ixpfx",
+                vec![(429, vec![("Retry-After", retry_after)], "{}".into())],
+            );
+            let (http, hits) = mock_http(routes).await;
+            let (whois, _) = mock_whois(CYMRU).await;
+            let service = service(http, whois, None);
+            let settings = ix_only(http);
+
+            let first = service
+                .enrich(ip("80.81.194.152"), no_geolite(), &settings, false)
+                .await;
+            let failed = status(&first, ProviderId::PeeringDbIx);
+            assert_eq!(failed.status, ProviderState::Error);
+            assert_eq!(
+                failed.message.as_deref(),
+                Some(
+                    format!(
+                        "IX list unavailable: ixpfx list: rate limited by PeeringDB (HTTP 429); next attempt in {minutes} min."
+                    )
+                    .as_str()
+                )
+            );
+            assert_eq!(hits.count("/api/ixpfx"), 1, "a 429 is not retried");
+
+            service
+                .enrich(ip("80.81.194.152"), no_geolite(), &settings, false)
+                .await;
+            assert_eq!(
+                hits.count("/api/ixpfx"),
+                1,
+                "no new request during the backoff"
+            );
+        }
     }
 
     #[tokio::test]
