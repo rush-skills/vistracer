@@ -7,6 +7,7 @@ import type {
   RecentRun,
   SnapshotExportOptions,
   SnapshotExportResult,
+  TileCacheInfo,
   TracerouteExecutionResult,
   TracerouteProgressEvent,
   TracerouteRequest
@@ -31,6 +32,8 @@ export interface RendererApi {
   ) => () => void;
   emitTelemetry: (eventName: string, payload?: Record<string, unknown>) => void;
   getAppInfo: () => Promise<AppInfo>;
+  getTileCacheInfo: () => Promise<TileCacheInfo>;
+  clearTileCache: () => Promise<TileCacheInfo>;
 }
 
 export interface VisTracerWindow extends Window {
@@ -102,7 +105,11 @@ function createTauriApi(): RendererApi {
       });
     },
 
-    getAppInfo: () => invoke<AppInfo>("get_app_info")
+    getAppInfo: () => invoke<AppInfo>("get_app_info"),
+
+    getTileCacheInfo: () => invoke<TileCacheInfo>("get_tile_cache_info"),
+
+    clearTileCache: () => invoke<TileCacheInfo>("clear_tile_cache")
   };
 }
 

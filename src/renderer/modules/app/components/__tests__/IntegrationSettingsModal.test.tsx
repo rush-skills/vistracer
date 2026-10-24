@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { IntegrationSettings } from "@common/ipc";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { IntegrationSettings, TileCacheInfo } from "@common/ipc";
+import type { RendererApi } from "@common/bridge";
 import {
   IntegrationSettingsModal,
   buildIntegrationSettings,
@@ -15,29 +16,51 @@ const savedSettings: IntegrationSettings = {
   ixMatching: { enabled: true }
 };
 
-const renderModal = (settings: IntegrationSettings = savedSettings) => {
+/** Renders the modal and lets the tile cache section finish loading. */
+const renderModal = async (settings: IntegrationSettings = savedSettings) => {
   const onSave = vi.fn().mockResolvedValue(undefined);
   const onGeoSave = vi.fn().mockResolvedValue(undefined);
   const onClose = vi.fn();
-  render(
-    <IntegrationSettingsModal
-      isOpen
-      settings={settings}
-      geoLoading={false}
-      onClose={onClose}
-      onSave={onSave}
-      onGeoSave={onGeoSave}
-    />
-  );
+  await act(async () => {
+    render(
+      <IntegrationSettingsModal
+        isOpen
+        settings={settings}
+        geoLoading={false}
+        onClose={onClose}
+        onSave={onSave}
+        onGeoSave={onGeoSave}
+      />
+    );
+  });
   return { onSave, onGeoSave, onClose };
 };
+
+const CAP = 500_000_000;
+let tileCache: { getTileCacheInfo: ReturnType<typeof vi.fn>; clearTileCache: ReturnType<typeof vi.fn> };
+
+beforeEach(() => {
+  tileCache = {
+    getTileCacheInfo: vi
+      .fn<() => Promise<TileCacheInfo>>()
+      .mockResolvedValue({ sizeBytes: 48_700_000, tileCount: 2_311, capBytes: CAP }),
+    clearTileCache: vi
+      .fn<() => Promise<TileCacheInfo>>()
+      .mockResolvedValue({ sizeBytes: 0, tileCount: 0, capBytes: CAP })
+  };
+  window.visTracer = tileCache as unknown as RendererApi;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const checkbox = (name: string) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
 const input = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
 
 describe("IntegrationSettingsModal providers", () => {
-  it("shows one toggle per provider that reflects the saved settings", () => {
-    renderModal();
+  it("shows one toggle per provider that reflects the saved settings", async () => {
+    await renderModal();
     expect(checkbox("Team Cymru").checked).toBe(true);
     expect(checkbox("RDAP").checked).toBe(true);
     expect(checkbox("RIPEstat").checked).toBe(true);
@@ -57,7 +80,7 @@ describe("IntegrationSettingsModal providers", () => {
   });
 
   it("saves provider toggles and a trimmed PeeringDB API key", async () => {
-    const { onSave, onClose } = renderModal();
+    const { onSave, onClose } = await renderModal();
 
     fireEvent.click(checkbox("Team Cymru"));
     fireEvent.click(checkbox("PeeringDB"));
@@ -76,7 +99,7 @@ describe("IntegrationSettingsModal providers", () => {
   });
 
   it("saves exchange matching separately from PeeringDB", async () => {
-    const { onSave, onClose } = renderModal();
+    const { onSave, onClose } = await renderModal();
     expect(checkbox("PeeringDB").checked).toBe(false);
 
     fireEvent.click(checkbox("Internet exchanges"));
@@ -89,7 +112,7 @@ describe("IntegrationSettingsModal providers", () => {
   });
 
   it("loads an existing key and lets the user disable a provider", async () => {
-    const { onSave, onClose } = renderModal({
+    const { onSave, onClose } = await renderModal({
       ...savedSettings,
       peeringDb: { enabled: true, apiKey: "stored-key" }
     });
@@ -104,8 +127,8 @@ describe("IntegrationSettingsModal providers", () => {
     expect(saved.peeringDb).toEqual({ enabled: true, apiKey: "stored-key" });
   });
 
-  it("rejects a non-HTTP RDAP URL and does not save", () => {
-    const { onSave, onClose } = renderModal();
+  it("rejects a non-HTTP RDAP URL and does not save", async () => {
+    const { onSave, onClose } = await renderModal();
 
     fireEvent.change(input("RDAP base URL"), { target: { value: "ftp://rdap.example.net" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -113,6 +136,41 @@ describe("IntegrationSettingsModal providers", () => {
     expect(screen.getByText("RDAP base URL must start with https:// or http://.")).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("IntegrationSettingsModal globe imagery", () => {
+  it("shows the tile cache size and clears it", async () => {
+    await renderModal();
+    expect(await screen.findByText("Tile cache: 49 MB of 500 MB (2,311 tiles).")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear tile cache" }));
+    expect(await screen.findByText("Tile cache: Empty (limit 500 MB).")).toBeTruthy();
+    expect(tileCache.clearTileCache).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("button", { name: "Clear tile cache" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+  });
+
+  it("says why clearing failed and shows the size that is left", async () => {
+    tileCache.clearTileCache.mockRejectedValue(
+      "Could not clear the tile cache in /cache/tiles: permission denied"
+    );
+    await renderModal();
+    await screen.findByText("Tile cache: 49 MB of 500 MB (2,311 tiles).");
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear tile cache" }));
+    expect(
+      await screen.findByText("Could not clear the tile cache in /cache/tiles: permission denied")
+    ).toBeTruthy();
+    expect(tileCache.getTileCacheInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a cache that cannot be read", async () => {
+    tileCache.getTileCacheInfo.mockRejectedValue(new Error("no app cache folder"));
+    await renderModal();
+    expect(await screen.findByText("Tile cache: unknown.")).toBeTruthy();
+    expect(screen.getByText("no app cache folder")).toBeTruthy();
   });
 });
 

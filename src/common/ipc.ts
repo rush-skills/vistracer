@@ -289,6 +289,13 @@ export interface AppInfo {
   updaterConfigured: boolean;
 }
 
+/** The disk cache of detailed globe tiles (`$APPCACHE/tiles`). */
+export interface TileCacheInfo {
+  sizeBytes: number;
+  tileCount: number;
+  capBytes: number;
+}
+
 export interface GeoDbDownloadProgress {
   stage: "downloading" | "extracting" | "complete" | "error";
   edition: string;
