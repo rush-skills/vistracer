@@ -1,4 +1,5 @@
 pub mod anycast;
+pub mod app_info;
 pub mod dns;
 pub mod enrichment_cache;
 pub mod geo;

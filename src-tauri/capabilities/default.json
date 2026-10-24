@@ -9,6 +9,8 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "shell:allow-open",
+    "updater:default",
+    "process:allow-restart",
     "fs:deny-default",
     "fs:allow-exists",
     "fs:allow-mkdir",

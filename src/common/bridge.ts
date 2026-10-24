@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AppInfo,
   GeoDatabaseMeta,
   GeoDbDownloadProgress,
   RecentRun,
@@ -29,6 +30,7 @@ export interface RendererApi {
     listener: (progress: TracerouteProgressEvent) => void
   ) => () => void;
   emitTelemetry: (eventName: string, payload?: Record<string, unknown>) => void;
+  getAppInfo: () => Promise<AppInfo>;
 }
 
 export interface VisTracerWindow extends Window {
@@ -98,7 +100,9 @@ function createTauriApi(): RendererApi {
       invoke("emit_telemetry", { eventName, payload }).catch(() => {
         // Fire and forget
       });
-    }
+    },
+
+    getAppInfo: () => invoke<AppInfo>("get_app_info")
   };
 }
 

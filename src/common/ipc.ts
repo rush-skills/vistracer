@@ -179,6 +179,12 @@ export interface IntegrationSettings {
   peeringDb: PeeringDbSettings;
 }
 
+export interface AppInfo {
+  version: string;
+  /** False while tauri.conf.json carries the updater public key placeholder. */
+  updaterConfigured: boolean;
+}
+
 export interface GeoDbDownloadProgress {
   stage: "downloading" | "extracting" | "complete" | "error";
   edition: string;

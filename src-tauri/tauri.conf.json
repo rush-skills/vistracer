@@ -84,5 +84,12 @@
       }
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "PUBLIC KEY PLACEHOLDER: replace with the contents of the .key.pub file from `npx tauri signer generate`. See docs/releasing.md.",
+      "endpoints": [
+        "https://github.com/rush-skills/vistracer/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

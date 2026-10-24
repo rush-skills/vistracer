@@ -5,6 +5,7 @@ mod commands;
 mod net;
 mod types;
 
+use commands::app_info::{updater_pubkey_configured, AppInfo};
 use commands::geo::{
     database_statuses, ensure_readers, reload_geo_databases, GeoReaders, SharedGeoReaders,
 };
@@ -211,6 +212,14 @@ async fn set_settings(
 }
 
 #[tauri::command]
+fn get_app_info(app: tauri::AppHandle) -> AppInfo {
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        updater_configured: updater_pubkey_configured(app.config().plugins.0.get("updater")),
+    }
+}
+
+#[tauri::command]
 async fn emit_telemetry(
     event_name: String,
     _payload: Option<serde_json::Value>,
@@ -224,6 +233,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -285,6 +296,7 @@ fn main() {
             get_settings,
             set_settings,
             emit_telemetry,
+            get_app_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

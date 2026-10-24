@@ -4,6 +4,7 @@ import type { GeoDatabaseMeta, IntegrationSettings } from "@common/ipc";
 import type { VisTracerWindow } from "@common/bridge";
 import { FiAlertCircle, FiCheckCircle, FiFolder } from "react-icons/fi";
 import { useModalA11y } from "@renderer/hooks/useModalA11y";
+import { useUpdateStore, type UpdateStatus } from "@renderer/state/updateStore";
 import "./IntegrationSettingsModal.css";
 
 interface IntegrationSettingsModalProps {
@@ -76,6 +77,66 @@ export const buildIntegrationSettings = (
       peeringDb: { enabled: form.peeringDbEnabled, apiKey: apiKey || undefined }
     }
   };
+};
+
+const updateStatusText = (status: UpdateStatus): string => {
+  switch (status.kind) {
+    case "idle":
+      return "Not checked yet.";
+    case "checking":
+      return "Checking for updates…";
+    case "disabled":
+      return status.reason;
+    case "up-to-date":
+      return "You have the latest version.";
+    case "available":
+      return `Version ${status.version} is available.`;
+    case "installing":
+      return `Downloading version ${status.version}…`;
+    case "install-failed":
+      return `Update to ${status.version} failed: ${status.message}`;
+    case "error":
+      return status.message;
+  }
+};
+
+const UpdatesSection: React.FC = () => {
+  const status = useUpdateStore((state) => state.status);
+  const currentVersion = useUpdateStore((state) => state.currentVersion);
+  const check = useUpdateStore((state) => state.check);
+  const install = useUpdateStore((state) => state.install);
+  const busy = status.kind === "checking" || status.kind === "installing";
+
+  return (
+    <section className="integration-settings-modal__updates" aria-labelledby="integration-settings-updates-title">
+      <header>
+        <h3 id="integration-settings-updates-title">Updates</h3>
+        {currentVersion && <small>Installed version {currentVersion}</small>}
+      </header>
+      <p className="integration-settings-modal__hint" role="status">
+        {updateStatusText(status)}
+      </p>
+      <div className="integration-settings-modal__update-actions">
+        <button
+          type="button"
+          className="integration-settings-modal__button"
+          onClick={() => void check()}
+          disabled={busy || status.kind === "disabled"}
+        >
+          Check for updates
+        </button>
+        {status.kind === "available" && (
+          <button
+            type="button"
+            className="integration-settings-modal__button integration-settings-modal__button--primary"
+            onClick={() => void install()}
+          >
+            Install and restart
+          </button>
+        )}
+      </div>
+    </section>
+  );
 };
 
 export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> = ({
@@ -441,6 +502,8 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
               </small>
             </div>
           </section>
+
+          <UpdatesSection />
 
           {error && <div className="integration-settings-modal__error">{error}</div>}
 
