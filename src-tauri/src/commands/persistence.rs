@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use crate::types::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GeoSettings {
     #[serde(rename = "cityDbPath")]
     pub city_db_path: Option<String>,
@@ -13,16 +13,6 @@ pub struct GeoSettings {
     pub asn_db_path: Option<String>,
     #[serde(rename = "lastUpdated")]
     pub last_updated: Option<f64>,
-}
-
-impl Default for GeoSettings {
-    fn default() -> Self {
-        Self {
-            city_db_path: None,
-            asn_db_path: None,
-            last_updated: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,20 +38,27 @@ pub struct Preferences {
 pub struct CacheSettings {
     #[serde(rename = "dnsTtlMs")]
     pub dns_ttl_ms: u64,
-    #[serde(rename = "geoTtlMs")]
-    pub geo_ttl_ms: u64,
+    #[serde(rename = "enrichmentTtlMs")]
+    pub enrichment_ttl_ms: u64,
 }
 
 impl Default for CacheSettings {
     fn default() -> Self {
         Self {
-            dns_ttl_ms: 86_400_000,  // 24h
-            geo_ttl_ms: 604_800_000, // 7d
+            dns_ttl_ms: 86_400_000,         // 24h
+            enrichment_ttl_ms: 604_800_000, // 7d: registry data changes slowly
         }
     }
 }
 
+pub const DEFAULT_RDAP_BASE_URL: &str = "https://rdap.org/ip";
+pub const RIPE_STAT_SOURCE_APP: &str = "VisTracer";
+
+/// `#[serde(default)]` keeps older or partial settings files loadable: a
+/// missing provider section falls back to its default instead of failing
+/// the whole file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct IntegrationSettings {
     #[serde(rename = "teamCymru")]
     pub team_cymru: TeamCymruSettings,
@@ -78,17 +75,52 @@ impl Default for IntegrationSettings {
             team_cymru: TeamCymruSettings { enabled: true },
             rdap: RdapSettings {
                 enabled: true,
-                base_url: Some("https://rdap.org/ip".to_string()),
+                base_url: Some(DEFAULT_RDAP_BASE_URL.to_string()),
             },
             ripe_stat: RipeStatSettings {
                 enabled: true,
-                source_app: "VisTracer".to_string(),
+                source_app: RIPE_STAT_SOURCE_APP.to_string(),
             },
             peering_db: PeeringDbSettings {
                 enabled: false,
                 api_key: None,
             },
         }
+    }
+}
+
+impl IntegrationSettings {
+    /// Checks settings that arrive from the renderer before they are stored.
+    pub fn validated(mut self) -> Result<Self, String> {
+        self.rdap.base_url = match self.rdap.base_url.as_deref().map(str::trim) {
+            None | Some("") => Some(DEFAULT_RDAP_BASE_URL.to_string()),
+            Some(raw) => {
+                let url = reqwest::Url::parse(raw)
+                    .map_err(|_| format!("RDAP base URL \"{raw}\" is not a valid URL."))?;
+                if !matches!(url.scheme(), "https" | "http") {
+                    return Err("RDAP base URL must start with https:// or http://.".to_string());
+                }
+                Some(raw.trim_end_matches('/').to_string())
+            }
+        };
+        self.peering_db.api_key = self
+            .peering_db
+            .api_key
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty());
+        if self
+            .peering_db
+            .api_key
+            .as_deref()
+            .is_some_and(|key| key.chars().any(|c| c.is_control() || c.is_whitespace()))
+        {
+            return Err(
+                "PeeringDB API key must not contain spaces or control characters.".to_string(),
+            );
+        }
+        // RIPEstat asks clients to identify themselves; the value is fixed.
+        self.ripe_stat.source_app = RIPE_STAT_SOURCE_APP.to_string();
+        Ok(self)
     }
 }
 
@@ -102,6 +134,12 @@ pub struct RdapSettings {
     pub enabled: bool,
     #[serde(rename = "baseUrl")]
     pub base_url: Option<String>,
+}
+
+impl RdapSettings {
+    pub fn base_url(&self) -> &str {
+        self.base_url.as_deref().unwrap_or(DEFAULT_RDAP_BASE_URL)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,45 +163,15 @@ pub struct DnsCacheEntry {
     pub expires_at: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeoCacheValue {
-    pub latitude: Option<f64>,
-    pub longitude: Option<f64>,
-    pub city: Option<String>,
-    pub country: Option<String>,
-    #[serde(rename = "isoCode")]
-    pub iso_code: Option<String>,
-    pub confidence: Option<f64>,
-    pub asn: Option<u32>,
-    #[serde(rename = "asnName")]
-    pub asn_name: Option<String>,
-    pub network: Option<String>,
-    #[serde(rename = "asnCountry")]
-    pub asn_country: Option<String>,
-    #[serde(rename = "asnRegistry")]
-    pub asn_registry: Option<String>,
-    pub providers: Option<Vec<ProviderStatus>>,
-    #[serde(rename = "peeringDb")]
-    pub peering_db: Option<PeeringDbDetails>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeoCacheEntry {
-    pub value: GeoCacheValue,
-    #[serde(rename = "expiresAt")]
-    pub expires_at: f64,
-}
-
-/// In-memory store for settings, cache, and runs.
-/// Backed by a simple in-memory HashMap that persists
-/// to the tauri-plugin-store on changes.
+/// In-memory store for settings, the DNS cache, and recent runs. Settings
+/// are persisted to settings.json; provider responses have their own cache
+/// (see `enrichment_cache`).
 pub struct AppStore {
     pub geo: GeoSettings,
     pub preferences: Preferences,
     pub cache_settings: CacheSettings,
     pub integrations: IntegrationSettings,
     pub dns_cache: HashMap<String, DnsCacheEntry>,
-    pub geo_cache: HashMap<String, GeoCacheEntry>,
     pub runs: Vec<TracerouteRun>,
 }
 
@@ -183,7 +191,6 @@ impl Default for AppStore {
             cache_settings: CacheSettings::default(),
             integrations: IntegrationSettings::default(),
             dns_cache: HashMap::new(),
-            geo_cache: HashMap::new(),
             runs: Vec::new(),
         }
     }
@@ -211,27 +218,6 @@ impl AppStore {
         );
     }
 
-    pub fn get_cached_geo(&self, ip: &str) -> Option<&GeoCacheValue> {
-        if let Some(entry) = self.geo_cache.get(ip) {
-            let now = chrono::Utc::now().timestamp_millis() as f64;
-            if entry.expires_at > now {
-                return Some(&entry.value);
-            }
-        }
-        None
-    }
-
-    pub fn set_cached_geo(&mut self, ip: &str, value: GeoCacheValue) {
-        let now = chrono::Utc::now().timestamp_millis() as f64;
-        self.geo_cache.insert(
-            ip.to_string(),
-            GeoCacheEntry {
-                value,
-                expires_at: now + self.cache_settings.geo_ttl_ms as f64,
-            },
-        );
-    }
-
     pub fn get_recent_runs(&self, limit: usize) -> Vec<RecentRun> {
         let mut runs: Vec<RecentRun> = self
             .runs
@@ -240,10 +226,14 @@ impl AppStore {
                 id: format!("{}{}", run.summary.target, run.summary.started_at as u64),
                 started_at: run.summary.started_at,
                 target: run.summary.target.clone(),
-                protocol: run.request.protocol.clone(),
+                protocol: run.request.protocol,
             })
             .collect();
-        runs.sort_by(|a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
+        runs.sort_by(|a, b| {
+            b.started_at
+                .partial_cmp(&a.started_at)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         runs.truncate(limit);
         runs
     }
@@ -274,12 +264,10 @@ fn settings_path(app_data_dir: &Path) -> PathBuf {
 pub fn load_persisted_settings(app_data_dir: &Path) -> PersistedSettings {
     let path = settings_path(app_data_dir);
     match std::fs::read_to_string(&path) {
-        Ok(contents) => {
-            serde_json::from_str(&contents).unwrap_or_else(|e| {
-                log::warn!("Failed to parse settings.json, using defaults: {}", e);
-                PersistedSettings::default()
-            })
-        }
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
+            log::warn!("Failed to parse settings.json, using defaults: {}", e);
+            PersistedSettings::default()
+        }),
         Err(_) => PersistedSettings::default(),
     }
 }
@@ -303,7 +291,7 @@ pub fn save_persisted_settings(app_data_dir: &Path, store: &AppStore) {
 
 pub type SharedStore = Mutex<AppStore>;
 
-pub fn ensure_app_data_dirs(app_data_dir: &PathBuf) {
+pub fn ensure_app_data_dirs(app_data_dir: &Path) {
     let dirs = vec![
         app_data_dir.join("geo"),
         app_data_dir.join("snapshots"),
@@ -316,15 +304,15 @@ pub fn ensure_app_data_dirs(app_data_dir: &PathBuf) {
     }
 }
 
-pub async fn configure_geo_database_defaults(
+pub fn configure_geo_database_defaults(
     store: &SharedStore,
-    assets_dir: &PathBuf,
+    assets_dir: &Path,
     app_data_dir: &Path,
 ) {
     // 1. Load any previously persisted settings from disk
     let persisted = load_persisted_settings(app_data_dir);
 
-    let mut guard = store.lock().unwrap();
+    let mut guard = store.lock().unwrap_or_else(|e| e.into_inner());
     guard.preferences = persisted.preferences;
     guard.integrations = persisted.integrations;
     guard.geo = persisted.geo;
@@ -372,17 +360,16 @@ pub async fn configure_geo_database_defaults(
 
     // Update last_updated timestamp from file metadata if available
     let mut updated = guard.geo.last_updated;
-    for path_opt in [&guard.geo.city_db_path, &guard.geo.asn_db_path] {
-        if let Some(p) = path_opt {
-            if let Ok(meta) = std::fs::metadata(p) {
-                if let Ok(modified) = meta.modified() {
-                    let ms = modified
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as f64;
-                    updated = Some(updated.map_or(ms, |u: f64| u.max(ms)));
-                }
-            }
+    for p in [&guard.geo.city_db_path, &guard.geo.asn_db_path]
+        .into_iter()
+        .flatten()
+    {
+        if let Ok(modified) = std::fs::metadata(p).and_then(|meta| meta.modified()) {
+            let ms = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as f64;
+            updated = Some(updated.map_or(ms, |u: f64| u.max(ms)));
         }
     }
     guard.geo.last_updated = updated;
@@ -392,4 +379,56 @@ pub async fn configure_geo_database_defaults(
         guard.geo.city_db_path,
         guard.geo.asn_db_path
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validated_normalizes_integration_settings() {
+        let mut settings = IntegrationSettings::default();
+        settings.rdap.base_url = Some("  ".into());
+        settings.peering_db.api_key = Some("  abc123  ".into());
+        settings.ripe_stat.source_app = "Something else".into();
+        let valid = settings.validated().unwrap();
+        assert_eq!(valid.rdap.base_url(), DEFAULT_RDAP_BASE_URL);
+        assert_eq!(valid.peering_db.api_key.as_deref(), Some("abc123"));
+        assert_eq!(valid.ripe_stat.source_app, RIPE_STAT_SOURCE_APP);
+
+        let mut blank_key = IntegrationSettings::default();
+        blank_key.peering_db.api_key = Some("   ".into());
+        assert_eq!(blank_key.validated().unwrap().peering_db.api_key, None);
+
+        let mut custom = IntegrationSettings::default();
+        custom.rdap.base_url = Some("https://rdap.example.net/ip/".into());
+        assert_eq!(
+            custom.validated().unwrap().rdap.base_url(),
+            "https://rdap.example.net/ip"
+        );
+    }
+
+    #[test]
+    fn validated_rejects_bad_urls_and_keys() {
+        let mut ftp = IntegrationSettings::default();
+        ftp.rdap.base_url = Some("ftp://rdap.example.net".into());
+        assert!(ftp.validated().is_err());
+
+        let mut garbage = IntegrationSettings::default();
+        garbage.rdap.base_url = Some("not a url".into());
+        assert!(garbage.validated().is_err());
+
+        let mut key = IntegrationSettings::default();
+        key.peering_db.api_key = Some("abc\ndef".into());
+        assert!(key.validated().is_err());
+    }
+
+    #[test]
+    fn partial_integration_settings_fall_back_to_defaults() {
+        let parsed: IntegrationSettings =
+            serde_json::from_str(r#"{"peeringDb":{"enabled":true,"apiKey":"k"}}"#).unwrap();
+        assert!(parsed.peering_db.enabled);
+        assert!(parsed.team_cymru.enabled);
+        assert_eq!(parsed.rdap.base_url(), DEFAULT_RDAP_BASE_URL);
+    }
 }

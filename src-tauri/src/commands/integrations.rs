@@ -1,485 +1,1291 @@
-use crate::commands::persistence::{IntegrationSettings, SharedStore};
-use crate::types::*;
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
-use std::time::Duration;
+//! External enrichment providers (Team Cymru, RDAP, RIPEstat, PeeringDB).
+//!
+//! Each lookup goes through the TTL cache, a per-provider concurrency
+//! limit, and retry with backoff. A failed provider never blocks the hop:
+//! it reports an error status and the merge uses the data that arrived.
 
-#[derive(Debug, Clone)]
-pub struct EnrichmentResult {
+use super::enrichment_cache::{CachedProvider, EnrichmentCache};
+use super::geo::GeoLiteResult;
+use super::persistence::IntegrationSettings;
+use super::retry::{with_retry, ProviderError, RetryPolicy};
+use crate::net::is_publicly_routable;
+use crate::types::{
+    AsnDetails, GeoDetails, PeeringDbDetails, ProviderId, ProviderState, ProviderStatus,
+};
+use reqwest::header::{HeaderMap, ACCEPT, AUTHORIZATION, RETRY_AFTER};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::future::Future;
+use std::net::IpAddr;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Semaphore;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CymruRecord {
+    pub asn: Option<u32>,
+    pub prefix: Option<String>,
+    pub country: Option<String>,
+    pub registry: Option<String>,
+    pub as_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RdapRecord {
+    pub name: Option<String>,
+    pub handle: Option<String>,
+    pub country: Option<String>,
+    pub cidr: Option<String>,
+    pub org_name: Option<String>,
+    pub registry: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RipeOrigin {
+    pub asn: u32,
+    pub holder: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RipeStatRecord {
+    pub prefix: Option<String>,
+    pub announced: bool,
+    pub origins: Vec<RipeOrigin>,
+}
+
+/// The merged result of every provider for one address.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Enrichment {
     pub geo: Option<GeoDetails>,
     pub asn: Option<AsnDetails>,
-    pub provider_statuses: Vec<ProviderStatus>,
     pub peering_db: Option<PeeringDbDetails>,
+    pub providers: Vec<ProviderStatus>,
 }
 
-fn make_provider_status(provider: &str, status: &str, message: &str) -> ProviderStatus {
-    ProviderStatus {
-        provider: provider.to_string(),
-        status: status.to_string(),
-        message: Some(message.to_string()),
-        details: None,
-    }
+// ---------------------------------------------------------------------------
+// Response parsers
+// ---------------------------------------------------------------------------
+
+fn non_empty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty() && trimmed != "NA").then(|| trimmed.to_string())
 }
 
-#[derive(Debug)]
-struct TeamCymruResult {
-    asn: Option<u32>,
-    name: Option<String>,
-    prefix: Option<String>,
-    country: Option<String>,
-    registry: Option<String>,
+fn json_str(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).and_then(non_empty)
 }
 
-async fn query_team_cymru(ip: &str) -> Result<Option<TeamCymruResult>, String> {
-    let ip_str = ip.to_string();
-    tokio::task::spawn_blocking(move || {
-        let mut stream = TcpStream::connect_timeout(
-            &"whois.cymru.com:43".parse().map_err(|e| format!("{}", e))?,
-            Duration::from_secs(8),
-        )
-        .map_err(|e| format!("Team Cymru connection failed: {}", e))?;
+/// Parses Team Cymru verbose whois output:
+/// `AS | IP | BGP Prefix | CC | Registry | Allocated | AS Name`.
+pub fn parse_team_cymru(text: &str, ip: IpAddr) -> Option<CymruRecord> {
+    let target = ip.to_string();
+    let rows: Vec<Vec<&str>> = text
+        .lines()
+        .filter(|line| line.contains('|'))
+        .map(|line| line.split('|').map(str::trim).collect::<Vec<_>>())
+        .filter(|fields| fields.len() >= 7)
+        .collect();
+    let row = rows
+        .iter()
+        .find(|fields| fields[1] == target)
+        .or_else(|| rows.first())?;
 
-        stream
-            .set_read_timeout(Some(Duration::from_secs(8)))
-            .ok();
-
-        stream
-            .write_all(format!("begin\nverbose\n{}\nend\n", ip_str).as_bytes())
-            .map_err(|e| format!("Write failed: {}", e))?;
-
-        let reader = BufReader::new(stream);
-        let mut data_row: Option<String> = None;
-
-        for line in reader.lines() {
-            let line = line.map_err(|e| format!("Read failed: {}", e))?;
-            let trimmed = line.trim().to_string();
-            if trimmed.is_empty() {
-                continue;
-            }
-            // Data rows start with a digit followed by pipe
-            if trimmed.chars().next().map_or(false, |c| c.is_ascii_digit())
-                && trimmed.contains('|')
-            {
-                data_row = Some(trimmed);
-                break;
-            }
-        }
-
-        match data_row {
-            None => Ok(None),
-            Some(row) => {
-                let parts: Vec<&str> = row.split('|').map(|s| s.trim()).collect();
-                if parts.len() < 7 {
-                    return Ok(None);
-                }
-                let asn = parts[0].parse::<u32>().ok();
-                let prefix = if parts[2].is_empty() {
-                    None
-                } else {
-                    Some(parts[2].to_string())
-                };
-                let country = if parts[3].is_empty() {
-                    None
-                } else {
-                    Some(parts[3].to_string())
-                };
-                let registry = if parts[4].is_empty() {
-                    None
-                } else {
-                    Some(parts[4].to_string())
-                };
-                let name = if parts.len() > 6 && !parts[6].is_empty() {
-                    Some(parts[6].to_string())
-                } else {
-                    None
-                };
-
-                Ok(Some(TeamCymruResult {
-                    asn,
-                    name,
-                    prefix,
-                    country,
-                    registry,
-                }))
-            }
-        }
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-}
-
-#[derive(Debug)]
-struct RdapResult {
-    name: Option<String>,
-    country: Option<String>,
-}
-
-async fn query_rdap(ip: &str, base_url: &str) -> Result<Option<RdapResult>, String> {
-    let url = format!("{}/{}", base_url.trim_end_matches('/'), ip);
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .header("User-Agent", "VisTracer")
-        .header("Accept", "application/rdap+json, application/json")
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| format!("RDAP request failed: {}", e))?;
-
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err("Rate limited by RDAP service (HTTP 429).".to_string());
-    }
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {} from RDAP service.", resp.status()));
-    }
-
-    let data: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("RDAP JSON parse failed: {}", e))?;
-
-    Ok(Some(RdapResult {
-        name: data["name"].as_str().map(|s| s.to_string()),
-        country: data["country"].as_str().map(|s| s.to_string()),
-    }))
-}
-
-#[derive(Debug)]
-struct RipeStatResult {
-    asn: Option<u32>,
-    holder: Option<String>,
-    prefix: Option<String>,
-    country: Option<String>,
-}
-
-async fn query_ripe_stat(ip: &str, source_app: &str) -> Result<Option<RipeStatResult>, String> {
-    let url = format!(
-        "https://stat.ripe.net/data/prefix-overview/data.json?resource={}&sourceapp={}",
-        ip, source_app
-    );
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .header("User-Agent", "VisTracer")
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| format!("RIPE Stat request failed: {}", e))?;
-
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err("Rate limited by RIPE Stat (HTTP 429).".to_string());
-    }
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {} from RIPE Stat.", resp.status()));
-    }
-
-    let data: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("RIPE Stat JSON parse failed: {}", e))?;
-
-    let primary_asn = &data["data"]["asns"][0];
-
-    Ok(Some(RipeStatResult {
-        asn: primary_asn["asn"].as_u64().map(|v| v as u32),
-        holder: primary_asn["holder"].as_str().map(|s| s.to_string()),
-        country: primary_asn["country"].as_str().map(|s| s.to_string()),
-        prefix: data["data"]["prefix"].as_str().map(|s| s.to_string()),
-    }))
-}
-
-async fn query_peeringdb(
-    asn: u32,
-    api_key: Option<&str>,
-) -> Result<Option<PeeringDbDetails>, String> {
-    let url = format!("https://www.peeringdb.com/api/net?asn={}", asn);
-    let client = reqwest::Client::new();
-    let mut req = client
-        .get(&url)
-        .header("User-Agent", "VisTracer")
-        .timeout(Duration::from_secs(10));
-
-    if let Some(key) = api_key {
-        req = req.header("X-Api-Key", key);
-    }
-
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("PeeringDB request failed: {}", e))?;
-
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err("Rate limited by PeeringDB (HTTP 429).".to_string());
-    }
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {} from PeeringDB.", resp.status()));
-    }
-
-    let data: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("PeeringDB JSON parse failed: {}", e))?;
-
-    let entry = &data["data"][0];
-    if entry.is_null() {
-        return Ok(None);
-    }
-
-    Ok(Some(PeeringDbDetails {
-        id: entry["id"].as_u64(),
-        name: entry["name"].as_str().map(|s| s.to_string()),
-        aka: entry["aka"].as_str().map(|s| s.to_string()),
-        website: entry["website"].as_str().map(|s| s.to_string()),
-        city: entry["city"].as_str().map(|s| s.to_string()),
-        country: entry["country"].as_str().map(|s| s.to_string()),
-        ix_count: entry["ix_count"].as_u64(),
-    }))
-}
-
-fn merge_asn(base: Option<&AsnDetails>, addition: &AsnDetails) -> AsnDetails {
-    AsnDetails {
-        asn: addition.asn.or_else(|| base.and_then(|b| b.asn)),
-        name: addition
-            .name
-            .clone()
-            .or_else(|| base.and_then(|b| b.name.clone())),
-        network: addition
-            .network
-            .clone()
-            .or_else(|| base.and_then(|b| b.network.clone())),
-        country: addition
-            .country
-            .clone()
-            .or_else(|| base.and_then(|b| b.country.clone())),
-        registry: addition
-            .registry
-            .clone()
-            .or_else(|| base.and_then(|b| b.registry.clone())),
-    }
-}
-
-pub async fn enrich_with_external_providers(
-    ip: &str,
-    seed_geo: Option<&GeoDetails>,
-    seed_asn: Option<&AsnDetails>,
-    store: &SharedStore,
-) -> EnrichmentResult {
-    let settings = {
-        let guard = store.lock().unwrap();
-        guard.integrations.clone()
+    let record = CymruRecord {
+        asn: row[0].parse().ok(),
+        prefix: non_empty(row[2]),
+        country: non_empty(row[3]),
+        registry: non_empty(row[4]).filter(|registry| registry != "other"),
+        as_name: non_empty(row[6]),
     };
+    (record.asn.is_some() || record.prefix.is_some()).then_some(record)
+}
 
-    let mut statuses: Vec<ProviderStatus> = Vec::new();
-    let mut current_geo = seed_geo.cloned();
-    let mut current_asn = seed_asn.cloned();
-    let mut peering_db_details: Option<PeeringDbDetails> = None;
+fn registry_from_whois_host(host: &str) -> Option<String> {
+    let host = host.to_lowercase();
+    [
+        ("arin", "arin"),
+        ("ripe", "ripencc"),
+        ("apnic", "apnic"),
+        ("lacnic", "lacnic"),
+        ("afrinic", "afrinic"),
+    ]
+    .iter()
+    .find(|(needle, _)| host.contains(needle))
+    .map(|(_, registry)| registry.to_string())
+}
 
-    // MaxMind status
-    if seed_geo.is_some() || seed_asn.is_some() {
-        statuses.push(make_provider_status(
-            "maxmind",
-            "success",
-            "Resolved locally via GeoLite2.",
+fn vcard_field(entity: &Value, field: &str) -> Option<String> {
+    entity
+        .get("vcardArray")?
+        .get(1)?
+        .as_array()?
+        .iter()
+        .find(|item| item.get(0).and_then(Value::as_str) == Some(field))
+        .and_then(|item| item.get(3))
+        .and_then(Value::as_str)
+        .and_then(non_empty)
+}
+
+fn rdap_registrant_name(data: &Value) -> Option<String> {
+    let registrants: Vec<&Value> = data
+        .get("entities")?
+        .as_array()?
+        .iter()
+        .filter(|entity| {
+            entity
+                .get("roles")
+                .and_then(Value::as_array)
+                .is_some_and(|roles| roles.iter().any(|r| r.as_str() == Some("registrant")))
+        })
+        .collect();
+    registrants
+        .iter()
+        .find(|entity| vcard_field(entity, "kind").as_deref() == Some("org"))
+        .or_else(|| registrants.first())
+        .and_then(|entity| vcard_field(entity, "fn"))
+}
+
+/// Parses an RDAP "ip network" object (RFC 9083).
+pub fn parse_rdap(data: &Value) -> Option<RdapRecord> {
+    if data.get("errorCode").is_some() {
+        return None;
+    }
+    let cidr = data
+        .get("cidr0_cidrs")
+        .and_then(Value::as_array)
+        .and_then(|cidrs| cidrs.first())
+        .and_then(|entry| {
+            let prefix = entry
+                .get("v4prefix")
+                .or_else(|| entry.get("v6prefix"))?
+                .as_str()?;
+            let length = entry.get("length")?.as_u64()?;
+            Some(format!("{prefix}/{length}"))
+        });
+    let record = RdapRecord {
+        name: json_str(data, "name"),
+        handle: json_str(data, "handle"),
+        country: json_str(data, "country"),
+        cidr,
+        org_name: rdap_registrant_name(data),
+        registry: json_str(data, "port43").and_then(|host| registry_from_whois_host(&host)),
+    };
+    let empty = record.name.is_none() && record.handle.is_none() && record.cidr.is_none();
+    (!empty).then_some(record)
+}
+
+/// Parses the RIPEstat `prefix-overview` data call.
+pub fn parse_ripe_stat(body: &Value) -> Result<Option<RipeStatRecord>, ProviderError> {
+    if let Some(status) = body.get("status").and_then(Value::as_str) {
+        if status != "ok" {
+            return Err(ProviderError::Parse(format!(
+                "RIPEstat status \"{status}\""
+            )));
+        }
+    }
+    let Some(data) = body.get("data") else {
+        return Err(ProviderError::Parse(
+            "RIPEstat response has no data".to_string(),
         ));
-    } else {
-        statuses.push(make_provider_status(
-            "maxmind",
-            "error",
-            "No GeoLite2 match found.",
-        ));
+    };
+    let announced = data
+        .get("announced")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let origins: Vec<RipeOrigin> = data
+        .get("asns")
+        .and_then(Value::as_array)
+        .map(|asns| {
+            asns.iter()
+                .filter_map(|origin| {
+                    Some(RipeOrigin {
+                        asn: u32::try_from(origin.get("asn")?.as_u64()?).ok()?,
+                        holder: json_str(origin, "holder"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let prefix = json_str(data, "resource").filter(|resource| resource.contains('/'));
+    if !announced && origins.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(RipeStatRecord {
+        prefix,
+        announced,
+        origins,
+    }))
+}
+
+/// Parses a PeeringDB `/api/net?asn=` response.
+pub fn parse_peeringdb(body: &Value) -> Option<PeeringDbDetails> {
+    let entry = body.get("data")?.as_array()?.first()?;
+    Some(PeeringDbDetails {
+        id: entry.get("id").and_then(Value::as_u64),
+        name: json_str(entry, "name"),
+        aka: json_str(entry, "aka"),
+        website: json_str(entry, "website"),
+        info_type: json_str(entry, "info_type"),
+        info_scope: json_str(entry, "info_scope"),
+        info_traffic: json_str(entry, "info_traffic"),
+        info_ratio: json_str(entry, "info_ratio"),
+        policy_general: json_str(entry, "policy_general"),
+        irr_as_set: json_str(entry, "irr_as_set"),
+        ix_count: entry.get("ix_count").and_then(Value::as_u64),
+        fac_count: entry.get("fac_count").and_then(Value::as_u64),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Merge
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MergeInputs<'a> {
+    pub geolite_asn: Option<&'a AsnDetails>,
+    pub cymru: Option<&'a CymruRecord>,
+    pub rdap: Option<&'a RdapRecord>,
+    pub ripe: Option<&'a RipeStatRecord>,
+    pub peering_db: Option<&'a PeeringDbDetails>,
+}
+
+/// Team Cymru and RIPEstat report the live BGP origin, so they win over
+/// the GeoLite2 snapshot.
+pub fn choose_asn(inputs: &MergeInputs) -> Option<u32> {
+    inputs
+        .cymru
+        .and_then(|c| c.asn)
+        .or_else(|| inputs.ripe.and_then(|r| r.origins.first().map(|o| o.asn)))
+        .or_else(|| inputs.geolite_asn.and_then(|g| g.asn))
+}
+
+/// Merges ASN details field by field. A name is only taken from a source
+/// that agrees on the chosen ASN, so the number and name always match.
+pub fn merge_asn(inputs: &MergeInputs) -> Option<AsnDetails> {
+    let asn = choose_asn(inputs);
+    let agrees = |candidate: Option<u32>| asn.is_some() && candidate == asn;
+
+    let name = inputs
+        .geolite_asn
+        .filter(|g| agrees(g.asn))
+        .and_then(|g| g.name.clone())
+        .or_else(|| {
+            inputs
+                .ripe
+                .and_then(|r| r.origins.iter().find(|o| agrees(Some(o.asn))))
+                .and_then(|o| o.holder.clone())
+        })
+        .or_else(|| {
+            inputs
+                .cymru
+                .filter(|c| agrees(c.asn))
+                .and_then(|c| c.as_name.clone())
+        })
+        .or_else(|| inputs.peering_db.and_then(|p| p.name.clone()))
+        .or_else(|| {
+            inputs
+                .rdap
+                .and_then(|r| r.org_name.clone().or_else(|| r.name.clone()))
+        });
+
+    let network = inputs
+        .ripe
+        .filter(|r| r.announced)
+        .and_then(|r| r.prefix.clone())
+        .or_else(|| inputs.cymru.and_then(|c| c.prefix.clone()))
+        .or_else(|| inputs.rdap.and_then(|r| r.cidr.clone()));
+
+    let details = AsnDetails {
+        asn,
+        name,
+        network,
+        country: inputs
+            .cymru
+            .and_then(|c| c.country.clone())
+            .or_else(|| inputs.rdap.and_then(|r| r.country.clone())),
+        registry: inputs
+            .cymru
+            .and_then(|c| c.registry.clone())
+            .or_else(|| inputs.rdap.and_then(|r| r.registry.clone())),
+    };
+    (details != AsnDetails::default()).then_some(details)
+}
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct ProviderEndpoints {
+    pub team_cymru_whois: String,
+    pub ripe_stat_base: String,
+    pub peering_db_base: String,
+}
+
+impl Default for ProviderEndpoints {
+    fn default() -> Self {
+        Self {
+            team_cymru_whois: "whois.cymru.com:43".to_string(),
+            ripe_stat_base: "https://stat.ripe.net".to_string(),
+            peering_db_base: "https://www.peeringdb.com".to_string(),
+        }
+    }
+}
+
+/// Concurrent requests allowed per provider, shared by all runs. PeeringDB
+/// gets one slot: hops in the same ASN then wait for the first answer and
+/// read it from the cache instead of sending duplicate requests.
+struct ProviderLimits {
+    team_cymru: Semaphore,
+    rdap: Semaphore,
+    ripe_stat: Semaphore,
+    peering_db: Semaphore,
+}
+
+impl Default for ProviderLimits {
+    fn default() -> Self {
+        Self {
+            team_cymru: Semaphore::new(2),
+            rdap: Semaphore::new(2),
+            ripe_stat: Semaphore::new(4),
+            peering_db: Semaphore::new(1),
+        }
+    }
+}
+
+pub struct EnrichmentConfig {
+    pub client: reqwest::Client,
+    pub endpoints: ProviderEndpoints,
+    pub retry: RetryPolicy,
+    /// Upper bound for one provider lookup, retries included.
+    pub provider_budget: Duration,
+    pub ttl: Duration,
+    pub cache_path: Option<PathBuf>,
+}
+
+impl EnrichmentConfig {
+    pub fn production(cache_path: PathBuf, ttl: Duration) -> Self {
+        let client = reqwest::Client::builder()
+            .user_agent(format!(
+                "VisTracer/{} (+https://github.com/rush-skills/vistracer)",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .connect_timeout(Duration::from_secs(5))
+            .build()
+            .unwrap_or_default();
+        Self {
+            client,
+            endpoints: ProviderEndpoints::default(),
+            retry: RetryPolicy::default(),
+            provider_budget: Duration::from_secs(25),
+            ttl,
+            cache_path: Some(cache_path),
+        }
+    }
+}
+
+pub struct EnrichmentService {
+    client: reqwest::Client,
+    endpoints: ProviderEndpoints,
+    retry: RetryPolicy,
+    provider_budget: Duration,
+    ttl_ms: i64,
+    cache_path: Option<PathBuf>,
+    cache: Mutex<EnrichmentCache>,
+    limits: ProviderLimits,
+}
+
+struct ProviderOutcome<T> {
+    record: Option<T>,
+    status: ProviderStatus,
+}
+
+impl<T> ProviderOutcome<T> {
+    fn skipped(provider: ProviderId, message: &str) -> Self {
+        Self {
+            record: None,
+            status: ProviderStatus::new(provider, ProviderState::Skipped, message),
+        }
     }
 
-    // Team Cymru
-    if settings.team_cymru.enabled {
-        match query_team_cymru(ip).await {
-            Ok(Some(result)) => {
-                let addition = AsnDetails {
-                    asn: result.asn,
-                    name: result.name,
-                    network: result.prefix,
-                    country: result.country,
-                    registry: result.registry,
-                };
-                current_asn = Some(merge_asn(current_asn.as_ref(), &addition));
-                statuses.push(make_provider_status("team-cymru", "success", "Lookup complete."));
-            }
-            Ok(None) => {
-                statuses.push(make_provider_status(
-                    "team-cymru",
-                    "success",
-                    "No data found for this IP.",
-                ));
-            }
-            Err(e) => {
-                statuses.push(make_provider_status("team-cymru", "error", &e));
+    fn answered(provider: ProviderId, record: Option<T>, cached: bool) -> Self {
+        let message = match (record.is_some(), cached) {
+            (true, false) => "Lookup complete.",
+            (false, false) => "No record found.",
+            (true, true) => "Loaded from cache.",
+            (false, true) => "No record found (cached).",
+        };
+        let mut status = ProviderStatus::new(provider, ProviderState::Success, message);
+        status.cached = cached;
+        Self { record, status }
+    }
+
+    fn failed(provider: ProviderId, message: String) -> Self {
+        Self {
+            record: None,
+            status: ProviderStatus::new(provider, ProviderState::Error, message),
+        }
+    }
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
+    headers
+        .get(RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(Duration::from_secs)
+}
+
+const WHOIS_RESPONSE_LIMIT: u64 = 64 * 1024;
+const PRIVATE_ADDRESS_MESSAGE: &str =
+    "Private or non-routable address; not sent to external providers.";
+const DISABLED_MESSAGE: &str = "Disabled in Integration settings.";
+
+impl EnrichmentService {
+    pub fn new(config: EnrichmentConfig) -> Self {
+        let ttl_ms = i64::try_from(config.ttl.as_millis()).unwrap_or(i64::MAX);
+        let cache = match &config.cache_path {
+            Some(path) => EnrichmentCache::load(path, now_ms(), ttl_ms),
+            None => EnrichmentCache::default(),
+        };
+        Self {
+            client: config.client,
+            endpoints: config.endpoints,
+            retry: config.retry,
+            provider_budget: config.provider_budget,
+            ttl_ms,
+            cache_path: config.cache_path,
+            cache: Mutex::new(cache),
+            limits: ProviderLimits::default(),
+        }
+    }
+
+    /// Writes changed cache entries to disk. Errors are logged; a lost
+    /// cache only costs extra lookups.
+    pub fn persist(&self) {
+        let Some(path) = &self.cache_path else {
+            return;
+        };
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(err) = cache.save_if_dirty(path, now_ms(), self.ttl_ms) {
+            log::warn!("Failed to write enrichment cache {}: {err}", path.display());
+        }
+    }
+
+    fn cache_get<T: CachedProvider>(&self, key: &str) -> Option<Option<T>> {
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.get::<T>(key, now_ms(), self.ttl_ms)
+    }
+
+    fn cache_insert<T: CachedProvider>(&self, key: &str, record: Option<T>) {
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(key, record, now_ms());
+    }
+
+    async fn cached_lookup<T, F, Fut>(
+        &self,
+        key: &str,
+        force_fresh: bool,
+        limit: &Semaphore,
+        fetch: F,
+    ) -> ProviderOutcome<T>
+    where
+        T: CachedProvider,
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<Option<T>, ProviderError>>,
+    {
+        let provider = T::PROVIDER;
+        if !force_fresh {
+            if let Some(hit) = self.cache_get::<T>(key) {
+                return ProviderOutcome::answered(provider, hit, true);
             }
         }
-    } else {
-        statuses.push(make_provider_status(
-            "team-cymru",
-            "skipped",
-            "Disabled in settings.",
-        ));
-    }
 
-    // RDAP
-    if settings.rdap.enabled {
-        let base_url = settings
-            .rdap
-            .base_url
-            .as_deref()
-            .unwrap_or("https://rdap.org/ip");
-        match query_rdap(ip, base_url).await {
-            Ok(Some(result)) => {
-                if current_asn.as_ref().and_then(|a| a.name.as_ref()).is_none() {
-                    if let Some(name) = result.name {
-                        let addition = AsnDetails {
-                            asn: None,
-                            name: Some(name),
-                            network: None,
-                            country: None,
-                            registry: None,
-                        };
-                        current_asn = Some(merge_asn(current_asn.as_ref(), &addition));
-                    }
-                }
-                if current_geo.as_ref().and_then(|g| g.country.as_ref()).is_none() {
-                    if let Some(country) = result.country {
-                        if let Some(ref mut geo) = current_geo {
-                            geo.country = Some(country);
-                        }
-                    }
-                }
-                statuses.push(make_provider_status("rdap", "success", "Lookup complete."));
-            }
-            Ok(None) => {
-                statuses.push(make_provider_status(
-                    "rdap",
-                    "success",
-                    "No data found for this IP.",
-                ));
-            }
-            Err(e) => {
-                statuses.push(make_provider_status("rdap", "error", &e));
+        let Ok(_permit) = limit.acquire().await else {
+            return ProviderOutcome::failed(provider, "Provider limiter closed.".to_string());
+        };
+        // Another hop may have fetched the same key while this one waited.
+        if !force_fresh {
+            if let Some(hit) = self.cache_get::<T>(key) {
+                return ProviderOutcome::answered(provider, hit, true);
             }
         }
-    } else {
-        statuses.push(make_provider_status(
-            "rdap",
-            "skipped",
-            "Disabled in settings.",
-        ));
-    }
 
-    // RIPE Stat
-    if settings.ripe_stat.enabled {
-        let source_app = &settings.ripe_stat.source_app;
-        match query_ripe_stat(ip, source_app).await {
-            Ok(Some(result)) => {
-                let addition = AsnDetails {
-                    asn: result.asn,
-                    name: result.holder,
-                    network: result.prefix,
-                    country: result.country,
-                    registry: None,
-                };
-                current_asn = Some(merge_asn(current_asn.as_ref(), &addition));
-                statuses.push(make_provider_status("ripe-stat", "success", "Lookup complete."));
+        let label = format!("{provider:?} {key}");
+        match tokio::time::timeout(self.provider_budget, with_retry(&self.retry, &label, fetch))
+            .await
+        {
+            Ok(Ok(record)) => {
+                self.cache_insert(key, record.clone());
+                ProviderOutcome::answered(provider, record, false)
             }
-            Ok(None) => {
-                statuses.push(make_provider_status(
-                    "ripe-stat",
-                    "success",
-                    "No data found for this IP.",
-                ));
+            Ok(Err((err, attempts))) => {
+                let plural = if attempts == 1 { "" } else { "s" };
+                let message = format!("{} after {attempts} attempt{plural}.", err.describe());
+                log::warn!("{label}: {message}");
+                ProviderOutcome::failed(provider, message)
             }
-            Err(e) => {
-                statuses.push(make_provider_status("ripe-stat", "error", &e));
+            Err(_) => {
+                log::warn!("{label}: lookup exceeded {:?}", self.provider_budget);
+                ProviderOutcome::failed(provider, "Timed out.".to_string())
             }
         }
-    } else {
-        statuses.push(make_provider_status(
-            "ripe-stat",
-            "skipped",
-            "Disabled in settings.",
-        ));
     }
 
-    // PeeringDB
-    if let Some(asn_num) = current_asn.as_ref().and_then(|a| a.asn) {
-        if settings.peering_db.enabled {
-            let api_key = settings.peering_db.api_key.as_deref();
-            match query_peeringdb(asn_num, api_key).await {
-                Ok(Some(result)) => {
-                    // Merge PeeringDB data into ASN
-                    if current_asn.as_ref().and_then(|a| a.name.as_ref()).is_none() {
-                        if let Some(ref name) = result.name {
-                            let addition = AsnDetails {
-                                asn: None,
-                                name: Some(name.clone()),
-                                network: None,
-                                country: result.country.clone(),
-                                registry: None,
-                            };
-                            current_asn = Some(merge_asn(current_asn.as_ref(), &addition));
-                        }
-                    }
-                    peering_db_details = Some(result);
-                    statuses.push(make_provider_status(
-                        "peeringdb",
-                        "success",
-                        "Lookup complete.",
-                    ));
-                }
-                Ok(None) => {
-                    statuses.push(make_provider_status(
-                        "peeringdb",
-                        "success",
-                        "No data found for this ASN.",
-                    ));
-                }
-                Err(e) => {
-                    statuses.push(make_provider_status("peeringdb", "error", &e));
-                }
-            }
-        } else {
-            statuses.push(make_provider_status(
-                "peeringdb",
-                "skipped",
-                "Disabled in settings.",
+    async fn get_json(
+        &self,
+        url: &str,
+        headers: HeaderMap,
+    ) -> Result<Option<Value>, ProviderError> {
+        let response = self.client.get(url).headers(headers).send().await?;
+        let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            return Err(ProviderError::from_status(
+                status.as_u16(),
+                parse_retry_after(response.headers()),
             ));
         }
-    } else {
-        statuses.push(make_provider_status(
-            "peeringdb",
-            "skipped",
-            "ASN unknown, skipping PeeringDB lookup.",
-        ));
+        let body = response
+            .json::<Value>()
+            .await
+            .map_err(|e| ProviderError::Parse(e.to_string()))?;
+        Ok(Some(body))
     }
 
-    EnrichmentResult {
-        geo: current_geo,
-        asn: current_asn,
-        provider_statuses: statuses,
-        peering_db: peering_db_details,
+    async fn fetch_team_cymru(&self, ip: IpAddr) -> Result<Option<CymruRecord>, ProviderError> {
+        let network = |e: std::io::Error| ProviderError::Network(e.to_string());
+        let mut stream = tokio::net::TcpStream::connect(&self.endpoints.team_cymru_whois)
+            .await
+            .map_err(network)?;
+        stream
+            .write_all(format!("begin\nverbose\n{ip}\nend\n").as_bytes())
+            .await
+            .map_err(network)?;
+        let mut response = Vec::new();
+        stream
+            .take(WHOIS_RESPONSE_LIMIT)
+            .read_to_end(&mut response)
+            .await
+            .map_err(network)?;
+        Ok(parse_team_cymru(&String::from_utf8_lossy(&response), ip))
+    }
+
+    async fn fetch_rdap(
+        &self,
+        ip: IpAddr,
+        base_url: &str,
+    ) -> Result<Option<RdapRecord>, ProviderError> {
+        let url = format!("{}/{ip}", base_url.trim_end_matches('/'));
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            ACCEPT,
+            "application/rdap+json, application/json"
+                .parse()
+                .expect("static header"),
+        );
+        Ok(self
+            .get_json(&url, headers)
+            .await?
+            .as_ref()
+            .and_then(parse_rdap))
+    }
+
+    async fn fetch_ripe_stat(
+        &self,
+        ip: IpAddr,
+        source_app: &str,
+    ) -> Result<Option<RipeStatRecord>, ProviderError> {
+        let url = format!(
+            "{}/data/prefix-overview/data.json?resource={ip}&sourceapp={}",
+            self.endpoints.ripe_stat_base.trim_end_matches('/'),
+            urlencoding::encode(source_app)
+        );
+        match self.get_json(&url, HeaderMap::new()).await? {
+            Some(body) => parse_ripe_stat(&body),
+            None => Ok(None),
+        }
+    }
+
+    async fn fetch_peeringdb(
+        &self,
+        asn: u32,
+        api_key: Option<&str>,
+    ) -> Result<Option<PeeringDbDetails>, ProviderError> {
+        let url = format!(
+            "{}/api/net?asn={asn}",
+            self.endpoints.peering_db_base.trim_end_matches('/')
+        );
+        let mut headers = HeaderMap::new();
+        if let Some(key) = api_key {
+            let value = format!("Api-Key {key}")
+                .parse()
+                .map_err(|_| ProviderError::Client(400))?;
+            headers.insert(AUTHORIZATION, value);
+        }
+        Ok(self
+            .get_json(&url, headers)
+            .await?
+            .as_ref()
+            .and_then(parse_peeringdb))
+    }
+
+    pub async fn enrich(
+        &self,
+        ip: IpAddr,
+        geolite: GeoLiteResult,
+        settings: &IntegrationSettings,
+        force_fresh: bool,
+    ) -> Enrichment {
+        if !is_publicly_routable(ip) {
+            let providers = [
+                ProviderId::MaxMind,
+                ProviderId::TeamCymru,
+                ProviderId::Rdap,
+                ProviderId::RipeStat,
+                ProviderId::PeeringDb,
+            ]
+            .into_iter()
+            .map(|id| ProviderStatus::new(id, ProviderState::Skipped, PRIVATE_ADDRESS_MESSAGE))
+            .collect();
+            return Enrichment {
+                geo: None,
+                asn: None,
+                peering_db: None,
+                providers,
+            };
+        }
+
+        let key = ip.to_string();
+        let cymru = async {
+            if !settings.team_cymru.enabled {
+                return ProviderOutcome::skipped(ProviderId::TeamCymru, DISABLED_MESSAGE);
+            }
+            self.cached_lookup(&key, force_fresh, &self.limits.team_cymru, || {
+                self.fetch_team_cymru(ip)
+            })
+            .await
+        };
+        let rdap = async {
+            if !settings.rdap.enabled {
+                return ProviderOutcome::skipped(ProviderId::Rdap, DISABLED_MESSAGE);
+            }
+            let base_url = settings.rdap.base_url();
+            self.cached_lookup(&key, force_fresh, &self.limits.rdap, || {
+                self.fetch_rdap(ip, base_url)
+            })
+            .await
+        };
+        let ripe = async {
+            if !settings.ripe_stat.enabled {
+                return ProviderOutcome::skipped(ProviderId::RipeStat, DISABLED_MESSAGE);
+            }
+            let source_app = settings.ripe_stat.source_app.as_str();
+            self.cached_lookup(&key, force_fresh, &self.limits.ripe_stat, || {
+                self.fetch_ripe_stat(ip, source_app)
+            })
+            .await
+        };
+        let (cymru, rdap, ripe) = tokio::join!(cymru, rdap, ripe);
+
+        let asn = choose_asn(&MergeInputs {
+            geolite_asn: geolite.asn.as_ref(),
+            cymru: cymru.record.as_ref(),
+            ripe: ripe.record.as_ref(),
+            ..MergeInputs::default()
+        });
+        let peering_db = match (settings.peering_db.enabled, asn) {
+            (false, _) => ProviderOutcome::skipped(ProviderId::PeeringDb, DISABLED_MESSAGE),
+            (true, None) => {
+                ProviderOutcome::skipped(ProviderId::PeeringDb, "No ASN known for this address.")
+            }
+            (true, Some(asn)) => {
+                let api_key = settings.peering_db.api_key.as_deref();
+                self.cached_lookup(
+                    &asn.to_string(),
+                    force_fresh,
+                    &self.limits.peering_db,
+                    || self.fetch_peeringdb(asn, api_key),
+                )
+                .await
+            }
+        };
+
+        let merged = merge_asn(&MergeInputs {
+            geolite_asn: geolite.asn.as_ref(),
+            cymru: cymru.record.as_ref(),
+            rdap: rdap.record.as_ref(),
+            ripe: ripe.record.as_ref(),
+            peering_db: peering_db.record.as_ref(),
+        });
+
+        Enrichment {
+            providers: vec![
+                geolite.status(),
+                cymru.status,
+                rdap.status,
+                ripe.status,
+                peering_db.status,
+            ],
+            geo: geolite.geo,
+            asn: merged,
+            peering_db: peering_db.record,
+        }
     }
 }
 
-pub fn get_integration_settings(store: &SharedStore) -> IntegrationSettings {
-    let guard = store.lock().unwrap();
-    guard.integrations.clone()
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::persistence::IntegrationSettings;
+    use std::collections::HashMap;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::net::TcpListener;
 
-pub fn set_integration_settings(store: &SharedStore, settings: IntegrationSettings) {
-    let mut guard = store.lock().unwrap();
-    guard.integrations = settings;
+    const CYMRU: &str = include_str!("../../fixtures/providers/team-cymru-verbose.txt");
+    const RDAP_ARIN: &str = include_str!("../../fixtures/providers/rdap-arin-8.8.8.8.json");
+    const RDAP_RIPE: &str = include_str!("../../fixtures/providers/rdap-ripe-193.0.6.139.json");
+    const RIPESTAT: &str =
+        include_str!("../../fixtures/providers/ripestat-prefix-overview-8.8.8.8.json");
+    const PEERINGDB: &str = include_str!("../../fixtures/providers/peeringdb-net-15169.json");
+
+    fn json(text: &str) -> Value {
+        serde_json::from_str(text).expect("fixture is valid JSON")
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    // ---- parsers ----------------------------------------------------------
+
+    #[test]
+    fn parses_team_cymru_rows_for_v4_v6_and_unknown() {
+        let google = parse_team_cymru(CYMRU, ip("8.8.8.8")).unwrap();
+        assert_eq!(
+            google,
+            CymruRecord {
+                asn: Some(15169),
+                prefix: Some("8.8.8.0/24".into()),
+                country: Some("US".into()),
+                registry: Some("arin".into()),
+                as_name: Some("GOOGLE - Google LLC, US".into()),
+            }
+        );
+
+        let v6 = parse_team_cymru(CYMRU, ip("2001:4860:4860::8888")).unwrap();
+        assert_eq!(v6.prefix.as_deref(), Some("2001:4860::/32"));
+
+        assert_eq!(parse_team_cymru(CYMRU, ip("10.0.0.1")), None);
+        assert_eq!(
+            parse_team_cymru("Error: no ASN or IP match", ip("8.8.8.8")),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_rdap_arin_and_ripe_shapes() {
+        let arin = parse_rdap(&json(RDAP_ARIN)).unwrap();
+        assert_eq!(arin.name.as_deref(), Some("GOGL"));
+        assert_eq!(arin.handle.as_deref(), Some("NET-8-8-8-0-2"));
+        assert_eq!(arin.cidr.as_deref(), Some("8.8.8.0/24"));
+        assert_eq!(arin.org_name.as_deref(), Some("Google LLC"));
+        assert_eq!(arin.registry.as_deref(), Some("arin"));
+        assert_eq!(arin.country, None);
+
+        let ripe = parse_rdap(&json(RDAP_RIPE)).unwrap();
+        assert_eq!(ripe.country.as_deref(), Some("NL"));
+        assert_eq!(ripe.cidr.as_deref(), Some("193.0.0.0/21"));
+        assert_eq!(ripe.registry.as_deref(), Some("ripencc"));
+        assert_eq!(
+            ripe.org_name.as_deref(),
+            Some("Reseaux IP Europeens Network Coordination Centre (RIPE NCC)")
+        );
+
+        assert_eq!(
+            parse_rdap(&json(r#"{"errorCode":404,"title":"Not Found"}"#)),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_ripestat_prefix_overview() {
+        let record = parse_ripe_stat(&json(RIPESTAT)).unwrap().unwrap();
+        assert_eq!(record.prefix.as_deref(), Some("8.8.8.0/24"));
+        assert!(record.announced);
+        assert_eq!(
+            record.origins,
+            [RipeOrigin {
+                asn: 15169,
+                holder: Some("GOOGLE - Google LLC".into())
+            }]
+        );
+
+        let unannounced =
+            json(r#"{"status":"ok","data":{"announced":false,"asns":[],"resource":"192.0.2.1"}}"#);
+        assert_eq!(parse_ripe_stat(&unannounced), Ok(None));
+        assert!(parse_ripe_stat(&json(r#"{"status":"error","messages":[]}"#)).is_err());
+    }
+
+    #[test]
+    fn parses_peeringdb_network() {
+        let net = parse_peeringdb(&json(PEERINGDB)).unwrap();
+        assert_eq!(net.id, Some(433));
+        assert_eq!(net.name.as_deref(), Some("Google LLC"));
+        assert_eq!(net.info_type.as_deref(), Some("Content"));
+        assert_eq!(net.info_scope.as_deref(), Some("Global"));
+        assert_eq!(net.policy_general.as_deref(), Some("Selective"));
+        assert_eq!(net.irr_as_set.as_deref(), Some("RADB::AS-GOOGLE"));
+        assert_eq!(net.ix_count, Some(160));
+        assert_eq!(net.fac_count, Some(135));
+        // Empty strings in the API become None, not "".
+        assert_eq!(net.info_traffic, None);
+
+        assert_eq!(parse_peeringdb(&json(r#"{"data":[],"meta":{}}"#)), None);
+    }
+
+    // ---- merge ------------------------------------------------------------
+
+    fn cymru(asn: u32, name: &str) -> CymruRecord {
+        CymruRecord {
+            asn: Some(asn),
+            prefix: Some("8.8.8.0/24".into()),
+            country: Some("US".into()),
+            registry: Some("arin".into()),
+            as_name: Some(name.into()),
+        }
+    }
+
+    #[test]
+    fn merge_prefers_live_bgp_asn_and_matching_name() {
+        let geolite = AsnDetails {
+            asn: Some(64500),
+            name: Some("STALE-SNAPSHOT".into()),
+            ..AsnDetails::default()
+        };
+        let cymru = cymru(15169, "GOOGLE - Google LLC, US");
+        let merged = merge_asn(&MergeInputs {
+            geolite_asn: Some(&geolite),
+            cymru: Some(&cymru),
+            ..MergeInputs::default()
+        })
+        .unwrap();
+        assert_eq!(merged.asn, Some(15169));
+        // GeoLite2 disagrees on the ASN, so its name is not used.
+        assert_eq!(merged.name.as_deref(), Some("GOOGLE - Google LLC, US"));
+        assert_eq!(merged.network.as_deref(), Some("8.8.8.0/24"));
+        assert_eq!(merged.registry.as_deref(), Some("arin"));
+    }
+
+    #[test]
+    fn merge_uses_geolite_name_when_asn_agrees() {
+        let geolite = AsnDetails {
+            asn: Some(15169),
+            name: Some("GOOGLE".into()),
+            ..AsnDetails::default()
+        };
+        let cymru = cymru(15169, "GOOGLE - Google LLC, US");
+        let ripe = parse_ripe_stat(&json(RIPESTAT)).unwrap().unwrap();
+        let merged = merge_asn(&MergeInputs {
+            geolite_asn: Some(&geolite),
+            cymru: Some(&cymru),
+            ripe: Some(&ripe),
+            ..MergeInputs::default()
+        })
+        .unwrap();
+        assert_eq!(merged.name.as_deref(), Some("GOOGLE"));
+    }
+
+    #[test]
+    fn merge_falls_back_to_rdap_when_no_asn_source_answers() {
+        let rdap = parse_rdap(&json(RDAP_RIPE)).unwrap();
+        let merged = merge_asn(&MergeInputs {
+            rdap: Some(&rdap),
+            ..MergeInputs::default()
+        })
+        .unwrap();
+        assert_eq!(merged.asn, None);
+        assert_eq!(merged.network.as_deref(), Some("193.0.0.0/21"));
+        assert_eq!(merged.country.as_deref(), Some("NL"));
+        assert_eq!(merged.registry.as_deref(), Some("ripencc"));
+        assert!(merged.name.unwrap().contains("RIPE NCC"));
+    }
+
+    #[test]
+    fn merge_of_nothing_is_none() {
+        assert_eq!(merge_asn(&MergeInputs::default()), None);
+    }
+
+    // ---- service against local mock servers -------------------------------
+
+    type Response = (u16, Vec<(&'static str, &'static str)>, String);
+
+    #[derive(Clone, Default)]
+    struct Hits(Arc<std::sync::Mutex<HashMap<String, Vec<String>>>>);
+
+    impl Hits {
+        fn count(&self, route: &str) -> usize {
+            self.0.lock().unwrap().get(route).map_or(0, Vec::len)
+        }
+        fn requests(&self, route: &str) -> Vec<String> {
+            self.0
+                .lock()
+                .unwrap()
+                .get(route)
+                .cloned()
+                .unwrap_or_default()
+        }
+    }
+
+    /// Minimal HTTP/1.1 server. Each route serves its responses in order and
+    /// repeats the last one.
+    async fn mock_http(routes: Vec<(&'static str, Vec<Response>)>) -> (SocketAddr, Hits) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Hits::default();
+        let routes = Arc::new(routes);
+        let server_hits = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let routes = routes.clone();
+                let hits = server_hits.clone();
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(stream);
+                    let mut head = String::new();
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).await.unwrap_or(0) == 0 || line == "\r\n" {
+                            break;
+                        }
+                        head.push_str(&line);
+                    }
+                    let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    let (status, headers, body) =
+                        match routes.iter().find(|(prefix, _)| path.starts_with(prefix)) {
+                            Some((prefix, responses)) => {
+                                let mut map = hits.0.lock().unwrap();
+                                let seen = map.entry(prefix.to_string()).or_default();
+                                seen.push(head.to_lowercase());
+                                responses[(seen.len() - 1).min(responses.len() - 1)].clone()
+                            }
+                            None => (404, vec![], "{}".to_string()),
+                        };
+                    let extra: String = headers
+                        .iter()
+                        .map(|(k, v)| format!("{k}: {v}\r\n"))
+                        .collect();
+                    let response = format!(
+                        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
+                        body.len()
+                    );
+                    let mut stream = reader.into_inner();
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        (addr, hits)
+    }
+
+    async fn mock_whois(reply: &'static str) -> (SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let server_count = count.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                server_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let mut reader = BufReader::new(stream);
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).await.unwrap_or(0) > 0 && line.trim() != "end"
+                    {
+                        line.clear();
+                    }
+                    let mut stream = reader.into_inner();
+                    let _ = stream.write_all(reply.as_bytes()).await;
+                    let _ = stream.shutdown().await;
+                });
+            }
+        });
+        (addr, count)
+    }
+
+    fn service(
+        http: SocketAddr,
+        whois: SocketAddr,
+        cache_path: Option<PathBuf>,
+    ) -> EnrichmentService {
+        EnrichmentService::new(EnrichmentConfig {
+            client: reqwest::Client::builder().no_proxy().build().unwrap(),
+            endpoints: ProviderEndpoints {
+                team_cymru_whois: whois.to_string(),
+                ripe_stat_base: format!("http://{http}"),
+                peering_db_base: format!("http://{http}"),
+            },
+            retry: RetryPolicy {
+                max_attempts: 3,
+                base_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(5),
+                attempt_timeout: Duration::from_secs(2),
+            },
+            provider_budget: Duration::from_secs(10),
+            ttl: Duration::from_secs(3600),
+            cache_path,
+        })
+    }
+
+    fn settings(http: SocketAddr) -> IntegrationSettings {
+        let mut settings = IntegrationSettings::default();
+        settings.rdap.base_url = Some(format!("http://{http}/rdap/ip"));
+        settings.peering_db.enabled = true;
+        settings.peering_db.api_key = Some("test-key".into());
+        settings
+    }
+
+    fn status(enrichment: &Enrichment, id: ProviderId) -> &ProviderStatus {
+        enrichment
+            .providers
+            .iter()
+            .find(|p| p.provider == id)
+            .unwrap()
+    }
+
+    fn no_geolite() -> GeoLiteResult {
+        GeoLiteResult {
+            geo: None,
+            asn: None,
+            databases_loaded: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn enrich_retries_merges_and_then_serves_from_cache() {
+        let (http, hits) = mock_http(vec![
+            (
+                "/rdap/ip/8.8.8.8",
+                vec![(200, vec![], RDAP_ARIN.to_string())],
+            ),
+            (
+                "/data/prefix-overview",
+                vec![
+                    (503, vec![], "{}".into()),
+                    (200, vec![], RIPESTAT.to_string()),
+                ],
+            ),
+            (
+                "/api/net",
+                vec![
+                    (429, vec![("Retry-After", "0")], "{}".into()),
+                    (200, vec![], PEERINGDB.to_string()),
+                ],
+            ),
+        ])
+        .await;
+        let (whois, whois_hits) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+        let settings = settings(http);
+
+        let first = service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        let asn = first.asn.clone().unwrap();
+        assert_eq!(asn.asn, Some(15169));
+        assert_eq!(asn.name.as_deref(), Some("GOOGLE - Google LLC"));
+        assert_eq!(asn.network.as_deref(), Some("8.8.8.0/24"));
+        assert_eq!(asn.country.as_deref(), Some("US"));
+        assert_eq!(
+            first.peering_db.as_ref().and_then(|p| p.name.as_deref()),
+            Some("Google LLC")
+        );
+        for id in [
+            ProviderId::TeamCymru,
+            ProviderId::Rdap,
+            ProviderId::RipeStat,
+            ProviderId::PeeringDb,
+        ] {
+            let s = status(&first, id);
+            assert_eq!(s.status, ProviderState::Success, "{id:?}: {:?}", s.message);
+            assert!(!s.cached);
+        }
+        assert_eq!(
+            status(&first, ProviderId::MaxMind).status,
+            ProviderState::Skipped
+        );
+        assert_eq!(
+            hits.count("/data/prefix-overview"),
+            2,
+            "RIPEstat 503 was retried"
+        );
+        assert_eq!(hits.count("/api/net"), 2, "PeeringDB 429 was retried");
+        assert!(hits.requests("/api/net")[0].contains("authorization: api-key test-key"));
+        assert!(hits.requests("/data/prefix-overview")[0].contains("sourceapp=vistracer"));
+
+        let second = service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(second.asn, first.asn);
+        assert!(second
+            .providers
+            .iter()
+            .filter(|p| p.provider != ProviderId::MaxMind)
+            .all(|p| p.cached));
+        assert_eq!(hits.count("/rdap/ip/8.8.8.8"), 1);
+        assert_eq!(whois_hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let forced = service
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, true)
+            .await;
+        assert!(forced.providers.iter().all(|p| !p.cached));
+        assert_eq!(hits.count("/rdap/ip/8.8.8.8"), 2);
+    }
+
+    #[tokio::test]
+    async fn failing_provider_degrades_gracefully() {
+        let (http, hits) = mock_http(vec![
+            ("/rdap/ip", vec![(500, vec![], "{}".into())]),
+            (
+                "/data/prefix-overview",
+                vec![(200, vec![], RIPESTAT.to_string())],
+            ),
+            ("/api/net", vec![(200, vec![], PEERINGDB.to_string())]),
+        ])
+        .await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+
+        let geolite = GeoLiteResult {
+            geo: Some(GeoDetails {
+                latitude: 37.751,
+                longitude: -97.822,
+                city: None,
+                country: Some("United States".into()),
+                iso_code: Some("US".into()),
+                confidence: Some(1000.0),
+            }),
+            asn: Some(AsnDetails {
+                asn: Some(15169),
+                name: Some("GOOGLE".into()),
+                ..AsnDetails::default()
+            }),
+            databases_loaded: true,
+        };
+        let result = service
+            .enrich(ip("8.8.8.8"), geolite, &settings(http), false)
+            .await;
+
+        let rdap = status(&result, ProviderId::Rdap);
+        assert_eq!(rdap.status, ProviderState::Error);
+        assert_eq!(
+            rdap.message.as_deref(),
+            Some("Server error (HTTP 500) after 3 attempts.")
+        );
+        assert_eq!(hits.count("/rdap/ip"), 3);
+        assert!(
+            result.geo.is_some(),
+            "GeoLite2 data survives a provider failure"
+        );
+        assert_eq!(
+            result.asn.as_ref().and_then(|a| a.name.as_deref()),
+            Some("GOOGLE")
+        );
+        assert_eq!(
+            status(&result, ProviderId::MaxMind).status,
+            ProviderState::Success
+        );
+    }
+
+    #[tokio::test]
+    async fn private_and_disabled_lookups_send_nothing() {
+        let (http, hits) = mock_http(vec![]).await;
+        let (whois, whois_hits) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+
+        let private = service
+            .enrich(ip("192.168.1.1"), no_geolite(), &settings(http), false)
+            .await;
+        assert!(private
+            .providers
+            .iter()
+            .all(|p| p.status == ProviderState::Skipped));
+
+        let mut disabled = settings(http);
+        disabled.team_cymru.enabled = false;
+        disabled.rdap.enabled = false;
+        disabled.ripe_stat.enabled = false;
+        disabled.peering_db.enabled = false;
+        let result = service
+            .enrich(ip("8.8.8.8"), no_geolite(), &disabled, false)
+            .await;
+        assert!(result
+            .providers
+            .iter()
+            .filter(|p| p.provider != ProviderId::MaxMind)
+            .all(|p| p.status == ProviderState::Skipped
+                && p.message.as_deref() == Some(DISABLED_MESSAGE)));
+        assert_eq!(result.asn, None);
+
+        assert_eq!(hits.0.lock().unwrap().len(), 0);
+        assert_eq!(whois_hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn persisted_cache_is_reused_by_a_new_service() {
+        let (http, hits) = mock_http(vec![
+            ("/rdap/ip", vec![(404, vec![], "{}".into())]),
+            (
+                "/data/prefix-overview",
+                vec![(200, vec![], RIPESTAT.to_string())],
+            ),
+        ])
+        .await;
+        let (whois, whois_hits) = mock_whois(CYMRU).await;
+        let dir = std::env::temp_dir().join(format!("vistracer-enrich-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("enrichment-cache.json");
+        let mut settings = settings(http);
+        settings.peering_db.enabled = false;
+
+        let first = service(http, whois, Some(path.clone()));
+        let fresh = first
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(
+            status(&fresh, ProviderId::Rdap).message.as_deref(),
+            Some("No record found.")
+        );
+        first.persist();
+        assert!(path.exists());
+
+        let second = service(http, whois, Some(path));
+        let cached = second
+            .enrich(ip("8.8.8.8"), no_geolite(), &settings, false)
+            .await;
+        assert_eq!(cached.asn, fresh.asn);
+        assert_eq!(
+            status(&cached, ProviderId::Rdap).message.as_deref(),
+            Some("No record found (cached).")
+        );
+        assert_eq!(hits.count("/rdap/ip"), 1);
+        assert_eq!(hits.count("/data/prefix-overview"), 1);
+        assert_eq!(whois_hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

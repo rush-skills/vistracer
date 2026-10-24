@@ -1,640 +1,548 @@
-use crate::commands::dns::resolve_reverse_dns;
-use crate::commands::geo::{lookup_geo, SharedGeoReaders};
-use crate::commands::persistence::SharedStore;
-use crate::net::{is_ipv6, is_private_ip};
-use crate::types::*;
-use regex::Regex;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+//! Runs traceroute and streams hops to the renderer.
+//!
+//! The read loop only parses lines and emits hops. Reverse DNS, GeoLite2 and
+//! provider lookups run as separate tasks (bounded by a semaphore) and emit
+//! hop updates when they finish, so a slow lookup never delays later hops.
 
-pub type ActiveRuns = Arc<Mutex<HashMap<String, tokio::process::Child>>>;
+use super::geo::SharedGeoReaders;
+use super::integrations::EnrichmentService;
+use super::lookup::{HopLookup, IpLookup, LookupContext, LookupRequest};
+use super::persistence::SharedStore;
+use super::run_state::RunState;
+use super::traceroute_command::{
+    linux_permission_fallback, normalize_request, plan_command, system_resolver, CommandPlan,
+    Platform,
+};
+use super::traceroute_parse::{parse_line, ParsedLine};
+use crate::types::*;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
+use tokio::process::{Child, Command};
+use tokio::sync::{mpsc, Semaphore};
+use tokio::task::{Id as TaskId, JoinSet};
+
+pub type ActiveRuns = Arc<Mutex<HashMap<String, Child>>>;
 
 pub fn create_active_runs() -> ActiveRuns {
     Arc::new(Mutex::new(HashMap::new()))
 }
 
-#[derive(Debug, Clone)]
-pub struct ParsedHop {
-    pub hop_index: u32,
-    pub ip_address: Option<String>,
-    pub host_name: Option<String>,
-    pub rtts: Vec<f64>,
-    pub lost_count: u32,
-    pub raw_line: String,
+const PROGRESS_EVENT: &str = "vistracer:traceroute:progress";
+/// Lookups in flight per run. Provider-level limits apply on top of this.
+const LOOKUP_CONCURRENCY: usize = 8;
+const STDERR_LIMIT: u64 = 16 * 1024;
+const ELEVATED_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const ELEVATED_EXIT_PREFIX: &str = "__VT_EXIT_";
+
+pub struct TracerouteDeps {
+    pub store: Arc<SharedStore>,
+    pub readers: Arc<SharedGeoReaders>,
+    pub enrichment: Arc<EnrichmentService>,
+    pub active_runs: ActiveRuns,
 }
 
-pub fn normalize_request(request: &TracerouteRequest) -> TracerouteRequest {
-    TracerouteRequest {
-        target: request.target.clone(),
-        protocol: if request.protocol.is_empty() {
-            "ICMP".to_string()
-        } else {
-            request.protocol.clone()
+enum ReaderEvent {
+    Line(String),
+    ElevatedExit(i32),
+}
+
+struct SpawnedAttempt {
+    lines: mpsc::Receiver<ReaderEvent>,
+    stderr: tokio::task::JoinHandle<String>,
+    /// Output file of an elevated run, removed when the attempt ends.
+    temp_output: Option<PathBuf>,
+}
+
+struct AttemptOutcome {
+    exit_code: Option<i32>,
+    stderr: String,
+    cancelled: bool,
+    hop_lines: usize,
+}
+
+fn lock_runs(runs: &ActiveRuns) -> std::sync::MutexGuard<'_, HashMap<String, Child>> {
+    runs.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn now_ms() -> f64 {
+    chrono::Utc::now().timestamp_millis() as f64
+}
+
+fn emit_progress(app: &AppHandle, event: TracerouteProgressEvent) {
+    if let Err(e) = app.emit(PROGRESS_EVENT, event) {
+        log::warn!("Failed to emit traceroute progress: {e}");
+    }
+}
+
+fn hop_event(run_id: &str, hop: HopResolution) -> TracerouteProgressEvent {
+    TracerouteProgressEvent {
+        run_id: run_id.to_string(),
+        hop: Some(hop),
+        completed: false,
+        summary: None,
+        hops: None,
+        error: None,
+    }
+}
+
+fn emit_summary(app: &AppHandle, run_id: &str, summary: &TracerouteSummary) {
+    emit_progress(
+        app,
+        TracerouteProgressEvent {
+            run_id: run_id.to_string(),
+            hop: None,
+            completed: false,
+            summary: Some(summary.clone()),
+            hops: None,
+            error: None,
         },
-        max_hops: request.max_hops.clamp(1, 64),
-        timeout_ms: request.timeout_ms.max(1000),
-        packet_count: request.packet_count.clamp(1, 5),
-        force_fresh: request.force_fresh,
-    }
+    );
 }
 
-pub fn build_command(request: &TracerouteRequest) -> (String, Vec<String>) {
-    let ipv6 = is_ipv6(&request.target);
-
-    if cfg!(target_os = "windows") {
-        let mut args = vec![
-            "-d".to_string(),
-            "-h".to_string(),
-            request.max_hops.to_string(),
-            "-w".to_string(),
-            request.timeout_ms.max(1000).to_string(),
-        ];
-        if ipv6 {
-            args.push("-6".to_string());
-        }
-        args.push(request.target.clone());
-        return ("tracert".to_string(), args);
-    }
-
-    // Unix (macOS/Linux)
-    let mut args = vec![
-        "-n".to_string(),
-        "-m".to_string(),
-        request.max_hops.to_string(),
-        "-q".to_string(),
-        request.packet_count.to_string(),
-        "-w".to_string(),
-        ((request.timeout_ms + 999) / 1000).to_string(), // ceil div
-    ];
-
-    if !ipv6 && request.protocol == "ICMP" {
-        args.insert(0, "-I".to_string());
-    } else if !ipv6 && request.protocol == "TCP" {
-        args.push("-P".to_string());
-        args.push("tcp".to_string());
-    }
-
-    args.push(request.target.clone());
-
-    let command = if ipv6 {
-        if cfg!(target_os = "macos") || cfg!(target_os = "linux") {
-            "/usr/sbin/traceroute6".to_string()
-        } else {
-            "traceroute6".to_string()
-        }
-    } else if cfg!(target_os = "macos") || cfg!(target_os = "linux") {
-        "/usr/sbin/traceroute".to_string()
-    } else {
-        "traceroute".to_string()
-    };
-
-    (command, args)
-}
-
-pub fn parse_latency_values(remainder: &str) -> Vec<f64> {
-    let re = Regex::new(r"(<\d+|\d+(?:\.\d+)?)\s*ms").unwrap();
-    re.captures_iter(remainder)
-        .filter_map(|cap| {
-            let raw = cap.get(1)?.as_str();
-            if let Some(stripped) = raw.strip_prefix('<') {
-                stripped.parse::<f64>().ok().or(Some(1.0))
-            } else {
-                raw.parse::<f64>().ok()
-            }
-        })
-        .collect()
-}
-
-pub fn parse_hop_line(line: &str, packet_count: u32) -> Option<ParsedHop> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let hop_re = Regex::new(r"^(\d+)\s+(.*)$").unwrap();
-    let caps = hop_re.captures(trimmed)?;
-    let hop_index: u32 = caps.get(1)?.as_str().parse().ok()?;
-    let remainder = caps.get(2)?.as_str();
-
-    // Check for timeout
-    if remainder.contains("Request timed out")
-        || remainder.split_whitespace().all(|t| t == "*")
+fn handle_output_line(line: &str) -> ReaderEvent {
+    if let Some(code) = line
+        .trim()
+        .strip_prefix(ELEVATED_EXIT_PREFIX)
+        .and_then(|rest| rest.strip_suffix("__"))
+        .and_then(|code| code.parse().ok())
     {
-        return Some(ParsedHop {
-            hop_index,
-            ip_address: None,
-            host_name: None,
-            rtts: vec![],
-            lost_count: packet_count,
-            raw_line: line.to_string(),
-        });
+        return ReaderEvent::ElevatedExit(code);
     }
+    ReaderEvent::Line(line.to_string())
+}
 
-    let mut ip_address: Option<String> = None;
-    let mut host_name: Option<String> = None;
-
-    // Match IPv4 in parentheses: hostname (1.2.3.4)
-    let paren_re = Regex::new(r"([^\s]+)?\s*\((\d{1,3}(?:\.\d{1,3}){3})\)").unwrap();
-    if let Some(caps) = paren_re.captures(remainder) {
-        host_name = caps.get(1).map(|m| m.as_str().to_string());
-        ip_address = caps.get(2).map(|m| m.as_str().to_string());
+/// Splits complete lines out of `pending`, decoding lossily because
+/// resolver-provided host names are not guaranteed to be UTF-8.
+fn drain_lines(pending: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    while let Some(pos) = pending.iter().position(|b| *b == b'\n') {
+        let line: Vec<u8> = pending.drain(..=pos).collect();
+        lines.push(String::from_utf8_lossy(&line).trim_end().to_string());
     }
+    lines
+}
 
-    // Match IPv6 in parentheses
-    if ip_address.is_none() {
-        let paren_v6_re =
-            Regex::new(r"([^\s]+)?\s*\(([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)\)").unwrap();
-        if let Some(caps) = paren_v6_re.captures(remainder) {
-            let addr = caps.get(2).map(|m| m.as_str().to_string());
-            if addr.as_ref().map_or(false, |a| a.contains(':')) {
-                host_name = caps.get(1).map(|m| m.as_str().to_string());
-                ip_address = addr;
-            }
-        }
-    }
-
-    // Match IPv4 in brackets: hostname [1.2.3.4] (Windows tracert)
-    if ip_address.is_none() {
-        let bracket_re = Regex::new(r"([^\s]+)?\s*\[(\d{1,3}(?:\.\d{1,3}){3})\]").unwrap();
-        if let Some(caps) = bracket_re.captures(remainder) {
-            host_name = caps.get(1).map(|m| m.as_str().to_string());
-            ip_address = caps.get(2).map(|m| m.as_str().to_string());
-        }
-    }
-
-    // Match IPv6 in brackets
-    if ip_address.is_none() {
-        let bracket_v6_re =
-            Regex::new(r"([^\s]+)?\s*\[([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)\]").unwrap();
-        if let Some(caps) = bracket_v6_re.captures(remainder) {
-            let addr = caps.get(2).map(|m| m.as_str().to_string());
-            if addr.as_ref().map_or(false, |a| a.contains(':')) {
-                host_name = caps.get(1).map(|m| m.as_str().to_string());
-                ip_address = addr;
-            }
-        }
-    }
-
-    // Fallback: bare IPv4
-    if ip_address.is_none() {
-        let ip_re = Regex::new(r"(\d{1,3}(?:\.\d{1,3}){3})").unwrap();
-        if let Some(caps) = ip_re.captures(remainder) {
-            ip_address = caps.get(1).map(|m| m.as_str().to_string());
-        }
-    }
-
-    // Fallback: bare IPv6
-    if ip_address.is_none() {
-        let v6_re = Regex::new(r"([0-9a-fA-F:]{2,39}(?:::[0-9a-fA-F]{0,4})*)").unwrap();
-        for caps in v6_re.captures_iter(remainder) {
-            if let Some(m) = caps.get(1) {
-                let addr = m.as_str();
-                if addr.matches(':').count() >= 2 {
-                    ip_address = Some(addr.to_string());
+async fn read_pipe<R: AsyncRead + Unpin>(source: R, tx: mpsc::Sender<ReaderEvent>) {
+    let mut reader = BufReader::new(source);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf).await {
+            Ok(0) => break,
+            Ok(_) => {
+                let line = String::from_utf8_lossy(&buf).trim_end().to_string();
+                if tx.send(handle_output_line(&line)).await.is_err() {
                     break;
                 }
             }
+            Err(e) => {
+                log::error!("Error reading traceroute output: {e}");
+                break;
+            }
         }
     }
+}
 
-    let rtts = parse_latency_values(remainder);
-    let lost_count = packet_count.saturating_sub(rtts.len() as u32);
+/// Follows the output file that the elevated (osascript) run writes, until
+/// the exit sentinel appears or osascript exits (for example when the user
+/// cancels the password prompt).
+async fn tail_elevated_output(
+    path: PathBuf,
+    run_id: String,
+    runs: ActiveRuns,
+    tx: mpsc::Sender<ReaderEvent>,
+) {
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(file) => file,
+        Err(e) => {
+            log::error!("Failed to open elevated traceroute output: {e}");
+            return;
+        }
+    };
+    let mut pending = Vec::new();
+    let mut chunk = vec![0u8; 8192];
+    loop {
+        let read = match file.read(&mut chunk).await {
+            Ok(n) => n,
+            Err(e) => {
+                log::error!("Error reading elevated traceroute output: {e}");
+                break;
+            }
+        };
+        if read > 0 {
+            pending.extend_from_slice(&chunk[..read]);
+            for line in drain_lines(&mut pending) {
+                let event = handle_output_line(&line);
+                let done = matches!(event, ReaderEvent::ElevatedExit(_));
+                if tx.send(event).await.is_err() || done {
+                    return;
+                }
+            }
+            continue;
+        }
 
-    Some(ParsedHop {
-        hop_index,
-        ip_address,
-        host_name,
-        rtts,
-        lost_count,
-        raw_line: line.to_string(),
+        let exited = match lock_runs(&runs).get_mut(&run_id) {
+            None => true,
+            Some(child) => !matches!(child.try_wait(), Ok(None)),
+        };
+        if exited {
+            let mut rest = Vec::new();
+            let _ = file.read_to_end(&mut rest).await;
+            pending.extend_from_slice(&rest);
+            pending.push(b'\n');
+            for line in drain_lines(&mut pending) {
+                if !line.is_empty() && tx.send(handle_output_line(&line)).await.is_err() {
+                    return;
+                }
+            }
+            return;
+        }
+        tokio::time::sleep(ELEVATED_POLL_INTERVAL).await;
+    }
+}
+
+async fn read_stderr<R: AsyncRead + Unpin>(source: R) -> String {
+    let mut buf = Vec::new();
+    let _ = source.take(STDERR_LIMIT).read_to_end(&mut buf).await;
+    String::from_utf8_lossy(&buf).trim().to_string()
+}
+
+fn shell_quote(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\\''"))
+}
+
+/// Spawns the traceroute process and a task that forwards its output.
+fn spawn_attempt(
+    plan: &CommandPlan,
+    run_id: &str,
+    runs: &ActiveRuns,
+) -> Result<SpawnedAttempt, String> {
+    let (tx, rx) = mpsc::channel(64);
+
+    if plan.needs_elevation {
+        // macOS only: TCP probes need root, so the command runs through
+        // osascript's administrator prompt and writes to a temp file.
+        let output_path = std::env::temp_dir().join(format!("vistracer-{run_id}.out"));
+        std::fs::File::create(&output_path)
+            .map_err(|e| format!("Failed to create temp file: {e}"))?;
+        let command_line = std::iter::once(plan.program.to_string_lossy().to_string())
+            .chain(plan.args.iter().cloned())
+            .map(|arg| shell_quote(&arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let quoted_path = shell_quote(&output_path.to_string_lossy());
+        let script = format!(
+            "{command_line} > {quoted_path} 2>&1; echo {ELEVATED_EXIT_PREFIX}$?__ >> {quoted_path}"
+        );
+        let mut child = Command::new("osascript")
+            .arg("-e")
+            .arg(format!(
+                "do shell script \"{}\" with administrator privileges",
+                script.replace('\\', "\\\\").replace('"', "\\\"")
+            ))
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| {
+                format!("Failed to request administrator privileges for TCP traceroute: {e}")
+            })?;
+        let stderr = child.stderr.take();
+        lock_runs(runs).insert(run_id.to_string(), child);
+        tokio::spawn(tail_elevated_output(
+            output_path.clone(),
+            run_id.to_string(),
+            runs.clone(),
+            tx,
+        ));
+        let stderr_task = tokio::spawn(async move {
+            match stderr {
+                Some(stderr) => read_stderr(stderr).await,
+                None => String::new(),
+            }
+        });
+        return Ok(SpawnedAttempt {
+            lines: rx,
+            stderr: stderr_task,
+            temp_output: Some(output_path),
+        });
+    }
+
+    let mut child = Command::new(&plan.program)
+        .args(&plan.args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("Failed to start {}: {e}", plan.program.display()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Failed to capture traceroute output")?;
+    let stderr = child.stderr.take();
+    lock_runs(runs).insert(run_id.to_string(), child);
+    tokio::spawn(read_pipe(stdout, tx));
+    let stderr_task = tokio::spawn(async move {
+        match stderr {
+            Some(stderr) => read_stderr(stderr).await,
+            None => String::new(),
+        }
+    });
+    Ok(SpawnedAttempt {
+        lines: rx,
+        stderr: stderr_task,
+        temp_output: None,
     })
 }
 
-fn compute_latency_stats(values: &[f64]) -> HopLatencyStats {
-    if values.is_empty() {
-        return HopLatencyStats {
-            min_rtt_ms: None,
-            max_rtt_ms: None,
-            avg_rtt_ms: None,
-            jitter_ms: None,
-        };
-    }
-
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let avg = values.iter().sum::<f64>() / values.len() as f64;
-    let jitter = if values.len() > 1 {
-        Some(round2(max - min))
-    } else {
-        None
-    };
-
-    HopLatencyStats {
-        min_rtt_ms: Some(round2(min)),
-        max_rtt_ms: Some(round2(max)),
-        avg_rtt_ms: Some(round2(avg)),
-        jitter_ms: jitter,
-    }
+fn spawn_lookup<L: HopLookup>(
+    lookups: &mut JoinSet<IpLookup>,
+    in_flight: &mut HashMap<TaskId, LookupRequest>,
+    limit: &Arc<Semaphore>,
+    ctx: &Arc<L>,
+    request: LookupRequest,
+) {
+    let limit = limit.clone();
+    let ctx = ctx.clone();
+    let task_request = request.clone();
+    let handle = lookups.spawn(async move {
+        let _permit = limit.acquire_owned().await;
+        ctx.lookup(&task_request).await
+    });
+    in_flight.insert(handle.id(), request);
 }
 
-fn round2(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
+async fn execute_attempt<L: HopLookup>(
+    plan: &CommandPlan,
+    run_id: &str,
+    emit: &impl Fn(TracerouteProgressEvent),
+    runs: &ActiveRuns,
+    ctx: &Arc<L>,
+    state: &mut RunState,
+) -> Result<AttemptOutcome, String> {
+    let SpawnedAttempt {
+        mut lines,
+        stderr: stderr_task,
+        temp_output,
+    } = spawn_attempt(plan, run_id, runs)?;
+    let limit = Arc::new(Semaphore::new(LOOKUP_CONCURRENCY));
+    let mut lookups: JoinSet<IpLookup> = JoinSet::new();
+    let mut in_flight: HashMap<TaskId, LookupRequest> = HashMap::new();
+    let mut lines_open = true;
+    let mut hop_lines = 0;
+    let mut elevated_exit: Option<i32> = None;
+
+    loop {
+        tokio::select! {
+            event = lines.recv(), if lines_open => match event {
+                Some(ReaderEvent::Line(line)) => {
+                    let parsed = parse_line(&line);
+                    if matches!(parsed, ParsedLine::Hop(_)) {
+                        hop_lines += 1;
+                    }
+                    for request in state.apply_line(parsed) {
+                        spawn_lookup(&mut lookups, &mut in_flight, &limit, ctx, request);
+                    }
+                    for hop in state.take_changed() {
+                        emit(hop_event(run_id, hop));
+                    }
+                }
+                Some(ReaderEvent::ElevatedExit(code)) => elevated_exit = Some(code),
+                None => {
+                    lines_open = false;
+                    if !lock_runs(runs).contains_key(run_id) {
+                        lookups.abort_all();
+                    }
+                }
+            },
+            Some(joined) = lookups.join_next_with_id(), if !lookups.is_empty() => {
+                match joined {
+                    Ok((id, result)) => {
+                        if let Some(request) = in_flight.remove(&id) {
+                            state.apply_lookup(&request, result);
+                        }
+                    }
+                    Err(err) => {
+                        if !err.is_cancelled() {
+                            log::error!("Lookup task failed: {err}");
+                        }
+                        if let Some(request) = in_flight.remove(&err.id()) {
+                            state.abandon_lookup(&request);
+                        }
+                    }
+                }
+                for hop in state.take_changed() {
+                    emit(hop_event(run_id, hop));
+                }
+            },
+            else => break,
+        }
+    }
+
+    if let Some(path) = temp_output {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    let child = lock_runs(runs).remove(run_id);
+    let (cancelled, process_code) = match child {
+        Some(mut child) => match child.wait().await {
+            Ok(status) => (false, status.code()),
+            Err(e) => {
+                log::error!("Failed to wait for traceroute: {e}");
+                (false, None)
+            }
+        },
+        None => (true, None),
+    };
+    let stderr = stderr_task.await.unwrap_or_default();
+
+    let exit_code = if plan.needs_elevation {
+        elevated_exit
+    } else {
+        process_code
+    };
+    Ok(AttemptOutcome {
+        exit_code,
+        stderr,
+        cancelled,
+        hop_lines,
+    })
 }
 
-async fn to_hop_resolution(
-    parsed: &ParsedHop,
-    request: &TracerouteRequest,
-    store: &SharedStore,
-    readers: &SharedGeoReaders,
-) -> HopResolution {
-    let latency = compute_latency_stats(&parsed.rtts);
-    let loss_percent = if request.packet_count > 0 {
-        Some(round2(
-            (parsed.lost_count as f64 / request.packet_count as f64) * 100.0,
-        ))
-    } else {
-        None
-    };
-
-    let host_name = if parsed.host_name.is_some() {
-        parsed.host_name.clone()
-    } else if let Some(ref ip) = parsed.ip_address {
-        resolve_reverse_dns(ip, request.force_fresh, store).await
-    } else {
-        None
-    };
-
-    let geo_lookup = if let Some(ref ip) = parsed.ip_address {
-        lookup_geo(ip, request.force_fresh, store, readers)
-    } else {
-        None
-    };
-
-    HopResolution {
-        hop_index: parsed.hop_index,
-        ip_address: parsed.ip_address.clone(),
-        host_name,
-        loss_percent,
-        latency,
-        geo: geo_lookup.as_ref().and_then(|g| g.geo.clone()),
-        asn: geo_lookup.as_ref().and_then(|g| g.asn.clone()),
-        is_private: parsed
-            .ip_address
-            .as_ref()
-            .map_or(false, |ip| is_private_ip(ip)),
-        is_anycast_suspected: false,
-        raw_line: parsed.raw_line.clone(),
-        providers: geo_lookup.as_ref().map(|g| g.providers.clone()),
-        peering_db: geo_lookup.and_then(|g| g.peering_db),
+fn failure_message(plan: &CommandPlan, outcome: &AttemptOutcome) -> Option<String> {
+    if outcome.cancelled {
+        return Some("Traceroute run cancelled".to_string());
+    }
+    let first_stderr_line = outcome.stderr.lines().find(|l| !l.trim().is_empty());
+    match (plan.needs_elevation, outcome.exit_code) {
+        (_, Some(0)) => None,
+        (true, None) => Some(format!(
+            "Administrator authorization for the TCP trace was cancelled or failed{}",
+            first_stderr_line
+                .map(|l| format!(": {l}"))
+                .unwrap_or_default()
+        )),
+        (_, code) => {
+            let code = code.map_or("an unknown status".to_string(), |c| format!("code {c}"));
+            Some(match first_stderr_line {
+                Some(line) => format!("Traceroute exited with {code}: {line}"),
+                None => format!("Traceroute exited with {code}"),
+            })
+        }
     }
 }
 
 pub async fn run_traceroute(
     request: TracerouteRequest,
     app: AppHandle,
-    store: &SharedStore,
-    readers: &SharedGeoReaders,
-    active_runs: &ActiveRuns,
+    deps: &TracerouteDeps,
 ) -> Result<TracerouteExecutionResult, String> {
-    let normalized = normalize_request(&request);
-    let (command, args) = build_command(&normalized);
-    let started_at = chrono::Utc::now().timestamp_millis() as f64;
+    let request = normalize_request(&request)?;
+    let platform = Platform::current();
+    let resolve = system_resolver(platform);
+    let mut plan = plan_command(&request, platform, &resolve)?;
     let run_id = uuid::Uuid::new_v4().to_string();
-
     log::info!(
-        "Starting traceroute run {} via {} {:?}",
-        run_id,
-        command,
-        args
+        "Starting traceroute run {run_id} via {} {:?}",
+        plan.program.display(),
+        plan.args
     );
 
-    // Send initial progress event
-    let _ = app.emit(
-        "vistracer:traceroute:progress",
-        TracerouteProgressEvent {
-            run_id: run_id.clone(),
-            hop: None,
-            completed: false,
-            summary: Some(TracerouteSummary {
-                target: normalized.target.clone(),
-                started_at,
-                completed_at: None,
-                hop_count: 0,
-                protocols_tried: vec![normalized.protocol.clone()],
-                error: None,
-            }),
-            hops: None,
-            error: None,
-        },
-    );
-
-    let needs_elevation = cfg!(target_os = "macos") && normalized.protocol == "TCP";
-
-    // For elevated (TCP on macOS): osascript writes to a temp file, we tail it.
-    // For normal: direct pipe from child stdout.
-    let tmp_output_path = if needs_elevation {
-        Some(std::env::temp_dir().join(format!("vistracer-{}.out", run_id)))
-    } else {
-        None
+    let mut summary = TracerouteSummary {
+        target: request.target.clone(),
+        started_at: now_ms(),
+        completed_at: None,
+        hop_count: 0,
+        protocols_tried: vec![plan.protocol],
+        error: None,
+        notices: plan.notices.clone(),
     };
+    emit_summary(&app, &run_id, &summary);
+    let emit = |event| emit_progress(&app, event);
 
-    let child = if needs_elevation {
-        let output_path = tmp_output_path.as_ref().unwrap();
-        // Create the output file so tail can start reading immediately
-        std::fs::File::create(output_path)
-            .map_err(|e| format!("Failed to create temp file: {}", e))?;
-
-        // TCP traceroute on macOS requires root (pcap_activate needs privileges).
-        // Use osascript to show the native admin password prompt.
-        // Redirect output to a temp file so we can stream-read it.
-        let shell_cmd = std::iter::once(command.clone())
-            .chain(args.iter().cloned())
-            .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let escaped_path = output_path.to_string_lossy().replace('\'', "'\\''");
-        let full_cmd = format!("{} > '{}' 2>&1; echo __VT_EXIT_$?__ >> '{}'",
-            shell_cmd, escaped_path, escaped_path);
-        Command::new("osascript")
-            .arg("-e")
-            .arg(format!(
-                "do shell script \"{}\" with administrator privileges",
-                full_cmd.replace('\\', "\\\\").replace('"', "\\\"")
-            ))
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| format!("Failed to spawn traceroute with elevation: {}", e))?
-    } else {
-        Command::new(&command)
-            .args(&args)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| format!("Failed to spawn traceroute: {}", e))?
+    let settings = {
+        let guard = deps.store.lock().unwrap_or_else(|e| e.into_inner());
+        guard.integrations.clone()
     };
+    let ctx = Arc::new(LookupContext {
+        store: deps.store.clone(),
+        readers: deps.readers.clone(),
+        enrichment: deps.enrichment.clone(),
+        settings,
+        force_fresh: request.force_fresh,
+    });
 
-    // Store the child for cancellation
-    {
-        let mut runs = active_runs.lock().unwrap();
-        runs.insert(run_id.clone(), child);
-    }
+    let mut state = RunState::new(plan.probes_per_hop);
+    let mut outcome =
+        execute_attempt(&plan, &run_id, &emit, &deps.active_runs, &ctx, &mut state).await?;
 
-    let mut hop_map: HashMap<u32, HopResolution> = HashMap::new();
-
-    if let Some(ref output_path) = tmp_output_path {
-        // Elevated mode: tail the temp file written by the osascript process.
-        // We poll the file for new lines until we see the sentinel or the process exits.
-        let file = tokio::fs::File::open(output_path).await
-            .map_err(|e| format!("Failed to open temp output: {}", e))?;
-        let mut reader = BufReader::new(file);
-        let mut line_buf = String::new();
-        let mut elevated_exit_code: Option<i32> = None;
-
-        loop {
-            line_buf.clear();
-            match reader.read_line(&mut line_buf).await {
-                Ok(0) => {
-                    // No data yet — check if the osascript process has exited
-                    let process_done = {
-                        let runs = active_runs.lock().unwrap();
-                        !runs.contains_key(&run_id)
-                    };
-                    if process_done {
-                        // Read any remaining data
-                        loop {
-                            line_buf.clear();
-                            match reader.read_line(&mut line_buf).await {
-                                Ok(0) => break,
-                                Ok(_) => {
-                                    let line = line_buf.trim_end();
-                                    if let Some(code_str) = line.strip_prefix("__VT_EXIT_").and_then(|s| s.strip_suffix("__")) {
-                                        elevated_exit_code = code_str.parse().ok();
-                                    } else if let Some(parsed) = parse_hop_line(line, normalized.packet_count) {
-                                        let hop = to_hop_resolution(&parsed, &normalized, store, readers).await;
-                                        hop_map.insert(hop.hop_index, hop.clone());
-                                        let _ = app.emit("vistracer:traceroute:progress", TracerouteProgressEvent {
-                                            run_id: run_id.clone(), hop: Some(hop), completed: false,
-                                            summary: None, hops: None, error: None,
-                                        });
-                                    }
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                        break;
-                    }
-                    // Poll interval
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                }
-                Ok(_) => {
-                    let line = line_buf.trim_end().to_string();
-                    if let Some(code_str) = line.strip_prefix("__VT_EXIT_").and_then(|s| s.strip_suffix("__")) {
-                        elevated_exit_code = code_str.parse().ok();
-                        break;
-                    }
-                    if let Some(parsed) = parse_hop_line(&line, normalized.packet_count) {
-                        let hop = to_hop_resolution(&parsed, &normalized, store, readers).await;
-                        hop_map.insert(hop.hop_index, hop.clone());
-                        let _ = app.emit("vistracer:traceroute:progress", TracerouteProgressEvent {
-                            run_id: run_id.clone(), hop: Some(hop), completed: false,
-                            summary: None, hops: None, error: None,
-                        });
-                    }
-                }
-                Err(e) => {
-                    log::error!("Error reading traceroute output: {}", e);
-                    break;
-                }
-            }
-        }
-
-        // Clean up temp file
-        let _ = tokio::fs::remove_file(output_path).await;
-
-        // Wait for osascript to exit
-        let exit_result = {
-            let mut runs = active_runs.lock().unwrap();
-            runs.remove(&run_id)
-        };
-        if let Some(mut child) = exit_result {
-            let _ = child.wait().await;
-        }
-
-        // Use the elevated traceroute's exit code
-        let exit_code = elevated_exit_code.unwrap_or(0);
-
-        let mut hop_list: Vec<HopResolution> = hop_map.into_values().collect();
-        hop_list.sort_by_key(|h| h.hop_index);
-
-        let error = if exit_code != 0 {
-            Some(format!("Traceroute exited with code {}", exit_code))
-        } else {
-            None
-        };
-
-        let summary = TracerouteSummary {
-            target: normalized.target.clone(),
-            started_at,
-            completed_at: Some(chrono::Utc::now().timestamp_millis() as f64),
-            hop_count: hop_list.len() as u32,
-            protocols_tried: vec![normalized.protocol.clone()],
-            error: error.clone(),
-        };
-
-        let run = TracerouteRun {
-            request: normalized,
-            summary: summary.clone(),
-            hops: hop_list.clone(),
-        };
-
-        {
-            let mut guard = store.lock().unwrap();
-            guard.add_completed_run(run.clone());
-        }
-
-        let _ = app.emit("vistracer:traceroute:progress", TracerouteProgressEvent {
-            run_id: run_id.clone(), hop: None, completed: true,
-            summary: Some(summary), hops: Some(hop_list), error,
-        });
-
-        return Ok(TracerouteExecutionResult { run_id, run });
-    }
-
-    // Normal (non-elevated) mode: read directly from child stdout
-    let stdout = {
-        let mut runs = active_runs.lock().unwrap();
-        runs.get_mut(&run_id).and_then(|c| c.stdout.take())
-    }.ok_or("Failed to capture stdout")?;
-
-    let mut reader = BufReader::new(stdout);
-    let mut line_buf = String::new();
-
-    loop {
-        line_buf.clear();
-        match reader.read_line(&mut line_buf).await {
-            Ok(0) => break, // EOF
-            Ok(_) => {
-                let line = line_buf.trim_end().to_string();
-                if let Some(parsed) = parse_hop_line(&line, normalized.packet_count) {
-                    let hop =
-                        to_hop_resolution(&parsed, &normalized, store, readers).await;
-
-                    hop_map.insert(hop.hop_index, hop.clone());
-
-                    let _ = app.emit(
-                        "vistracer:traceroute:progress",
-                        TracerouteProgressEvent {
-                            run_id: run_id.clone(),
-                            hop: Some(hop),
-                            completed: false,
-                            summary: None,
-                            hops: None,
-                            error: None,
-                        },
-                    );
-                }
-            }
-            Err(e) => {
-                log::error!("Error reading traceroute output: {}", e);
-                break;
-            }
+    if !outcome.cancelled && outcome.exit_code != Some(0) {
+        if let Some((udp_plan, notice)) = linux_permission_fallback(
+            &plan,
+            &request,
+            platform,
+            &outcome.stderr,
+            outcome.hop_lines,
+            &resolve,
+        ) {
+            log::info!("Run {run_id}: {notice}");
+            plan = udp_plan;
+            summary.protocols_tried.push(plan.protocol);
+            summary.notices.push(notice);
+            emit_summary(&app, &run_id, &summary);
+            state = RunState::new(plan.probes_per_hop);
+            outcome =
+                execute_attempt(&plan, &run_id, &emit, &deps.active_runs, &ctx, &mut state).await?;
         }
     }
 
-    // Wait for the process to finish and get exit status
-    let exit_result = {
-        let mut runs = active_runs.lock().unwrap();
-        runs.remove(&run_id)
-    };
-
-    let was_cancelled;
-    let exit_code;
-
-    if let Some(mut child) = exit_result {
-        match child.wait().await {
-            Ok(status) => {
-                exit_code = status.code().unwrap_or(0);
-                was_cancelled = false;
-            }
-            Err(_) => {
-                exit_code = -1;
-                was_cancelled = true;
-            }
-        }
-    } else {
-        // Run was cancelled and removed from active_runs
-        exit_code = -1;
-        was_cancelled = true;
-    }
-
-    let mut hop_list: Vec<HopResolution> = hop_map.into_values().collect();
-    hop_list.sort_by_key(|h| h.hop_index);
-
-    let error = if was_cancelled {
-        Some("Traceroute run cancelled".to_string())
-    } else if exit_code != 0 {
-        Some(format!("Traceroute exited with code {}", exit_code))
-    } else {
-        None
-    };
-
-    let summary = TracerouteSummary {
-        target: normalized.target.clone(),
-        started_at,
-        completed_at: Some(chrono::Utc::now().timestamp_millis() as f64),
-        hop_count: hop_list.len() as u32,
-        protocols_tried: vec![normalized.protocol.clone()],
-        error: error.clone(),
-    };
+    let hops = state.hops();
+    let error = failure_message(&plan, &outcome);
+    summary.completed_at = Some(now_ms());
+    summary.hop_count = hops.len() as u32;
+    summary.error = error.clone();
 
     let run = TracerouteRun {
-        request: normalized,
+        request,
         summary: summary.clone(),
-        hops: hop_list.clone(),
+        hops: hops.clone(),
     };
+    deps.store
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .add_completed_run(run.clone());
 
-    // Store the completed run
-    {
-        let mut guard = store.lock().unwrap();
-        guard.add_completed_run(run.clone());
-    }
-
-    // Emit completion event
-    let _ = app.emit(
-        "vistracer:traceroute:progress",
+    emit_progress(
+        &app,
         TracerouteProgressEvent {
             run_id: run_id.clone(),
             hop: None,
             completed: true,
             summary: Some(summary),
-            hops: Some(hop_list),
-            error: error.clone(),
+            hops: Some(hops),
+            error,
         },
     );
 
-    if was_cancelled {
+    let enrichment = deps.enrichment.clone();
+    tokio::task::spawn_blocking(move || enrichment.persist());
+
+    if outcome.cancelled {
         return Err("Traceroute run cancelled".to_string());
     }
-
-    Ok(TracerouteExecutionResult {
-        run_id,
-        run,
-    })
+    Ok(TracerouteExecutionResult { run_id, run })
 }
 
 pub fn cancel_traceroute(run_id: &str, active_runs: &ActiveRuns) {
-    let mut runs = active_runs.lock().unwrap();
-    if let Some(mut child) = runs.remove(run_id) {
-        if let Err(e) = child.start_kill() {
-            log::error!("Failed to kill traceroute process {}: {}", run_id, e);
-        } else {
-            log::info!("Cancelled traceroute run {}", run_id);
+    if let Some(mut child) = lock_runs(active_runs).remove(run_id) {
+        match child.start_kill() {
+            Ok(()) => log::info!("Cancelled traceroute run {run_id}"),
+            Err(e) => log::error!("Failed to kill traceroute process {run_id}: {e}"),
         }
     }
 }
@@ -643,116 +551,308 @@ pub fn cancel_traceroute(run_id: &str, active_runs: &ActiveRuns) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_hop_line_unix() {
-        let line = " 1  10.0.0.1 (10.0.0.1)  1.234 ms  0.567 ms  0.890 ms";
-        let hop = parse_hop_line(line, 3).unwrap();
-        assert_eq!(hop.hop_index, 1);
-        assert_eq!(hop.ip_address.as_deref(), Some("10.0.0.1"));
-        assert_eq!(hop.rtts.len(), 3);
+    fn plan(needs_elevation: bool) -> CommandPlan {
+        CommandPlan {
+            program: PathBuf::from("/usr/sbin/traceroute"),
+            args: vec![],
+            protocol: TracerouteProtocol::Udp,
+            probes_per_hop: 3,
+            needs_elevation,
+            notices: vec![],
+        }
+    }
+
+    fn outcome(exit_code: Option<i32>, stderr: &str, cancelled: bool) -> AttemptOutcome {
+        AttemptOutcome {
+            exit_code,
+            stderr: stderr.to_string(),
+            cancelled,
+            hop_lines: 0,
+        }
     }
 
     #[test]
-    fn test_parse_hop_line_timeout() {
-        let line = " 2  * * *";
-        let hop = parse_hop_line(line, 3).unwrap();
-        assert_eq!(hop.hop_index, 2);
-        assert!(hop.ip_address.is_none());
-        assert_eq!(hop.lost_count, 3);
+    fn failure_message_reports_stderr_and_cancellation() {
+        assert_eq!(
+            failure_message(&plan(false), &outcome(Some(0), "", false)),
+            None
+        );
+        assert_eq!(
+            failure_message(
+                &plan(false),
+                &outcome(Some(2), "\ntraceroute: unknown host nope.invalid\n", false)
+            )
+            .as_deref(),
+            Some("Traceroute exited with code 2: traceroute: unknown host nope.invalid")
+        );
+        assert_eq!(
+            failure_message(&plan(false), &outcome(None, "", true)).as_deref(),
+            Some("Traceroute run cancelled")
+        );
+        assert!(
+            failure_message(&plan(true), &outcome(None, "User canceled. (-128)", false))
+                .unwrap()
+                .contains("Administrator authorization")
+        );
     }
 
     #[test]
-    fn test_parse_hop_line_windows() {
-        let line = "  3    12 ms     8 ms    10 ms  router.example.com [192.168.1.1]";
-        let hop = parse_hop_line(line, 3).unwrap();
-        assert_eq!(hop.hop_index, 3);
-        assert_eq!(hop.ip_address.as_deref(), Some("192.168.1.1"));
+    fn output_line_detects_elevated_exit_sentinel() {
+        assert!(matches!(
+            handle_output_line("__VT_EXIT_0__"),
+            ReaderEvent::ElevatedExit(0)
+        ));
+        assert!(matches!(
+            handle_output_line("__VT_EXIT_1__ "),
+            ReaderEvent::ElevatedExit(1)
+        ));
+        assert!(matches!(
+            handle_output_line(" 1  10.0.0.1  1 ms"),
+            ReaderEvent::Line(_)
+        ));
     }
 
     #[test]
-    fn test_parse_hop_line_bare_ipv4() {
-        let line = " 4  8.8.8.8  10.123 ms  12.456 ms  11.789 ms";
-        let hop = parse_hop_line(line, 3).unwrap();
-        assert_eq!(hop.hop_index, 4);
-        assert_eq!(hop.ip_address.as_deref(), Some("8.8.8.8"));
+    fn drain_lines_keeps_partial_line() {
+        let mut pending = b" 1  10.0.0.1  1 ms\n 2  10.0.0".to_vec();
+        assert_eq!(drain_lines(&mut pending), [" 1  10.0.0.1  1 ms"]);
+        assert_eq!(pending, b" 2  10.0.0");
+        pending.extend_from_slice(b".2  2 ms\r\n");
+        assert_eq!(drain_lines(&mut pending), [" 2  10.0.0.2  2 ms"]);
+        assert!(pending.is_empty());
     }
 
     #[test]
-    fn test_parse_latency_values() {
-        let values = parse_latency_values("1.234 ms  0.567 ms  0.890 ms");
-        assert_eq!(values.len(), 3);
-        assert!((values[0] - 1.234).abs() < 0.001);
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
     }
 
-    #[test]
-    fn test_parse_latency_values_with_less_than() {
-        let values = parse_latency_values("<1 ms  2.345 ms");
-        assert_eq!(values.len(), 2);
-        assert!((values[0] - 1.0).abs() < 0.001);
+    #[tokio::test]
+    async fn pipe_reader_forwards_lines_lossily() {
+        let (tx, mut rx) = mpsc::channel(8);
+        let input: &[u8] = b" 1  host\xff (10.0.0.1)  1 ms\n__VT_EXIT_0__\n";
+        read_pipe(input, tx).await;
+        match rx.recv().await {
+            Some(ReaderEvent::Line(line)) => assert!(line.starts_with(" 1  host")),
+            _ => panic!("expected a line"),
+        }
+        assert!(matches!(
+            rx.recv().await,
+            Some(ReaderEvent::ElevatedExit(0))
+        ));
+        assert!(rx.recv().await.is_none());
     }
 
-    #[test]
-    fn test_build_command_linux() {
-        let request = TracerouteRequest {
-            target: "8.8.8.8".to_string(),
-            protocol: "ICMP".to_string(),
-            max_hops: 30,
-            timeout_ms: 4000,
-            packet_count: 3,
-            force_fresh: false,
-        };
-        let (cmd, args) = build_command(&request);
-        // On Linux, command should be traceroute with ICMP flag
-        assert!(cmd.contains("traceroute"));
-        assert!(args.contains(&"-I".to_string()) || cmd.contains("tracert"));
-        assert!(args.contains(&"8.8.8.8".to_string()));
-    }
+    /// Runs real child processes (a shell script that prints traceroute
+    /// lines) through the read loop with an injected lookup worker.
+    #[cfg(unix)]
+    mod pipeline {
+        use super::*;
+        use crate::commands::lookup::LookupKind;
+        use std::future::Future;
+        use std::time::Instant;
 
-    #[test]
-    fn test_build_command_ipv6() {
-        let request = TracerouteRequest {
-            target: "2001:db8::1".to_string(),
-            protocol: "ICMP".to_string(),
-            max_hops: 30,
-            timeout_ms: 4000,
-            packet_count: 3,
-            force_fresh: false,
-        };
-        let (cmd, _args) = build_command(&request);
-        assert!(cmd.contains("traceroute6") || cmd.contains("tracert"));
-    }
+        struct FakeLookup {
+            slow_ip: &'static str,
+            delay: Duration,
+            calls: Mutex<Vec<LookupRequest>>,
+        }
 
-    #[test]
-    fn test_normalize_request() {
-        let request = TracerouteRequest {
-            target: "example.com".to_string(),
-            protocol: "".to_string(),
-            max_hops: 100,
-            timeout_ms: 500,
-            packet_count: 10,
-            force_fresh: false,
-        };
-        let normalized = normalize_request(&request);
-        assert_eq!(normalized.protocol, "ICMP");
-        assert_eq!(normalized.max_hops, 64);
-        assert_eq!(normalized.timeout_ms, 1000);
-        assert_eq!(normalized.packet_count, 5);
-    }
+        impl FakeLookup {
+            fn new(slow_ip: &'static str, delay: Duration) -> Arc<Self> {
+                Arc::new(Self {
+                    slow_ip,
+                    delay,
+                    calls: Mutex::new(Vec::new()),
+                })
+            }
+        }
 
-    #[test]
-    fn test_parse_hop_line_ipv6_bare() {
-        let line = " 5  2001:4860:0:1::89b  12.345 ms  13.456 ms  14.567 ms";
-        let hop = parse_hop_line(line, 3).unwrap();
-        assert_eq!(hop.hop_index, 5);
-        assert_eq!(hop.ip_address.as_deref(), Some("2001:4860:0:1::89b"));
-    }
+        impl HopLookup for FakeLookup {
+            fn lookup(&self, request: &LookupRequest) -> impl Future<Output = IpLookup> + Send {
+                self.calls.lock().unwrap().push(request.clone());
+                let delay = if request.ip == self.slow_ip {
+                    self.delay
+                } else {
+                    Duration::ZERO
+                };
+                let host_name = Some(format!("host-{}", request.ip));
+                async move {
+                    tokio::time::sleep(delay).await;
+                    IpLookup {
+                        host_name,
+                        enrichment: None,
+                    }
+                }
+            }
+        }
 
-    #[test]
-    fn test_parse_hop_line_windows_timeout() {
-        let line = "  6     *        *        *     Request timed out.";
-        let hop = parse_hop_line(line, 3).unwrap();
-        assert_eq!(hop.hop_index, 6);
-        assert!(hop.ip_address.is_none());
-        assert_eq!(hop.lost_count, 3);
+        fn fake_traceroute(body: &str) -> (PathBuf, CommandPlan) {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = std::env::temp_dir().join(format!("vistracer-fake-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let script = dir.join("traceroute");
+            std::fs::write(&script, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let plan = CommandPlan {
+                program: script,
+                args: vec![],
+                protocol: TracerouteProtocol::Udp,
+                probes_per_hop: 1,
+                needs_elevation: false,
+                notices: vec![],
+            };
+            (dir, plan)
+        }
+
+        type Recorded = Arc<Mutex<Vec<(Duration, HopResolution)>>>;
+
+        fn recorder(start: Instant) -> (Recorded, impl Fn(TracerouteProgressEvent)) {
+            let events: Recorded = Arc::new(Mutex::new(Vec::new()));
+            let sink = events.clone();
+            let emit = move |event: TracerouteProgressEvent| {
+                if let Some(hop) = event.hop {
+                    sink.lock().unwrap().push((start.elapsed(), hop));
+                }
+            };
+            (events, emit)
+        }
+
+        #[tokio::test]
+        async fn slow_lookup_does_not_delay_later_hops() {
+            let (dir, plan) = fake_traceroute(
+                "echo 'traceroute to 192.0.2.9 (192.0.2.9), 3 hops max'\n\
+                 echo ' 1  192.0.2.1  1.0 ms'\n\
+                 sleep 0.1\n\
+                 echo ' 2  192.0.2.2  2.0 ms'\n\
+                 echo '    192.0.2.22  2.5 ms'\n\
+                 sleep 0.1\n\
+                 echo ' 3  192.0.2.9  3.0 ms'",
+            );
+            let lookup = FakeLookup::new("192.0.2.1", Duration::from_millis(1500));
+            let runs = create_active_runs();
+            let mut state = RunState::new(1);
+            let start = Instant::now();
+            let (events, emit) = recorder(start);
+
+            let outcome = execute_attempt(&plan, "run-slow", &emit, &runs, &lookup, &mut state)
+                .await
+                .unwrap();
+            assert_eq!(outcome.exit_code, Some(0));
+            assert_eq!(outcome.hop_lines, 3);
+            assert!(!outcome.cancelled);
+
+            let events = events.lock().unwrap();
+            let first_seen = |index: u32| {
+                events
+                    .iter()
+                    .find(|(_, hop)| hop.hop_index == index)
+                    .map(|(at, _)| *at)
+                    .unwrap()
+            };
+            let hop1_done = events
+                .iter()
+                .find(|(_, hop)| hop.hop_index == 1 && hop.lookup_state == LookupState::Complete)
+                .map(|(at, _)| *at)
+                .unwrap();
+            assert!(
+                first_seen(3) < Duration::from_millis(1000),
+                "hop 3 at {:?}",
+                first_seen(3)
+            );
+            assert!(
+                hop1_done >= Duration::from_millis(1400),
+                "hop 1 done at {hop1_done:?}"
+            );
+            assert!(first_seen(3) < hop1_done);
+            assert_eq!(events[0].1.lookup_state, LookupState::Pending);
+
+            let hops = state.hops();
+            assert!(hops
+                .iter()
+                .all(|hop| hop.lookup_state == LookupState::Complete));
+            assert_eq!(hops[0].host_name.as_deref(), Some("host-192.0.2.1"));
+            let multipath: Vec<_> = hops[1]
+                .responders
+                .iter()
+                .map(|r| (r.ip_address.as_str(), r.host_name.as_deref()))
+                .collect();
+            assert_eq!(
+                multipath,
+                [
+                    ("192.0.2.2", Some("host-192.0.2.2")),
+                    ("192.0.2.22", Some("host-192.0.2.22"))
+                ]
+            );
+            let calls = lookup.calls.lock().unwrap();
+            assert!(calls.contains(&LookupRequest {
+                ip: "192.0.2.22".into(),
+                kind: LookupKind::NameOnly
+            }));
+            assert_eq!(calls.len(), 4);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+
+        #[tokio::test]
+        async fn cancel_stops_the_process_and_abandons_lookups() {
+            // exec keeps a single process, like a real traceroute binary.
+            let (dir, plan) = fake_traceroute("echo ' 1  192.0.2.1  1.0 ms'\nexec sleep 30");
+            let lookup = FakeLookup::new("192.0.2.1", Duration::from_secs(30));
+            let runs = create_active_runs();
+            let mut state = RunState::new(1);
+            let start = Instant::now();
+
+            // Cancel as soon as the first hop reaches the renderer, while its
+            // lookup is still in flight.
+            let first_hop = Arc::new(tokio::sync::Notify::new());
+            let signal = first_hop.clone();
+            let emit = move |event: TracerouteProgressEvent| {
+                if event.hop.is_some() {
+                    signal.notify_one();
+                }
+            };
+            let cancel_runs = runs.clone();
+            tokio::spawn(async move {
+                first_hop.notified().await;
+                cancel_traceroute("run-cancel", &cancel_runs);
+            });
+            let outcome = execute_attempt(&plan, "run-cancel", &emit, &runs, &lookup, &mut state)
+                .await
+                .unwrap();
+
+            assert!(outcome.cancelled);
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "took {:?}",
+                start.elapsed()
+            );
+            let hops = state.hops();
+            assert_eq!(hops.len(), 1);
+            assert_eq!(hops[0].lookup_state, LookupState::Complete);
+            assert_eq!(hops[0].host_name, None);
+            assert!(runs.lock().unwrap().is_empty());
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+
+        #[tokio::test]
+        async fn failing_process_reports_exit_code_and_stderr() {
+            let (dir, plan) =
+                fake_traceroute("echo 'traceroute: unknown host nope.invalid' >&2\nexit 2");
+            let lookup = FakeLookup::new("", Duration::ZERO);
+            let runs = create_active_runs();
+            let mut state = RunState::new(1);
+            let (_events, emit) = recorder(Instant::now());
+
+            let outcome = execute_attempt(&plan, "run-fail", &emit, &runs, &lookup, &mut state)
+                .await
+                .unwrap();
+            assert_eq!(outcome.exit_code, Some(2));
+            assert_eq!(outcome.hop_lines, 0);
+            assert_eq!(
+                failure_message(&plan, &outcome).as_deref(),
+                Some("Traceroute exited with code 2: traceroute: unknown host nope.invalid")
+            );
+            std::fs::remove_dir_all(dir).unwrap();
+        }
     }
 }

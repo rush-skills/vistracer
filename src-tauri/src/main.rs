@@ -1,30 +1,40 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![allow(dead_code)]
 
 mod commands;
 mod net;
 mod types;
 
 use commands::geo::{
-    ensure_readers, reload_geo_databases, GeoReaders, SharedGeoReaders,
+    database_statuses, ensure_readers, reload_geo_databases, GeoReaders, SharedGeoReaders,
 };
 use commands::geodb_downloader::download_geo_databases;
+use commands::integrations::{EnrichmentConfig, EnrichmentService};
 use commands::persistence::{
     configure_geo_database_defaults, ensure_app_data_dirs, save_persisted_settings, AppStore,
-    SharedStore,
+    IntegrationSettings, SharedStore,
 };
-use commands::traceroute::{cancel_traceroute, create_active_runs, run_traceroute, ActiveRuns};
+use commands::traceroute::{
+    cancel_traceroute, create_active_runs, run_traceroute, ActiveRuns, TracerouteDeps,
+};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use tauri::Manager;
 use types::*;
 
 struct AppState {
-    store: SharedStore,
-    geo_readers: SharedGeoReaders,
+    store: Arc<SharedStore>,
+    geo_readers: Arc<SharedGeoReaders>,
+    enrichment: Arc<EnrichmentService>,
     active_runs: ActiveRuns,
     app_data_dir: PathBuf,
+}
+
+impl AppState {
+    fn store(&self) -> MutexGuard<'_, AppStore> {
+        self.store.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 #[tauri::command]
@@ -33,14 +43,13 @@ async fn traceroute_run(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<TracerouteExecutionResult, String> {
-    run_traceroute(
-        request,
-        app,
-        &state.store,
-        &state.geo_readers,
-        &state.active_runs,
-    )
-    .await
+    let deps = TracerouteDeps {
+        store: state.store.clone(),
+        readers: state.geo_readers.clone(),
+        enrichment: state.enrichment.clone(),
+        active_runs: state.active_runs.clone(),
+    };
+    run_traceroute(request, app, &deps).await
 }
 
 #[tauri::command]
@@ -54,55 +63,33 @@ async fn traceroute_cancel(
 
 #[tauri::command]
 async fn get_recent_runs(state: tauri::State<'_, AppState>) -> Result<Vec<RecentRun>, String> {
-    let guard = state.store.lock().unwrap();
-    Ok(guard.get_recent_runs(5))
+    Ok(state.store().get_recent_runs(5))
 }
 
 #[tauri::command]
 async fn get_geo_database_meta(
     state: tauri::State<'_, AppState>,
 ) -> Result<GeoDatabaseMeta, String> {
-    let guard = state.store.lock().unwrap();
-    let city_path = guard.geo.city_db_path.clone();
-    let asn_path = guard.geo.asn_db_path.clone();
-    let updated = guard.geo.last_updated;
-    drop(guard);
-
-    let city_exists = city_path
-        .as_ref()
-        .map(|p| std::path::Path::new(p).exists())
-        .unwrap_or(false);
-    let asn_exists = asn_path
-        .as_ref()
-        .map(|p| std::path::Path::new(p).exists())
-        .unwrap_or(false);
-
-    let city_status = if city_path.is_some() {
-        if city_exists {
-            "loaded"
-        } else {
-            "error"
-        }
-    } else {
-        "missing"
+    ensure_readers(&state.geo_readers, &state.store);
+    let (city_path, asn_path, updated_at) = {
+        let guard = state.store();
+        (
+            guard.geo.city_db_path.clone(),
+            guard.geo.asn_db_path.clone(),
+            guard.geo.last_updated,
+        )
     };
+    let (city_status, asn_status, load_errors) = database_statuses(&state.geo_readers);
 
-    let asn_status = if asn_path.is_some() {
-        if asn_exists {
-            "loaded"
-        } else {
-            "error"
-        }
-    } else {
-        "missing"
-    };
-
-    let status_message = if !city_exists && !asn_exists {
+    let loaded = |s: GeoDatabaseStatus| s == GeoDatabaseStatus::Loaded;
+    let status_message = if !load_errors.is_empty() {
+        Some(load_errors.join(" "))
+    } else if !loaded(city_status) && !loaded(asn_status) {
         Some("GeoIP databases not found. Fallback services will attempt lookups but accuracy may vary.".to_string())
-    } else if !city_exists {
-        Some("City database not found. Location accuracy will rely on fallback providers.".to_string())
-    } else if !asn_exists {
-        Some("ASN database not found. ASN details will rely on fallback providers.".to_string())
+    } else if !loaded(city_status) {
+        Some("City database not found. Hops will have no map location.".to_string())
+    } else if !loaded(asn_status) {
+        Some("ASN database not found. ASN details will rely on external providers.".to_string())
     } else {
         None
     };
@@ -110,9 +97,9 @@ async fn get_geo_database_meta(
     Ok(GeoDatabaseMeta {
         city_db_path: city_path,
         asn_db_path: asn_path,
-        updated_at: updated,
-        city_db_status: city_status.to_string(),
-        asn_db_status: asn_status.to_string(),
+        updated_at,
+        city_db_status: city_status,
+        asn_db_status: asn_status,
         status_message,
     })
 }
@@ -124,7 +111,7 @@ async fn update_geo_database_paths(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     {
-        let mut guard = state.store.lock().unwrap();
+        let mut guard = state.store();
         guard.geo.city_db_path = city_path;
         guard.geo.asn_db_path = asn_path;
         guard.geo.last_updated = Some(chrono::Utc::now().timestamp_millis() as f64);
@@ -146,7 +133,12 @@ async fn select_geo_db_file(app: tauri::AppHandle) -> Result<Option<String>, Str
         .set_title("Select GeoLite2 Database File")
         .blocking_pick_file();
 
-    Ok(file.map(|f| f.into_path().unwrap_or_default().to_string_lossy().to_string()))
+    Ok(file.map(|f| {
+        f.into_path()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    }))
 }
 
 #[tauri::command]
@@ -175,22 +167,16 @@ async fn get_settings(
     key: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let guard = state.store.lock().unwrap();
-
-    match key.as_str() {
-        "geo" => serde_json::to_value(&guard.geo).map_err(|e| e.to_string()),
-        "preferences" => serde_json::to_value(&guard.preferences).map_err(|e| e.to_string()),
-        "preferences.onboarding" => {
-            serde_json::to_value(&guard.preferences.onboarding).map_err(|e| e.to_string())
-        }
-        "integrations" => {
-            serde_json::to_value(&guard.integrations).map_err(|e| e.to_string())
-        }
-        "cache" => {
-            serde_json::to_value(&guard.cache_settings).map_err(|e| e.to_string())
-        }
+    let guard = state.store();
+    let value = match key.as_str() {
+        "geo" => serde_json::to_value(&guard.geo),
+        "preferences" => serde_json::to_value(&guard.preferences),
+        "preferences.onboarding" => serde_json::to_value(&guard.preferences.onboarding),
+        "integrations" => serde_json::to_value(&guard.integrations),
+        "cache" => serde_json::to_value(&guard.cache_settings),
         _ => Ok(serde_json::Value::Null),
-    }
+    };
+    value.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -199,28 +185,25 @@ async fn set_settings(
     value: serde_json::Value,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut guard = state.store.lock().unwrap();
+    let mut guard = state.store();
 
     match key.as_str() {
         "integrations" => {
-            guard.integrations =
-                serde_json::from_value(value).map_err(|e| e.to_string())?;
+            let parsed: IntegrationSettings = serde_json::from_value(value)
+                .map_err(|e| format!("Invalid integration settings: {e}"))?;
+            guard.integrations = parsed.validated()?;
         }
         "preferences.onboarding" => {
             guard.preferences.onboarding =
                 serde_json::from_value(value).map_err(|e| e.to_string())?;
         }
         "preferences" => {
-            guard.preferences =
-                serde_json::from_value(value).map_err(|e| e.to_string())?;
+            guard.preferences = serde_json::from_value(value).map_err(|e| e.to_string())?;
         }
         "geo" => {
-            guard.geo =
-                serde_json::from_value(value).map_err(|e| e.to_string())?;
+            guard.geo = serde_json::from_value(value).map_err(|e| e.to_string())?;
         }
-        _ => {
-            log::warn!("Unknown settings key: {}", key);
-        }
+        _ => return Err(format!("Unknown settings key: {key}")),
     }
 
     save_persisted_settings(&state.app_data_dir, &guard);
@@ -228,7 +211,10 @@ async fn set_settings(
 }
 
 #[tauri::command]
-async fn emit_telemetry(event_name: String, _payload: Option<serde_json::Value>) -> Result<(), String> {
+async fn emit_telemetry(
+    event_name: String,
+    _payload: Option<serde_json::Value>,
+) -> Result<(), String> {
     log::debug!("Telemetry event: {}", event_name);
     Ok(())
 }
@@ -248,31 +234,41 @@ fn main() {
                 .path()
                 .app_data_dir()
                 .expect("Failed to get app data directory");
-
             ensure_app_data_dirs(&app_data_dir);
+
+            let cache_dir = app
+                .path()
+                .app_cache_dir()
+                .unwrap_or_else(|_| app_data_dir.join("cache"));
 
             let assets_dir = app
                 .path()
                 .resource_dir()
                 .unwrap_or_else(|_| PathBuf::from("assets"));
 
-            let store: SharedStore = Mutex::new(AppStore::default());
-            let readers: SharedGeoReaders = Mutex::new(GeoReaders::default());
-            let active_runs = create_active_runs();
+            let store: Arc<SharedStore> = Arc::new(Mutex::new(AppStore::default()));
+            let readers: Arc<SharedGeoReaders> = Arc::new(Mutex::new(GeoReaders::default()));
 
-            // Configure geo database defaults synchronously on setup
-            {
-                let rt = tokio::runtime::Runtime::new()
-                    .expect("Failed to create tokio runtime for setup");
-                rt.block_on(configure_geo_database_defaults(&store, &assets_dir, &app_data_dir));
-            }
-
+            configure_geo_database_defaults(&store, &assets_dir, &app_data_dir);
             ensure_readers(&readers, &store);
+
+            let enrichment_ttl = Duration::from_millis(
+                store
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .cache_settings
+                    .enrichment_ttl_ms,
+            );
+            let enrichment = Arc::new(EnrichmentService::new(EnrichmentConfig::production(
+                cache_dir.join("enrichment-cache.json"),
+                enrichment_ttl,
+            )));
 
             app.manage(AppState {
                 store,
                 geo_readers: readers,
-                active_runs,
+                enrichment,
+                active_runs: create_active_runs(),
                 app_data_dir,
             });
 
