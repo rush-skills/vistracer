@@ -1,0 +1,19 @@
+{
+ "data": [
+  {
+   "id": 26,
+   "name": "AMS-IX",
+   "city": "Amsterdam",
+   "country": "NL",
+   "website": "http://www.ams-ix.net/"
+  },
+  {
+   "id": 31,
+   "name": "DE-CIX Frankfurt",
+   "city": "Frankfurt",
+   "country": "DE",
+   "website": "https://www.de-cix.net"
+  }
+ ],
+ "meta": {}
+}
