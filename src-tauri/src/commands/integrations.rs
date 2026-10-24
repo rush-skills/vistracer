@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -430,6 +430,9 @@ pub struct EnrichmentService {
     ttl_ms: i64,
     cache_path: Option<PathBuf>,
     cache: Mutex<EnrichmentCache>,
+    /// Held from snapshot to rename, so two runs that finish together write
+    /// in snapshot order and never share the temporary file.
+    persist_lock: Mutex<()>,
     limits: ProviderLimits,
 }
 
@@ -503,6 +506,7 @@ impl EnrichmentService {
             ttl_ms,
             cache_path: config.cache_path,
             cache: Mutex::new(cache),
+            persist_lock: Mutex::new(()),
             limits: ProviderLimits::default(),
         }
     }
@@ -510,11 +514,16 @@ impl EnrichmentService {
     /// Writes changed cache entries to disk. Errors are logged; a lost
     /// cache only costs extra lookups.
     pub fn persist(&self) {
+        self.persist_with(write_atomic);
+    }
+
+    fn persist_with(&self, write: impl FnOnce(&Path, &[u8]) -> std::io::Result<()>) {
         let Some(path) = &self.cache_path else {
             return;
         };
-        // Serialise under the lock; write after it is released so lookups
-        // are not blocked by disk I/O.
+        let _writer = self.persist_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // Serialise under the cache lock; write after it is released so
+        // lookups are not blocked by disk I/O.
         let snapshot = {
             let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             cache.snapshot_if_dirty(now_ms(), self.ttl_ms)
@@ -527,7 +536,7 @@ impl EnrichmentService {
                 return;
             }
         };
-        if let Err(err) = write_atomic(path, &bytes) {
+        if let Err(err) = write(path, &bytes) {
             log::warn!("Failed to write enrichment cache {}: {err}", path.display());
             self.cache
                 .lock()
@@ -1533,6 +1542,61 @@ mod tests {
             .is_some());
         drop(cache);
         std::fs::remove_file(&blocker).unwrap();
+    }
+
+    #[test]
+    fn concurrent_persists_never_write_an_older_snapshot_last() {
+        use std::sync::mpsc;
+
+        let dir = std::env::temp_dir().join(format!("vistracer-persist-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("enrichment-cache.json");
+        let service = EnrichmentService::new(EnrichmentConfig {
+            client: reqwest::Client::new(),
+            endpoints: ProviderEndpoints::default(),
+            retry: RetryPolicy::default(),
+            breaker: BreakerPolicy::default(),
+            provider_budget: Duration::from_secs(1),
+            ttl: Duration::from_secs(3600),
+            cache_path: Some(path.clone()),
+        });
+        let record = |asn| CymruRecord {
+            asn: Some(asn),
+            prefix: None,
+            country: None,
+            registry: None,
+            as_name: None,
+        };
+        service.cache_insert("1.1.1.1", Some(record(13335)));
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        std::thread::scope(|scope| {
+            // The first run's write is slow (busy disk) and holds an older
+            // snapshot while the second run finishes.
+            let service = &service;
+            scope.spawn(move || {
+                service.persist_with(move |path, bytes| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    write_atomic(path, bytes)
+                });
+            });
+            entered_rx.recv().unwrap();
+            service.cache_insert("8.8.8.8", Some(record(15169)));
+            let second = scope.spawn(move || service.persist());
+            std::thread::sleep(Duration::from_millis(100));
+            release_tx.send(()).unwrap();
+            second.join().unwrap();
+        });
+
+        let loaded = EnrichmentCache::load(&path, now_ms(), service.ttl_ms);
+        assert_eq!(
+            loaded.get::<CymruRecord>("8.8.8.8", now_ms(), service.ttl_ms),
+            Some(Some(record(15169))),
+            "the newer snapshot must be the one on disk"
+        );
+        assert!(!path.with_extension("json.tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[tokio::test]

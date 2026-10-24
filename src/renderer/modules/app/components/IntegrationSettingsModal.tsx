@@ -27,7 +27,6 @@ export interface IntegrationSettingsFormState {
   peeringDbApiKey: string;
 }
 
-
 const defaultFormState: IntegrationSettingsFormState = {
   teamCymruEnabled: true,
   rdapEnabled: true,
