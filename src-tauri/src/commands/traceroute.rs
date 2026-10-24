@@ -37,6 +37,9 @@ const PROGRESS_EVENT: &str = "vistracer:traceroute:progress";
 const LOOKUP_CONCURRENCY: usize = 8;
 const STDERR_LIMIT: u64 = 16 * 1024;
 const ELEVATED_POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// How often the loop checks for a cancel after the process has exited and
+/// only lookups are left.
+const CANCEL_CHECK_INTERVAL: Duration = Duration::from_millis(200);
 const ELEVATED_EXIT_PREFIX: &str = "__VT_EXIT_";
 
 pub struct TracerouteDeps {
@@ -157,11 +160,24 @@ async fn tail_elevated_output(
     runs: ActiveRuns,
     tx: mpsc::Sender<ReaderEvent>,
 ) {
-    let mut file = match tokio::fs::File::open(&path).await {
-        Ok(file) => file,
-        Err(e) => {
-            log::error!("Failed to open elevated traceroute output: {e}");
-            return;
+    let osascript_exited = |runs: &ActiveRuns| match lock_runs(runs).get_mut(&run_id) {
+        None => true,
+        Some(child) => !matches!(child.try_wait(), Ok(None)),
+    };
+    // The root shell creates the file after the password prompt.
+    let mut file = loop {
+        match tokio::fs::File::open(&path).await {
+            Ok(file) => break file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if osascript_exited(&runs) {
+                    return;
+                }
+                tokio::time::sleep(ELEVATED_POLL_INTERVAL).await;
+            }
+            Err(e) => {
+                log::error!("Failed to open elevated traceroute output: {e}");
+                return;
+            }
         }
     };
     let mut pending = Vec::new();
@@ -186,11 +202,7 @@ async fn tail_elevated_output(
             continue;
         }
 
-        let exited = match lock_runs(&runs).get_mut(&run_id) {
-            None => true,
-            Some(child) => !matches!(child.try_wait(), Ok(None)),
-        };
-        if exited {
+        if osascript_exited(&runs) {
             let mut rest = Vec::new();
             let _ = file.read_to_end(&mut rest).await;
             pending.extend_from_slice(&rest);
@@ -216,6 +228,20 @@ fn shell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', "'\\''"))
 }
 
+/// Shell script that runs as root. `set -C` makes the redirection fail if
+/// the path already exists, and one redirection covers the output and the
+/// exit sentinel. Together they keep a symlink planted in the user's temp
+/// folder from making root overwrite another file.
+fn elevated_script(plan: &CommandPlan, output_path: &std::path::Path) -> String {
+    let command_line = std::iter::once(plan.program.to_string_lossy().to_string())
+        .chain(plan.args.iter().cloned())
+        .map(|arg| shell_quote(&arg))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let quoted_path = shell_quote(&output_path.to_string_lossy());
+    format!("set -C; {{ {command_line} 2>&1; echo {ELEVATED_EXIT_PREFIX}$?__; }} > {quoted_path}")
+}
+
 /// Spawns the traceroute process and a task that forwards its output.
 fn spawn_attempt(
     plan: &CommandPlan,
@@ -228,17 +254,7 @@ fn spawn_attempt(
         // macOS only: TCP probes need root, so the command runs through
         // osascript's administrator prompt and writes to a temp file.
         let output_path = std::env::temp_dir().join(format!("vistracer-{run_id}.out"));
-        std::fs::File::create(&output_path)
-            .map_err(|e| format!("Failed to create temp file: {e}"))?;
-        let command_line = std::iter::once(plan.program.to_string_lossy().to_string())
-            .chain(plan.args.iter().cloned())
-            .map(|arg| shell_quote(&arg))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let quoted_path = shell_quote(&output_path.to_string_lossy());
-        let script = format!(
-            "{command_line} > {quoted_path} 2>&1; echo {ELEVATED_EXIT_PREFIX}$?__ >> {quoted_path}"
-        );
+        let script = elevated_script(plan, &output_path);
         let mut child = Command::new("osascript")
             .arg("-e")
             .arg(format!(
@@ -273,11 +289,20 @@ fn spawn_attempt(
         });
     }
 
-    let mut child = Command::new(&plan.program)
+    let mut command = Command::new(&plan.program);
+    command
         .args(&plan.args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        // The release build is a GUI-subsystem app; without this flag every
+        // tracert run opens a console window, and closing it ends the trace.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
         .spawn()
         .map_err(|e| format!("Failed to start {}: {e}", plan.program.display()))?;
     let stdout = child
@@ -336,6 +361,7 @@ async fn execute_attempt<L: HopLookup>(
     let mut lines_open = true;
     let mut hop_lines = 0;
     let mut elevated_exit: Option<i32> = None;
+    let mut cancel_check = tokio::time::interval(CANCEL_CHECK_INTERVAL);
 
     loop {
         tokio::select! {
@@ -378,6 +404,13 @@ async fn execute_attempt<L: HopLookup>(
                 }
                 for hop in state.take_changed() {
                     emit(hop_event(run_id, hop));
+                }
+            },
+            // After the process has exited, a cancel only removes the run
+            // from `runs`; abort the remaining lookups instead of waiting.
+            _ = cancel_check.tick(), if !lines_open && !lookups.is_empty() => {
+                if !lock_runs(runs).contains_key(run_id) {
+                    lookups.abort_all();
                 }
             },
             else => break,
@@ -623,6 +656,28 @@ mod tests {
     }
 
     #[test]
+    fn elevated_script_creates_output_exclusively_with_one_redirect() {
+        let plan = CommandPlan {
+            program: PathBuf::from("/usr/sbin/traceroute"),
+            args: vec!["-P".into(), "tcp".into(), "example.com".into()],
+            protocol: TracerouteProtocol::Tcp,
+            probes_per_hop: 3,
+            needs_elevation: true,
+            notices: vec![],
+        };
+        let script = elevated_script(&plan, std::path::Path::new("/tmp/vt it's.out"));
+        assert_eq!(
+            script,
+            "set -C; { '/usr/sbin/traceroute' '-P' 'tcp' 'example.com' 2>&1; echo __VT_EXIT_$?__; } > '/tmp/vt it'\\''s.out'"
+        );
+        assert_eq!(
+            script.matches('>').count(),
+            2,
+            "one 2>&1 and one file redirect"
+        );
+    }
+
+    #[test]
     fn shell_quote_escapes_single_quotes() {
         assert_eq!(shell_quote("a'b"), "'a'\\''b'");
     }
@@ -832,6 +887,102 @@ mod tests {
             assert_eq!(hops[0].host_name, None);
             assert!(runs.lock().unwrap().is_empty());
             std::fs::remove_dir_all(dir).unwrap();
+        }
+
+        #[tokio::test]
+        async fn cancel_after_exit_aborts_pending_lookups() {
+            // The process prints one hop and exits at once; only the slow
+            // lookup is left when the user cancels.
+            let (dir, plan) = fake_traceroute("echo ' 1  192.0.2.1  1.0 ms'");
+            let lookup = FakeLookup::new("192.0.2.1", Duration::from_secs(30));
+            let runs = create_active_runs();
+            let mut state = RunState::new(1);
+            let start = Instant::now();
+            let (_events, emit) = recorder(start);
+
+            let cancel_runs = runs.clone();
+            tokio::spawn(async move {
+                // Wait until the process has exited and only the lookup runs.
+                loop {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    let exited = cancel_runs
+                        .lock()
+                        .unwrap()
+                        .get_mut("run-tail")
+                        .is_some_and(|child| matches!(child.try_wait(), Ok(Some(_))));
+                    if exited {
+                        break;
+                    }
+                }
+                cancel_traceroute("run-tail", &cancel_runs);
+            });
+            let outcome = execute_attempt(&plan, "run-tail", &emit, &runs, &lookup, &mut state)
+                .await
+                .unwrap();
+
+            assert!(outcome.cancelled);
+            assert!(
+                start.elapsed() < Duration::from_secs(5),
+                "took {:?}",
+                start.elapsed()
+            );
+            assert_eq!(state.hops()[0].lookup_state, LookupState::Complete);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+
+        #[tokio::test]
+        async fn elevated_reader_waits_for_root_to_create_the_file() {
+            let dir = std::env::temp_dir().join(format!("vistracer-tail-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("out");
+            let runs = create_active_runs();
+            let stand_in = Command::new("sleep")
+                .arg("5")
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            runs.lock().unwrap().insert("run-elevated".into(), stand_in);
+
+            let (tx, mut rx) = mpsc::channel(8);
+            let reader = tokio::spawn(tail_elevated_output(
+                path.clone(),
+                "run-elevated".into(),
+                runs.clone(),
+                tx,
+            ));
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            std::fs::write(&path, " 1  192.0.2.1  1.0 ms\n__VT_EXIT_0__\n").unwrap();
+
+            match rx.recv().await {
+                Some(ReaderEvent::Line(line)) => assert_eq!(line, " 1  192.0.2.1  1.0 ms"),
+                _ => panic!("expected the hop line"),
+            }
+            assert!(matches!(
+                rx.recv().await,
+                Some(ReaderEvent::ElevatedExit(0))
+            ));
+            reader.await.unwrap();
+            cancel_traceroute("run-elevated", &runs);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+
+        #[tokio::test]
+        async fn elevated_reader_stops_when_prompt_is_cancelled() {
+            let path =
+                std::env::temp_dir().join(format!("vistracer-missing-{}", uuid::Uuid::new_v4()));
+            let runs = create_active_runs();
+            // osascript exits without running the command (prompt cancelled).
+            let stand_in = Command::new("sh").arg("-c").arg("exit 1").spawn().unwrap();
+            runs.lock().unwrap().insert("run-denied".into(), stand_in);
+
+            let (tx, mut rx) = mpsc::channel(8);
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                tail_elevated_output(path, "run-denied".into(), runs, tx),
+            )
+            .await
+            .expect("reader must stop once osascript has exited");
+            assert!(rx.recv().await.is_none());
         }
 
         #[tokio::test]

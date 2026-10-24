@@ -384,7 +384,7 @@ fn plan_linux(
 
 const PERMISSION_ERROR_MARKERS: &[&str] = &[
     "operation not permitted",
-    "not enough privileges",
+    "enough privileges",
     "permission denied",
     "got root",
     "must be root",
@@ -607,6 +607,12 @@ mod tests {
         assert_eq!(fallback.protocol, TracerouteProtocol::Udp);
         assert!(!fallback.args.contains(&"-I".to_string()));
         assert!(notice.contains("setcap cap_net_raw+ep"), "{notice}");
+
+        // traceroute 2.1.x (Debian/Ubuntu) wording for -I/-T without privileges.
+        assert!(is_permission_error(
+            "You do not have enough privileges to use this traceroute method."
+        ));
+        assert!(is_permission_error("socket: Operation not permitted"));
 
         assert!(linux_permission_fallback(
             &plan,

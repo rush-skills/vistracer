@@ -112,9 +112,33 @@ fn parse_rtt(token: &str) -> Option<(f64, bool)> {
     Some((value, caps.get(3).is_some()))
 }
 
+/// Returns the index of the responder for `ip`, adding it if it is new.
+/// Linux traceroute prints an address again when a later probe of the same
+/// hop returns to it (` 5  A 1 ms  B 2 ms  A 3 ms`); such repeats belong to
+/// the first entry.
+fn responder_index(
+    responders: &mut Vec<ParsedResponder>,
+    ip: String,
+    host_name: Option<String>,
+) -> usize {
+    if let Some(index) = responders.iter().position(|r| r.ip == ip) {
+        if responders[index].host_name.is_none() {
+            responders[index].host_name = host_name;
+        }
+        return index;
+    }
+    responders.push(ParsedResponder {
+        ip,
+        host_name,
+        rtts: Vec::new(),
+    });
+    responders.len() - 1
+}
+
 fn parse_responders(body: &str) -> Vec<ParsedResponder> {
     let tokens: Vec<&str> = body.split_whitespace().collect();
     let mut responders: Vec<ParsedResponder> = Vec::new();
+    let mut current: Option<usize> = None;
     let mut leading_rtts: Vec<f64> = Vec::new();
     let mut pending_host: Option<&str> = None;
     let next_is_wrapped_ip = |i: usize| {
@@ -130,8 +154,8 @@ fn parse_responders(body: &str) -> Vec<ParsedResponder> {
         if let Some((value, has_unit)) = parse_rtt(token) {
             let unit_follows = tokens.get(i + 1) == Some(&"ms");
             if has_unit || unit_follows {
-                match responders.last_mut() {
-                    Some(last) => last.rtts.push(value),
+                match current {
+                    Some(index) => responders[index].rtts.push(value),
                     None => leading_rtts.push(value),
                 }
                 i += if unit_follows { 2 } else { 1 };
@@ -144,19 +168,11 @@ fn parse_responders(body: &str) -> Vec<ParsedResponder> {
                 .take()
                 .filter(|host| *host != ip)
                 .map(str::to_string);
-            responders.push(ParsedResponder {
-                ip,
-                host_name,
-                rtts: Vec::new(),
-            });
+            current = Some(responder_index(&mut responders, ip, host_name));
         } else if next_is_wrapped_ip(i) {
             pending_host = Some(token);
         } else if let Some(ip) = parse_ip(token) {
-            responders.push(ParsedResponder {
-                ip,
-                host_name: None,
-                rtts: Vec::new(),
-            });
+            current = Some(responder_index(&mut responders, ip, None));
         }
         i += 1;
     }
@@ -276,6 +292,18 @@ mod tests {
             Some("edge.example")
         );
         assert_eq!(parsed.raw_lines.len(), 2);
+    }
+
+    #[test]
+    fn repeated_address_on_one_line_is_one_responder() {
+        let parsed = hop(" 5  198.51.100.1  1.0 ms  198.51.100.2  2.0 ms  198.51.100.1  3.0 ms");
+        assert_eq!(ips(&parsed), ["198.51.100.1", "198.51.100.2"]);
+        assert_eq!(parsed.responders[0].rtts, [1.0, 3.0]);
+        assert_eq!(parsed.responders[1].rtts, [2.0]);
+
+        let named = hop(" 6  a.example (198.51.100.1)  1 ms b.example (198.51.100.2)  2 ms a.example (198.51.100.1)  3 ms");
+        assert_eq!(ips(&named), ["198.51.100.1", "198.51.100.2"]);
+        assert_eq!(named.responders[0].rtts, [1.0, 3.0]);
     }
 
     #[test]
