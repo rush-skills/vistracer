@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
 jobs:
   ci:
     name: CI checks
@@ -22,6 +25,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -60,23 +65,108 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+  preflight:
+    name: Check signing setup and version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check updater public key
+        run: |
+          pubkey=$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey")
+          case "$pubkey" in
+            ""|*PLACEHOLDER*)
+              echo "::error file=src-tauri/tauri.conf.json::plugins.updater.pubkey is still the placeholder. Put the public key from 'npx tauri signer generate' there before you tag a release (see docs/releasing.md)."
+              exit 1
+              ;;
+          esac
+
+      - name: Check signing secrets
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::The repository secret TAURI_SIGNING_PRIVATE_KEY is not set. Releases must be signed for the updater (see docs/releasing.md)."
+            exit 1
+          fi
+
+      - name: Check tag matches app version
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in src-tauri/tauri.conf.json. latest.json would advertise the wrong version."
+            exit 1
+          fi
+
+  create-release:
+    name: Create draft release
+    needs: [ci, preflight]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+
+    steps:
+      - name: Create or reuse the draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Reuse a draft from an earlier run of this workflow for the same tag.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id" | head -n 1)
+          if [ -z "$id" ]; then
+            notes=$(cat <<'EOF'
+          ## macOS
+          The DMG is a universal app for Apple Silicon and Intel Macs. The app is not notarized with Apple. On first launch:
+          1. **Right-click** (or Control+click) VisTracer.app and click **Open**.
+          2. In the dialog, click **Open** again.
+
+          If you still see a warning, run `xattr -cr VisTracer.app` in Terminal first.
+          EOF
+            )
+            id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$GITHUB_REF_NAME" \
+              -f name="VisTracer $GITHUB_REF_NAME" \
+              -f body="$notes" \
+              -F draft=true \
+              -F generate_release_notes=true \
+              --jq .id)
+          fi
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.name }}
-    needs: ci
+    needs: create-release
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          - name: macOS (universal)
             os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
 
           - name: Windows
             os: windows-latest
+            rust-targets: ""
+            args: ""
 
           - name: Linux
             os: ubuntu-latest
+            rust-targets: ""
+            args: ""
 
     steps:
       - name: Checkout
@@ -90,6 +180,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -98,8 +190,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-release-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-release-cargo-
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -110,59 +202,62 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Build Tauri app
-        run: npx tauri build
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+      # tauri.updater.conf.json turns on createUpdaterArtifacts, so this
+      # build signs the bundles and the action uploads .sig files and
+      # merges this platform into latest.json on the draft release.
+      - name: Build, sign and upload
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          name: release-${{ matrix.name }}
-          path: |
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
-          if-no-files-found: warn
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseDraft: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          retryAttempts: 1
+          args: ${{ matrix.args }} --config src-tauri/tauri.updater.conf.json
 
-  release:
-    name: Create GitHub Release
-    needs: build
+  publish:
+    name: Verify latest.json and publish
+    needs: [create-release, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: release-*
-          merge-multiple: true
-          path: artifacts/
+      # Build jobs merge their platform into latest.json one at a time; two
+      # jobs that finish together can drop an entry. Publishing only after
+      # this check keeps a broken latest.json from reaching users.
+      - name: Check latest.json has a signed entry for every platform
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          asset_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            --jq '.[] | select(.name == "latest.json") | .id')
+          if [ -z "$asset_id" ]; then
+            echo "::error::latest.json was not uploaded to the draft release. Check the signing secrets and the build logs."
+            exit 1
+          fi
+          gh api -H "Accept: application/octet-stream" \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > latest.json
+          jq . latest.json
+          for platform in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
+            if ! jq -e --arg p "$platform" '(.platforms[$p].signature // "") | length > 0' latest.json > /dev/null; then
+              echo "::error::latest.json has no signed entry for $platform. Re-run the failed build job, then this job."
+              exit 1
+            fi
+          done
 
-      - name: List release files
-        run: find artifacts/ -type f | head -20
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          body: |
-            ## macOS note
-            The app is not notarized with Apple. On first launch:
-            1. **Right-click** (or Control+click) VisTracer.app → click **Open**
-            2. In the dialog, click **Open** again
-
-            If you still see a warning, run this in Terminal first:
-            ```
-            xattr -cr VisTracer.app
-            ```
-          files: |
-            artifacts/**/*.dmg
-            artifacts/**/*.exe
-            artifacts/**/*.msi
-            artifacts/**/*.AppImage
-            artifacts/**/*.deb
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false \
+            -f make_latest=true \
+            --jq .html_url
