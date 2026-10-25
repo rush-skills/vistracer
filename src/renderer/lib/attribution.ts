@@ -1,4 +1,5 @@
 import { SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
+import type { LayerId, LayerVisibility } from "./layers";
 
 /**
  * Credits for the code and data the app shows. Keep in step with
@@ -23,7 +24,7 @@ export interface Credit {
    */
   servesOnlineTiles?: true;
   /** Listed only while this layer is on (data the user opted in to). */
-  layer?: string;
+  layer?: LayerId;
 }
 
 /**
@@ -31,7 +32,7 @@ export interface Credit {
  * data whose layer is on (CC BY asks for attribution in the medium, and an
  * export leaves the app). Empty while no such layer is on.
  */
-export function exportCredits(visibility: Readonly<Record<string, boolean>>): string[] {
+export function exportCredits(visibility: LayerVisibility): string[] {
   return CREDITS.flatMap((credit) =>
     credit.layer && credit.notice && visibility[credit.layer] ? [credit.notice] : []
   );

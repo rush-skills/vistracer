@@ -1,11 +1,11 @@
 import React, { useMemo } from "react";
 import { FiX } from "react-icons/fi";
 import {
-  LAYERS,
   LAYER_GROUPS,
+  LAYER_LIST,
+  layerById,
   layerVisibility,
-  type LayerDefinition,
-  type LayerId
+  type LayerDefinition
 } from "@renderer/lib/layers";
 import { usePanel } from "@renderer/hooks/usePanel";
 import { useInfraStore, type InfraSources } from "@renderer/state/infraStore";
@@ -72,58 +72,52 @@ export const LayerPanel: React.FC = () => {
       {LAYER_GROUPS.map((group) => (
         <fieldset key={group.id} className="layer-panel__group">
           <legend>{group.label}</legend>
-          {(LAYERS as readonly LayerDefinition[])
-            .filter((layer) => layer.group === group.id)
-            .map((layer) => {
-              const id = layer.id as LayerId;
-              const parentOff = layer.parent != null && !visibility[layer.parent as LayerId];
-              const status = visibility[id] && !parentOff ? sourceStatus(layer, sources) : undefined;
-              return (
-                <div
-                  key={layer.id}
-                  className={`layer-panel__item${layer.parent ? " layer-panel__item--child" : ""}`}
-                >
-                  <span className="layer-panel__text">
-                    <span id={`layer-${layer.id}-label`} className="layer-panel__label">
-                      {layer.swatch && (
-                        <span
-                          className="layer-panel__swatch"
-                          aria-hidden
-                          style={{ background: layer.swatch.fill, borderColor: layer.swatch.outline }}
-                        />
-                      )}
-                      {layer.label}
-                    </span>
-                    <small id={`layer-${layer.id}-description`}>
-                      {layer.description}
-                      {parentOff && ` Turn on ${layerLabel(layer.parent)} to see it.`}
-                    </small>
-                    {status && (
-                      <small className="layer-panel__status" role="status">
-                        {status}
-                      </small>
+          {LAYER_LIST.filter((layer) => layer.group === group.id).map((layer) => {
+            const { id, parent } = layer;
+            const parentOff = parent != null && !visibility[parent];
+            const status = visibility[id] && !parentOff ? sourceStatus(layer, sources) : undefined;
+            return (
+              <div
+                key={layer.id}
+                className={`layer-panel__item${layer.parent ? " layer-panel__item--child" : ""}`}
+              >
+                <span className="layer-panel__text">
+                  <span id={`layer-${layer.id}-label`} className="layer-panel__label">
+                    {layer.swatch && (
+                      <span
+                        className="layer-panel__swatch"
+                        aria-hidden
+                        style={{ background: layer.swatch.fill, borderColor: layer.swatch.outline }}
+                      />
                     )}
+                    {layer.label}
                   </span>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    className="switch"
-                    checked={visibility[id]}
-                    aria-labelledby={`layer-${layer.id}-label`}
-                    aria-describedby={`layer-${layer.id}-description`}
-                    onChange={(event) =>
-                      useUiStore.getState().setLayerVisible(id, event.target.checked)
-                    }
-                  />
-                </div>
-              );
-            })}
+                  <small id={`layer-${layer.id}-description`}>
+                    {layer.description}
+                    {parentOff && ` Turn on ${layerById(parent)?.label} to see it.`}
+                  </small>
+                  {status && (
+                    <small className="layer-panel__status" role="status">
+                      {status}
+                    </small>
+                  )}
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  className="switch"
+                  checked={visibility[id]}
+                  aria-labelledby={`layer-${layer.id}-label`}
+                  aria-describedby={`layer-${layer.id}-description`}
+                  onChange={(event) =>
+                    useUiStore.getState().setLayerVisible(id, event.target.checked)
+                  }
+                />
+              </div>
+            );
+          })}
         </fieldset>
       ))}
     </section>
   );
 };
-
-function layerLabel(id: string | undefined): string {
-  return (LAYERS as readonly LayerDefinition[]).find((layer) => layer.id === id)?.label ?? "";
-}

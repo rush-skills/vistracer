@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FiInfo, FiX } from "react-icons/fi";
 import { ONLINE_IMAGERY_LAYER_ID, SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
 import { CREDITS, type CreditGroup } from "@renderer/lib/attribution";
-import { layerVisibility, type LayerId } from "@renderer/lib/layers";
+import { layerVisibility } from "@renderer/lib/layers";
 import { useUiStore } from "@renderer/state/uiStore";
 import "./Attribution.css";
 
@@ -18,9 +18,7 @@ export const Attribution: React.FC = () => {
   const savedLayers = useUiStore((state) => state.layers);
   const visibility = useMemo(() => layerVisibility(savedLayers), [savedLayers]);
   const online = visibility[ONLINE_IMAGERY_LAYER_ID];
-  const credits = CREDITS.filter(
-    (credit) => credit.layer == null || visibility[credit.layer as LayerId]
-  );
+  const credits = CREDITS.filter((credit) => credit.layer == null || visibility[credit.layer]);
   // CC BY asks for attribution in the medium: name TeleGeography on the chip too.
   const chip = visibility[SUBMARINE_CABLES_LAYER_ID]
     ? "NASA, GIBS, CesiumJS, TeleGeography"

@@ -56,8 +56,9 @@ export interface LayerConsent {
   readonly accept: string;
 }
 
-export interface LayerDefinition {
-  readonly id: string;
+/** `Id`: the registry's ids, so a link to another entry is checked (see `defineLayers`). */
+export interface LayerDefinition<Id extends string = string> {
+  readonly id: Id;
   readonly label: string;
   readonly description: string;
   readonly group: LayerGroupId;
@@ -66,7 +67,7 @@ export interface LayerDefinition {
   /** In the command bar ("Show …"); default: the label in lower case. */
   readonly commandName?: string;
   /** A switch under another layer: it only has an effect while that one is on. */
-  readonly parent?: string;
+  readonly parent?: Id;
   /** Data the layer loads (lib/infra/sources.ts) when it is first shown. */
   readonly data?: InfraSourceId;
   readonly consent?: LayerConsent;
@@ -87,14 +88,24 @@ export const SITE_COLORS = {
 export const SUBMARINE_CABLE_CONSENT: LayerConsent = {
   title: "Show submarine cables?",
   paragraphs: [
-    "The cable routes come from TeleGeography's Submarine Cable Map. TeleGeography publishes it under the Creative Commons licence CC BY-NC-SA 3.0: for non-commercial use only, with attribution to TeleGeography, and adaptations under the same licence. The credits list TeleGeography while the layer is on.",
+    "The cable routes come from TeleGeography's Submarine Cable Map. TeleGeography published the map under the Creative Commons licence CC BY-NC-SA 3.0, and VisTracer applies those terms: non-commercial use only, with attribution to TeleGeography, and adaptations under the same licence. TeleGeography's current terms can be different. The credits list TeleGeography while the layer is on.",
     "Turning the layer on downloads the cable map (about 0.75 MB) from TeleGeography's server, www.submarinecablemap.com. The request shows TeleGeography your IP address and nothing about your traces. VisTracer keeps a copy in its cache folder and asks again at most once a week, only while the layer is on.",
     "While the layer is off, VisTracer sends nothing to TeleGeography."
   ],
   accept: "Show and download"
 };
 
-export const LAYERS = [
+/**
+ * Keeps the entries' literal types, and makes a `parent` that is not the id
+ * of an entry a type error.
+ */
+function defineLayers<const L extends readonly LayerDefinition<Extract<L[number]["id"], string>>[]>(
+  layers: L
+): L {
+  return layers;
+}
+
+export const LAYERS = defineLayers([
   {
     id: "arcs",
     label: "Route arcs",
@@ -248,14 +259,16 @@ export const LAYERS = [
     defaultVisible: true,
     target: { kind: "imagery", option: "online" }
   }
-] as const satisfies readonly LayerDefinition[];
+]);
 
 export type LayerId = (typeof LAYERS)[number]["id"];
 export type LayerVisibility = Record<LayerId, boolean>;
 
-/** The registry entry of `id`, typed as the general definition. */
-export function layerById(id: string): LayerDefinition | undefined {
-  return (LAYERS as readonly LayerDefinition[]).find((layer) => layer.id === id);
+/** The registry with each entry typed as the general definition, ids as `LayerId`. */
+export const LAYER_LIST: readonly LayerDefinition<LayerId>[] = LAYERS;
+
+export function layerById(id: LayerId): LayerDefinition<LayerId> | undefined {
+  return LAYER_LIST.find((layer) => layer.id === id);
 }
 
 /** Saved switches over the registry defaults; unknown saved ids are ignored. */
@@ -267,15 +280,15 @@ export function layerVisibility(saved: Readonly<Record<string, boolean>>): Layer
 
 /** On, and (for a child switch) its parent on too. */
 export function layerActive(visibility: LayerVisibility, id: LayerId): boolean {
-  const parent = layerById(id)?.parent as LayerId | undefined;
+  const parent = layerById(id)?.parent;
   return visibility[id] && (parent == null || visibility[parent]);
 }
 
 /** The data sources that the shown layers need. */
 export function sourcesForLayers(visibility: LayerVisibility): Set<InfraSourceId> {
   const sources = new Set<InfraSourceId>();
-  for (const layer of LAYERS as readonly LayerDefinition[]) {
-    if (layer.data && layerActive(visibility, layer.id as LayerId)) {
+  for (const layer of LAYER_LIST) {
+    if (layer.data && layerActive(visibility, layer.id)) {
       sources.add(layer.data);
     }
   }
@@ -285,9 +298,9 @@ export function sourcesForLayers(visibility: LayerVisibility): Set<InfraSourceId
 /** Filter keys switched off for `items` (applied before clustering). */
 export function hiddenFilterKeys(visibility: LayerVisibility, items: FilterableItems): Set<string> {
   const hidden = new Set<string>();
-  for (const layer of LAYERS as readonly LayerDefinition[]) {
+  for (const layer of LAYER_LIST) {
     const { target } = layer;
-    if (target.kind === "filter" && target.items === items && !visibility[layer.id as LayerId]) {
+    if (target.kind === "filter" && target.items === items && !visibility[layer.id]) {
       hidden.add(target.key);
     }
   }

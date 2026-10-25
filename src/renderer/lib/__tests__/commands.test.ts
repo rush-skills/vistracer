@@ -96,9 +96,28 @@ describe("buildCommands", () => {
     aws.run();
     expect(ctx.actions.setLayerVisible).toHaveBeenNthCalledWith(1, "cloud-regions", true);
     expect(ctx.actions.setLayerVisible).toHaveBeenNthCalledWith(2, "cloud-aws", true);
-    expect(byId(ctx, "layer.cloud-cloudflare").title).toBe("Hide Cloudflare data centres");
     expect(byId(ctx, "layer.submarine-cables").title).toBe("Show submarine cables");
     expect(byId(ctx, "layer.asn-colors").title).toBe("Show network colours");
+  });
+
+  it("offers to show a child switch whose parent is off, as the README example does", () => {
+    // The default state: Cloud regions off, every provider switch on.
+    const ctx = context({ layers: layerVisibility({}) });
+    const aws = byId(ctx, "layer.cloud-aws");
+    expect(aws.title).toBe("Show AWS regions");
+    expect(aws.detail).toBe("Also shows cloud regions");
+    expect(searchCommands(buildCommands(ctx), "show AWS regions")[0].id).toBe("layer.cloud-aws");
+    aws.run();
+    // The child is on already: only the parent changes, the child is not turned off.
+    expect(ctx.actions.setLayerVisible).toHaveBeenCalledTimes(1);
+    expect(ctx.actions.setLayerVisible).toHaveBeenCalledWith("cloud-regions", true);
+
+    const shown = context({ layers: layerVisibility({ "cloud-regions": true }) });
+    const hide = byId(shown, "layer.cloud-cloudflare");
+    expect(hide.title).toBe("Hide Cloudflare data centres");
+    expect(hide.detail).toBeUndefined();
+    hide.run();
+    expect(shown.actions.setLayerVisible).toHaveBeenCalledWith("cloud-cloudflare", false);
   });
 
   it("goes to a hop, found by its address, host name or network", () => {

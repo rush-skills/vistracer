@@ -6,6 +6,7 @@ import type { GlobeScene } from "@renderer/lib/globe";
 import {
   LAYERS,
   LAYER_GROUPS,
+  LAYER_LIST,
   hiddenFilterKeys,
   imageryForLayers,
   layerActive,
@@ -13,8 +14,7 @@ import {
   layerVisibility,
   sceneForLayers,
   sourcesForLayers,
-  styleForLayers,
-  type LayerDefinition
+  styleForLayers
 } from "@renderer/lib/layers";
 import { parseCloudRegions } from "@renderer/lib/infra/sources";
 
@@ -64,8 +64,7 @@ describe("layer registry", () => {
   });
 
   it("adds the infrastructure layers off by default, each with its data source", () => {
-    const layers = LAYERS as readonly LayerDefinition[];
-    const infra = layers.filter((layer) => layer.group === "infrastructure" || layer.group === "cloud");
+    const infra = LAYER_LIST.filter((layer) => layer.group === "infrastructure" || layer.group === "cloud");
     expect(infra.filter((layer) => !layer.parent).every((layer) => !layer.defaultVisible)).toBe(true);
     expect(layerById("exchanges")?.data).toBe("peeringdb-sites");
     expect(layerById("data-centres")?.data).toBe("peeringdb-sites");
@@ -86,7 +85,7 @@ describe("layer registry", () => {
     expect(text).toContain("attribution");
     expect(text).toContain("www.submarinecablemap.com");
     // No other layer asks for consent.
-    expect((LAYERS as readonly LayerDefinition[]).filter((layer) => layer.consent)).toHaveLength(1);
+    expect(LAYER_LIST.filter((layer) => layer.consent)).toHaveLength(1);
   });
 
   it("has one provider switch under cloud regions per provider of the snapshot", () => {
@@ -95,9 +94,7 @@ describe("layer registry", () => {
         fs.readFileSync(path.resolve(__dirname, "../../public/infra/cloud-regions.json"), "utf8")
       )
     );
-    const filters = (LAYERS as readonly LayerDefinition[]).filter(
-      (layer) => layer.target.kind === "filter"
-    );
+    const filters = LAYER_LIST.filter((layer) => layer.target.kind === "filter");
     expect(filters.every((layer) => layer.parent === "cloud-regions" && layer.defaultVisible)).toBe(true);
     expect(filters.map((layer) => (layer.target.kind === "filter" ? layer.target.key : "")).sort()).toEqual(
       snapshot.providers.map((provider) => provider.id).sort()
