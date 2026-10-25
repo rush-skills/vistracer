@@ -29,7 +29,11 @@ export function parseSatelliteKey(
 ): { group: SatelliteGroupId; noradId: number } | null {
   const [kind, group, id] = key.split("|");
   const noradId = Number(id);
-  return kind === "sat" && group in SATELLITE_GROUPS && Number.isInteger(noradId)
+  // An own key only ("constructor" is not a group). Not `Object.hasOwn`:
+  // the build targets Safari 14, which does not have it.
+  return kind === "sat" &&
+    Object.prototype.hasOwnProperty.call(SATELLITE_GROUPS, group) &&
+    Number.isInteger(noradId)
     ? { group: group as SatelliteGroupId, noradId }
     : null;
 }

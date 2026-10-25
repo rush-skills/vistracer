@@ -244,6 +244,7 @@ describe("satelliteCardContent", () => {
     expect(satelliteCardContent({ keys: ["sat|starlink|1"] }, { starlink }, new Map(), now)).toBeNull();
     expect(satelliteCardContent({ keys: ["sat|gps|99902"] }, { starlink }, new Map(), now)).toBeNull();
     expect(parseSatelliteKey("sat|moon|1")).toBeNull();
+    expect(parseSatelliteKey("sat|constructor|1")).toBeNull();
     expect(parseSatelliteKey("facilities|fac:1")).toBeNull();
     expect(parseSatelliteKey("sat|geo|100001")).toEqual({ group: "geo", noradId: 100001 });
   });

@@ -277,7 +277,6 @@ export function buildSiteClusters(
 /** Pick ids of site markers: "<layer>|<site key>". */
 export const siteSpecKey = (layer: SiteLayer, key: string) => `${layer}|${key}`;
 
-
 function siteColors(site: SiteCluster): { fill: string; outline: string } {
   if (site.layer === "exchanges") {
     return SITE_COLORS.exchange;

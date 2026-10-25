@@ -77,7 +77,7 @@ describe("createPropagator (SGP4, satellite.js)", () => {
   });
 
   it("gives NaN for a satellite that SGP4 cannot place", () => {
-    // Mean motion so low that the orbit decays far below the ground in a year.
+    // Mean motion so high (a very low orbit) that it decays far below the ground in a year.
     const decayed = { ...starlinkRow(99904, 0), meanMotion: 16.4, bstar: 0.9 };
     const out = new Float64Array(3);
     createPropagator([elements("starlink", decayed)]).positions(

@@ -1126,9 +1126,9 @@ the address in its firewall). `commands/satellites.rs` follows it:
 | Answer | HTTPS to `celestrak.org` only, no redirect elsewhere, 8 MB cap |
 
 When no new copy may or can be had, an older saved copy is shown with a
-note under the switch. The renderer turns the group on again after the
-12 hours: `staleAt` makes `ensure` load the source again, and the old
-satellites stay on the globe meanwhile.
+note under the switch. When the user turns the group on after the 12
+hours, the renderer loads it again: `staleAt` makes `ensure` load the
+source again, and the old satellites stay on the globe meanwhile.
 
 **Parsing at the edge.** Rust reads the CSV by its header names and drops
 a row with a missing or out-of-range value (eccentricity 0–1, mean motion
