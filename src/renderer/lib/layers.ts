@@ -99,14 +99,6 @@ export const LAYERS = [
 export type LayerId = (typeof LAYERS)[number]["id"];
 export type LayerVisibility = Record<LayerId, boolean>;
 
-export const findLayer = (id: LayerId): LayerDefinition => {
-  const layer = LAYERS.find((candidate) => candidate.id === id);
-  if (!layer) {
-    throw new Error(`Unknown layer ${id}`);
-  }
-  return layer;
-};
-
 /** Saved switches over the registry defaults; unknown saved ids are ignored. */
 export function layerVisibility(saved: Readonly<Record<string, boolean>>): LayerVisibility {
   return Object.fromEntries(

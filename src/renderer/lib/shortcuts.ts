@@ -1,5 +1,5 @@
 /** macOS uses ⌘ for app shortcuts; Windows and Linux use Ctrl. */
-export function isMacPlatform(): boolean {
+function isMacPlatform(): boolean {
   return /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
 }
 

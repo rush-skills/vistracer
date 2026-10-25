@@ -2,7 +2,7 @@ import type { HopLocation, HopResolution, LocationEstimate, TracerouteRun } from
 
 /** Small hop and run builders for renderer tests. */
 
-export const NO_LOCATION: HopLocation = {
+const NO_LOCATION: HopLocation = {
   best: null,
   alternatives: [],
   ixp: null,

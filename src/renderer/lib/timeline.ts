@@ -87,7 +87,7 @@ export function formatMs(ms: number): string {
   return ms >= 10 ? `${Math.round(ms)}` : `${Math.round(ms * 10) / 10}`;
 }
 
-export function describeLocation(location: TimelineLocation): string {
+function describeLocation(location: TimelineLocation): string {
   switch (location.kind) {
     case "located":
       return `${location.label}, ${location.confidence} confidence`;
