@@ -958,10 +958,12 @@ flowchart LR
   `unknown` until parsed. A record with a wrong field is dropped and
   counted, and the loader logs the count; a wrong outer shape (or another
   snapshot layout) is an error shown under the switch.
-- **Lazy code.** The parsers, clustering, route matching and site cards
-  (`lib/infra/code.ts`) load with the first layer data (`infraStore.code`);
-  until then the hooks return empty results. With every layer off, the
-  start-up chunk does not carry them.
+- **Lazy code.** The parsers, clustering, route matching, site cards and
+  the satellite drawing (`lib/infra/code.ts`, the `code` chunk) load with
+  the first layer data (`infraStore.code`); until then the hooks return
+  empty results. The globe adapter imports none of it (its hover styles
+  are in `lib/globe.ts`), so with every layer off the page loads only the
+  start-up and globe chunks (globe check).
 - **Retry.** `useInfraLoading` asks for a layer's source when that layer is
   turned on. A source that failed, or had nothing yet (no exchange list),
   is loaded again then, also while another layer with the same source
@@ -1113,11 +1115,12 @@ the address in its firewall). `commands/satellites.rs` follows it:
 | --- | --- |
 | Groups | `starlink`, `oneweb`, `gps-ops`, `stations`, `geo` only (`SATELLITE_GROUPS`); never `active` |
 | Format | CSV (CelesTrak's recommended format; Starlink was 1.70 MB, 11,113 rows) |
-| Gate | Saved `preferences.ui`: layer `satellites` on, the group's switch on (or its default), consent `satellites` accepted; checked at each call |
+| Gate | Saved `preferences.ui`: layer `satellites` on, the group's switch on (or its default), consent `satellites` accepted; read when a call starts, again after it waited for another request, and right before its request goes out |
 | Reuse | A saved group for 12 hours (`SATELLITE_TTL_MS`) |
-| One request per group | At most once in 2 hours; the time is saved in `requests.json` before the request goes out, so a restart does not ask again |
+| One request per group | At most once in 2 hours; the time is saved in `requests.json` before the request goes out, so a restart does not ask again; when that file cannot be saved, no request goes out |
 | After an HTTP error or unusable data | No request to CelesTrak for 2 hours, for every group, also after a restart |
-| After a network error (no answer) | That group again after 15 minutes; it did not count as a download |
+| After a failure that may have reached CelesTrak (a timeout, a broken answer) | It counts as the group's download: the group waits 2 hours |
+| After a failed connection (no request sent, `FetchError.sent` false) | That group again after 15 minutes |
 | At a time | One request, for all groups |
 | Answer | HTTPS to `celestrak.org` only, no redirect elsewhere, 8 MB cap |
 
@@ -1153,8 +1156,11 @@ online tiles with the satellites moving.
   `'wasm-unsafe-eval'`.
 - **Points**: one `PointPrimitiveCollection` per group, so a group on or
   off adds or removes one collection, and a group whose data is the same
-  keeps its points and SGP4 records (`useSatelliteDrawing` keeps its result
-  while the shown groups' data and the highlight are the same). Small
+  keeps its points and SGP4 records (`planSatelliteGroups` decides;
+  `useSatelliteDrawing` keeps its result while the shown groups' data and
+  the highlight are the same, and the store keeps the data object when a
+  refresh returns the same download). The SGP4 records of Starlink's
+  11,113 satellites take about 17.5 MB and 18 ms to build (Node 24). Small
   points (Starlink 2 px) with a thin dark outline; the depth test hides
   satellites behind the Earth. No labels: the hover card names them.
 - **Limit**: at most 12,000 points per group (`MAX_SATELLITES_PER_GROUP`);
@@ -1162,7 +1168,8 @@ online tiles with the satellites moving.
   largest group, had 11,113 satellites on 2026-10-25.
 - **Moves**: `PeriodicTicker` (`lib/satellites/clock.ts`) computes new
   positions at most once a second while a group is drawn and the window is
-  visible (the same visibility as the governor: Page Visibility and the
+  visible; new data moves at once only when the last move is a second old,
+  else with the next move (the same visibility as the governor: Page Visibility and the
   Tauri minimized state). Each move asks the governor for one frame
   (`wakeForFrame`), and the loop sleeps right after it. With the layer off
   the ticker does not run at all.
@@ -1219,7 +1226,9 @@ UI preferences are validated too (`UiPreferences::validated`), see
   HTTPS to a fixed host list, follows redirects only within that list, and
   has a size cap: `gibs.earthdata.nasa.gov` (tiles, 2 MB),
   `www.submarinecablemap.com` (cable map, 8 MB) and `celestrak.org`
-  (satellite groups, 8 MB). The URLs are built in Rust from constants.
+  (satellite groups, 8 MB). The URLs are built in Rust from constants. A
+  failure says whether a request can have reached the host
+  (`FetchError.sent`), for the satellites' request limits.
   `devCsp` adds `'unsafe-inline'` and the Vite dev server for HMR. Additions
   for the globe:
   - `img-src` and `connect-src`: `vistiles:` and `http://vistiles.localhost`,
