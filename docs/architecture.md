@@ -523,10 +523,15 @@ node scripts/globe-check/ui-shots.mjs [output dir]
 ```
 
 Result of one run on 2026-10-25, after the phase 5 infrastructure layers
-(36 checks pass). The request counts of user zooms differ from run to run:
-the first user zoom made between 49 and 89 requests and the next user zoom
-between 103 and 240 in the runs of phases 4 and 5. Every count that must be
-0 was 0 in every run.
+(36 checks pass). The request counts of user zooms differ from run to run
+(for example, the first user zoom made 49 to 89 requests and the next one
+103 to 254 in the runs of phases 4 and 5); the checks only need more than 0.
+Every count that must be 0 was 0 in every run.
+
+Each idle window starts only after the "Detailed imagery is unavailable"
+notice is gone, up to 35 s after the last action (see below). So the check
+finds continuous idle work, but not a short animation that stops within
+that time after an action.
 
 - A 7680 x 2160 window at DPR 1 made 0 online tile requests in 12 s with no
   input. Control: with the gate starting open, the same step made 161.

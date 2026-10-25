@@ -25,7 +25,6 @@ const place = (city: string | null, country: string | null) =>
 const plural = (n: number, one: string, many: string) =>
   `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
-
 function linkText(link: SiteLink, what: string): string {
   return link.kind === "on-lan"
     ? `Hop ${link.hopIndex} is on its peering LAN.`

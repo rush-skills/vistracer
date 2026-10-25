@@ -55,9 +55,10 @@ pub const SUBMARINE_CABLES_LAYER: &str = "submarine-cables";
 const MAX_UI_ENTRIES: usize = 64;
 const MAX_UI_ID_LEN: usize = 40;
 
-/// Theme, globe layers and collapsed panels (`preferences.ui`). Layer and
-/// panel ids come from the renderer's registries. Ids that this version does
-/// not know are kept, so the choices of a newer version survive a downgrade.
+/// Theme, globe layers, collapsed panels and accepted layer notices
+/// (`preferences.ui`). Layer and panel ids come from the renderer's
+/// registries. Ids that this version does not know are kept, so the choices
+/// of a newer version survive a downgrade.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiPreferences {
