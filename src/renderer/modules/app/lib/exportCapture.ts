@@ -3,7 +3,7 @@ import { hopIndexToColor, hopPosition } from "@renderer/lib/globe";
 import { createGif } from "@renderer/lib/gifjs";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 
-type ExportFormat = "png" | "jpg" | "webp" | "webm" | "gif";
+export type ExportFormat = "png" | "jpg" | "webp" | "webm" | "gif";
 
 export interface ExportOptions {
   format: ExportFormat;

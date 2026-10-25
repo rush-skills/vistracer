@@ -1,64 +1,29 @@
 import React, { useState } from "react";
 import { useGeoDatabaseMeta } from "@renderer/hooks/useGeoDatabaseMeta";
 import { useTracerouteStore, selectCurrentRun } from "@renderer/state/tracerouteStore";
+import { useExportStore } from "@renderer/state/exportStore";
+import { useNoticeStore } from "@renderer/state/noticeStore";
 import { GeoWarningBanner } from "./GeoWarningBanner";
 import { GeoSettingsModal } from "./GeoSettingsModal";
 import { ExportMediaModal } from "./ExportMediaModal";
-import { runExport } from "../lib/exportCapture";
 import type { VisTracerWindow } from "@common/bridge";
 import "./FooterBar.css";
-
-type ExportState = "idle" | "working" | "success" | "error";
 
 export const FooterBar: React.FC = () => {
   const { data: geoMeta, refetch: refetchGeoMeta } = useGeoDatabaseMeta();
   const currentRun = useTracerouteStore(selectCurrentRun);
-  const [exportState, setExportState] = useState<ExportState>("idle");
-  const [message, setMessage] = useState<string | undefined>();
+  const exporting = useExportStore((state) => state.working);
+  const dialogOpen = useExportStore((state) => state.dialogOpen);
+  const { openDialog, closeDialog, start } = useExportStore.getState();
+  const notice = useNoticeStore((state) => state.notice);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [defaultFormat, setDefaultFormat] = useState<"png" | "jpg" | "webp" | "webm" | "gif">("png");
-
-  const beginExport = () => {
-    if (!currentRun || exportState === "working") {
-      return;
-    }
-    setDefaultFormat("png");
-    setIsExportModalOpen(true);
-  };
-
-  const handleExportConfirm = async (options: { format: "png" | "jpg" | "webp" | "webm" | "gif"; dwellSeconds: number }) => {
-    if (!currentRun) {
-      setIsExportModalOpen(false);
-      return;
-    }
-
-    setDefaultFormat(options.format);
-    setIsExportModalOpen(false);
-    setExportState("working");
-    setMessage(undefined);
-    try {
-      const { filename } = await runExport(options, currentRun);
-      setExportState("success");
-      setMessage(`Saved ${filename}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Export failed";
-      setExportState("error");
-      setMessage(message);
-    } finally {
-      setTimeout(() => {
-        setExportState("idle");
-        setMessage(undefined);
-      }, 3500);
-    }
-  };
 
   const handleUpdateGeoPaths = async (cityPath?: string, asnPath?: string) => {
     await (window as VisTracerWindow).visTracer.updateGeoDatabasePaths(cityPath, asnPath);
     await refetchGeoMeta();
   };
 
-  const exportDisabled = !currentRun || exportState === "working";
+  const exportDisabled = !currentRun || exporting;
   const updatedLabel = geoMeta?.updatedAt
     ? new Date(geoMeta.updatedAt).toLocaleDateString()
     : "unknown";
@@ -93,12 +58,19 @@ export const FooterBar: React.FC = () => {
             <button
               type="button"
               className="footer-bar__export"
-              onClick={beginExport}
+              onClick={openDialog}
               disabled={exportDisabled}
             >
-              {exportState === "working" ? "Exporting…" : "Download export"}
+              {exporting ? "Exporting…" : "Download export"}
             </button>
-            {message && <span className="footer-bar__message">{message}</span>}
+            {notice && (
+              <span
+                className={`footer-bar__message footer-bar__message--${notice.tone}`}
+                role="status"
+              >
+                {notice.text}
+              </span>
+            )}
           </div>
         </div>
         {geoMeta && (
@@ -119,11 +91,11 @@ export const FooterBar: React.FC = () => {
         />
       )}
       <ExportMediaModal
-        isOpen={isExportModalOpen}
-        defaultFormat={defaultFormat}
-        onCancel={() => setIsExportModalOpen(false)}
-        onConfirm={handleExportConfirm}
-        disabled={exportState === "working"}
+        isOpen={dialogOpen}
+        defaultFormat="png"
+        onCancel={closeDialog}
+        onConfirm={(options) => void start(options)}
+        disabled={exporting}
       />
     </>
   );

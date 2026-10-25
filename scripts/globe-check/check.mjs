@@ -300,9 +300,7 @@ try {
     }
     await evaluate(`[...document.querySelectorAll('.export-modal button')].at(-1).click()`);
   };
-  // Waits for the footer's "Saved <file>" message. The button is not a
-  // reliable signal: a previous export's 3.5 s reset timer can set it back
-  // to "Download export" while the next export still runs.
+  // Waits for the footer's "Saved <file>" message.
   const exportSaved = async (extension, timeoutMs) => {
     for (let waited = 0; waited < timeoutMs; waited += 250) {
       const message = await evaluate(
@@ -327,8 +325,6 @@ try {
   const exportTiles = await tilesDuring(async () => {
     await startExport("png");
     await exportSaved("png", 10000);
-    // Let the PNG export's reset timer run out before the next export.
-    await sleep(4000);
     // 8.8.8.8 trace: hop 1 is private, so after the first flight (to hop 2)
     // the export dwells 5 s on hop 1 with no camera move: a quiet window.
     await startExport("webm", 5);

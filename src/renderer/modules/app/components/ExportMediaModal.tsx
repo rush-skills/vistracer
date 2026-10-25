@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useModalA11y } from "@renderer/hooks/useModalA11y";
+import type { ExportFormat } from "../lib/exportCapture";
 import "./ExportMediaModal.css";
-
-type ExportFormat = "png" | "jpg" | "webp" | "webm" | "gif";
 
 interface ExportMediaModalProps {
   isOpen: boolean;
