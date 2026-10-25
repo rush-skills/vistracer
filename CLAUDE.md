@@ -28,12 +28,13 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (106 tests across 12 files)
+npm run test           # Run unit + component tests (113 tests across 12 files)
 npm run test:e2e       # Run e2e tests (74 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
+node scripts/globe-check/check.mjs  # After a build: idle frames and online tile requests in headless Chrome
 
 # Rust
-cd src-tauri && cargo test                                # 162 tests (+2 ignored network smoke tests)
+cd src-tauri && cargo test                                # 164 tests (+2 ignored network smoke tests)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -142,7 +143,7 @@ Full description and mermaid diagram: [docs/architecture.md](./docs/architecture
 
 CesiumJS globe, details and diagram in [docs/architecture.md#globe](./docs/architecture.md#globe):
 
-- **Scene mapping** (`src/renderer/lib/globe.ts`, pure): `buildGlobeScene` turns hops into markers, raised great-circle arcs, confidence rings (km, styled by confidence), anycast reach circles and labels; `nextCameraFocus` / `flyHeight` decide camera flights. No Cesium import, tested in jsdom.
+- **Scene mapping** (`src/renderer/lib/globe.ts`, pure): `buildGlobeScene` turns hops into markers, raised great-circle arcs, confidence rings (km, styled by confidence), anycast reach circles and labels; `nextCameraFocus` / `planFlight` decide camera flights; app-made flights stay at or above `bundledOnlyHeight` (`lib/imagery.ts`), so only user zooms load online tiles. No Cesium import, tested in jsdom.
 - **Adapter** (`modules/app/components/globe/cesiumGlobe.ts`): the only Cesium import. `CesiumWidget` with every ion default off (`baseLayer: false`, ellipsoid terrain, no sky box), primitives (not entities), picking for hover/click. `GlobeViewport.tsx` loads it lazily behind the `GlobeController` interface (`globe/controller.ts`); tests mock that module.
 - **Render governor** (`src/renderer/lib/renderGovernor.ts`): owns the rAF loop. `requestRenderMode`, wake on data/input/resize/`scene.requestRender()`, sleep after 20 idle ticks, 60 fps cap (30 on battery), paused when hidden or minimized.
 - **Imagery** (`src/renderer/lib/imagery.ts`): bundled Blue Marble + Black Marble tiles (levels 0–4) in `src/renderer/public/imagery/` (built by `scripts/build-globe-imagery.mjs`); online Blue Marble levels 5–8 via `vistiles://` → Rust tile cache → NASA GIBS. Night imagery fades out with Cesium's lighting fade when zooming in.
@@ -193,16 +194,16 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 106 tests across 12 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 113 tests across 12 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 10 tests: store behavior, hovered hop
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
-  - `src/renderer/lib/__tests__/globe.test.ts` — 22 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders
+  - `src/renderer/lib/__tests__/globe.test.ts` — 26 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders, flight floor (a whole trace follow from a zoomed-in view never moves sideways below it)
   - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 8 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible (resumes a running flight), dispose, render quality
-  - `src/renderer/lib/__tests__/imagery.test.ts` — 5 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade
+  - `src/renderer/lib/__tests__/imagery.test.ts` — 7 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade, bundled-only height
   - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 5 tests: scene and fly-to through a mocked `GlobeController`, hover/select sync, input lock during export, WebGL failure message, imagery notice
   - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 14 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, hover sync, scroll to selection
-  - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 10 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing
+  - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 11 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing, online tile disclosure
   - `src/renderer/modules/app/lib/__tests__/tileCache.test.ts` — 2 tests: cache size text
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
@@ -218,7 +219,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 162 tests in `src-tauri/src/` (plus two ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache) covering:
+- 164 tests in `src-tauri/src/` (plus two ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
@@ -226,7 +227,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
   - Settings validation (including `ixMatching` defaults for old settings files), updater key detection
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
-  - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers and interrupted clears, clear, single flight for one tile, concurrent writes of many tiles, failure pause, `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
+  - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers and interrupted clears, clear, single flight for one tile, concurrent writes of many tiles, failure pause, GET/HEAD only (405 otherwise), `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
 
 ## Key Implementation Details
 

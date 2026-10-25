@@ -48,9 +48,12 @@ The layer ids and the maximum level in the script must match
 | Blue Marble day tiles, levels 5–8 (EPSG:3857, `GoogleMapsCompatible_Level8`, about 600 m per pixel at level 8) | `gibs.earthdata.nasa.gov` | Only when the globe is zoomed in past the bundled levels; through the Rust tile cache (`$APPCACHE/tiles`, 500 MB) | GIBS: "NASA promotes full and open sharing of data." No API key, no stated rate limit. GIBS asks clients to add: "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS)." |
 | PeeringDB exchange list | `www.peeringdb.com` | At most once a day | See [src-tauri/data/README.md](../src-tauri/data/README.md) and [architecture.md](./architecture.md) |
 
-The tile requests reveal to NASA which areas of the globe you zoom into
-(not your route or any address). Night imagery has no online layer: it fades
-out as the camera comes close, where the day imagery takes over (see
+The tile requests show NASA the approximate areas of the globe you zoom
+into; they carry no addresses. Automatic camera moves (following a trace,
+selecting a hop, exports) stay at or above the height where the globe uses
+only bundled imagery, so they download nothing and do not trace your route
+for NASA. Night imagery has no online layer: it fades out as the camera
+comes close, where the day imagery takes over (see
 [architecture.md](./architecture.md#globe)).
 
 ## Credits shown in the app

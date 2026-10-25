@@ -361,10 +361,10 @@ flowchart LR
         store[("tracerouteStore<br/>run, selectedHopIndex,<br/>hoveredHopIndex")]
         pane["HopDetailsPane<br/>row hover, click"]
         viewport["GlobeViewport.tsx"]
-        mapping["lib/globe.ts (pure)<br/>buildGlobeScene: markers, arcs,<br/>rings, anycast reach, labels<br/>nextCameraFocus, flyHeight"]
+        mapping["lib/globe.ts (pure)<br/>buildGlobeScene: markers, arcs,<br/>rings, anycast reach, labels<br/>nextCameraFocus, planFlight"]
         adapter["globe/cesiumGlobe.ts<br/>(only module that imports Cesium)"]
         governor["lib/renderGovernor.ts<br/>wake, idle sleep, fps cap,<br/>hidden or minimized pause"]
-        imagery["lib/imagery.ts<br/>layer config, night fade"]
+        imagery["lib/imagery.ts<br/>layer config, night fade,<br/>bundledOnlyHeight (flight floor)"]
     end
     subgraph cesium["CesiumJS"]
         widget["CesiumWidget<br/>requestRenderMode, own render loop off"]
@@ -415,6 +415,27 @@ newest hop that got a location during the run; enrichment updates of the
 same hops do not move it. Flights keep the user's zoom unless the hop's ring
 would not fit (`flyHeight`). With `prefers-reduced-motion` the camera jumps.
 
+Camera moves the app makes (following a trace, selecting a hop, the per-hop
+moves of a GIF or WebM export) never load online tiles: online tiles show
+NASA the areas they cover, and a camera that follows a trace would trace the
+route for NASA. `planFlight` keeps every such move at or above the floor
+from `bundledOnlyHeight`. That is the camera height at which Cesium's
+screen-space error of a level 4 tile (the last bundled level) stays below
+`Globe.maximumScreenSpaceError`, so no level 5 tile (the first online level)
+is selected:
+
+`floor = 1.15 × levelError(4) × max(view width, view height, screen width, screen height) / (maximumScreenSpaceError × 2 tan(fov / 2))`
+
+`levelError(4)` is 4,892 m for the ellipsoid terrain and `fov` is 60°, so the
+floor is about 4,700 km for a 1920 px wide screen. The screen size is
+included so that a larger window later does not cross the floor at the same
+height. From below the floor, the camera first rises over the place the
+user zoomed into, then moves to the hop at the floor or higher. While such a
+flight runs, the online layer is hidden, so the wider view during the rise
+loads nothing either; it shows again when the flight ends or is cancelled.
+Only zooms the user makes go below the floor and load online tiles.
+`scripts/globe-check/check.mjs` (below) counts the tile requests to show it.
+
 Picking: the arcs end at the markers and are drawn after them, so a pick that
 hits an arc looks underneath (`drillPick`, 4 deep) for a marker, ring or
 reach. Hovering is checked at most every 50 ms and never while dragging.
@@ -439,10 +460,24 @@ loop that asks Cesium for those frames:
   fog, FXAA, HDR, shadows, order-independent translucency. The canvas uses
   the screen's pixel density up to 2x, and MSAA only below 1.5x.
 
-An idle globe therefore runs no animation frames at all. Measured in Chrome
-on the production build (`.claude-runs/ui-check/check.mjs`, not committed):
-0 animation-frame callbacks and 0 WebGL draw calls in each 5 s idle window;
-a 20-step drag ran 64 callbacks and then stopped again.
+An idle globe therefore runs no animation frames at all.
+
+`scripts/globe-check/check.mjs` checks this on the production build in
+headless Chrome, with the app's CSP and a fake Tauri IPC
+(`scripts/globe-check/mock-ipc.js`, two fixture traces). It counts
+animation frames, WebGL draws and online tile requests, and exits 1 when a
+check fails. It needs a local Chrome (`CHROME=...`), so it is not part of CI:
+
+```bash
+npm run build
+node scripts/globe-check/check.mjs [output dir]
+```
+
+Result on 2026-10-25: 0 animation frames and 0 WebGL draws in each 5 s idle
+window; a 20-step drag ran 63 frames, then stopped. A user zoom made 47
+online tile requests. Selecting a hop, following a trace and exporting, each
+from that zoomed-in view, made 0; with the floor and the hidden layer
+removed (a control run), the same steps made 166, 99 and 42.
 
 ### Imagery and day/night
 
@@ -478,7 +513,8 @@ after a failed tile. Outside the desktop app (a plain browser) there is no
   extension the layer's. The request host must be the scheme's own. The
   upstream URL is built in Rust from constants and the parsed numbers, and
   its host must be in `ALLOWED_UPSTREAM_HOSTS`; redirects are followed only
-  to those hosts. The scheme is not a proxy.
+  to those hosts. The scheme is not a proxy. Only GET and HEAD are served;
+  other methods get 405.
 - Cache: `$APPCACHE/tiles/{layer}/{z}/{y}/{x}.jpg`, at most 500 MB
   (decimal). An in-memory index (built by scanning the folder on first use,
   in file write order) tracks sizes and last use; past the cap the least
