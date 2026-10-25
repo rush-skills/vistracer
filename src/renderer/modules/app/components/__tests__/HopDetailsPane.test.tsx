@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { HopLocation, HopResolution, LocationEstimate, TracerouteRun } from "@common/ipc";
 import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
 import { CLOUD, INFRA_CODE, PEERINGDB } from "@renderer/test/infraFixtures";
 import { HopDetailsPane } from "../HopDetailsPane";
+import { LayerConsentDialog } from "../LayerConsentDialog";
 
 const latency = { minRttMs: 11.9, maxRttMs: 12.2, avgRttMs: 12.05, jitterMs: 0.3 };
 
@@ -608,6 +609,28 @@ describe("HopDetailsPane", () => {
       "Starlink satellites are highlighted on the globe."
     );
     expect(screen.queryByRole("button", { name: "Show Starlink satellites" })).toBeNull();
+  });
+
+  it("moves the focus into the satellites notice and back to the button with Escape", async () => {
+    const starlinkHop: HopResolution = { ...multipathHop, asn: { asn: 14593, name: "SPACEX-STARLINK" } };
+    const run: TracerouteRun = { ...baseRun, hops: [starlinkHop] };
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    act(() => useUiStore.setState({ layers: {}, consents: {}, loaded: true, pendingConsent: undefined }));
+    render(
+      <>
+        <HopDetailsPane run={run} selectedHopIndex={starlinkHop.hopIndex} status="success" />
+        <LayerConsentDialog />
+      </>
+    );
+    const show = screen.getByRole("button", { name: "Show Starlink satellites" });
+    show.focus();
+    fireEvent.click(show);
+    const notice = screen.getByRole("dialog", { name: "Show satellites?" });
+    await waitFor(() => expect(notice.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement ?? notice, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(show);
+    expect(useUiStore.getState().layers.satellites).toBeUndefined();
   });
 
   it("colours each hop's dot like its marker: by network while network colours are on", () => {
