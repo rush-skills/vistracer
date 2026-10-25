@@ -51,8 +51,9 @@ The layer ids and the maximum level in the script must match
 The tile requests show NASA the approximate areas of the globe you zoom
 into; they carry no addresses. Automatic camera moves (following a trace,
 selecting a hop, exports) stay at or above the height where the globe uses
-only bundled imagery, so they download nothing and do not trace your route
-for NASA. Night imagery has no online layer: it fades out as the camera
+only bundled imagery, and online tiles stay off after them until you zoom,
+drag or tilt the globe yourself. So they download nothing and do not trace
+your route for NASA. Night imagery has no online layer: it fades out as the camera
 comes close, where the day imagery takes over (see
 [architecture.md](./architecture.md#globe)).
 

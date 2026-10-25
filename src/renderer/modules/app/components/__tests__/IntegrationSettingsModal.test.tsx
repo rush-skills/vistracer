@@ -144,7 +144,7 @@ describe("IntegrationSettingsModal globe imagery", () => {
     await renderModal();
     const hint = screen.getByText(/These downloads show NASA the approximate areas you zoom into/);
     expect(hint.textContent).toContain(
-      "Automatic camera moves (following a trace, exports) stay zoomed out and use only the bundled imagery."
+      "Automatic camera moves (following a trace, selecting a hop, exports) stay zoomed out and use only the bundled imagery."
     );
   });
 

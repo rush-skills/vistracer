@@ -28,10 +28,10 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (113 tests across 12 files)
+npm run test           # Run unit + component tests (117 tests across 12 files)
 npm run test:e2e       # Run e2e tests (74 tests across 6 files)
 npm run test:watch     # Run tests in watch mode
-node scripts/globe-check/check.mjs  # After a build: idle frames and online tile requests in headless Chrome
+node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): idle frames, online tile requests, export input lock in headless Chrome
 
 # Rust
 cd src-tauri && cargo test                                # 164 tests (+2 ignored network smoke tests)
@@ -143,7 +143,7 @@ Full description and mermaid diagram: [docs/architecture.md](./docs/architecture
 
 CesiumJS globe, details and diagram in [docs/architecture.md#globe](./docs/architecture.md#globe):
 
-- **Scene mapping** (`src/renderer/lib/globe.ts`, pure): `buildGlobeScene` turns hops into markers, raised great-circle arcs, confidence rings (km, styled by confidence), anycast reach circles and labels; `nextCameraFocus` / `planFlight` decide camera flights; app-made flights stay at or above `bundledOnlyHeight` (`lib/imagery.ts`), so only user zooms load online tiles. No Cesium import, tested in jsdom.
+- **Scene mapping** (`src/renderer/lib/globe.ts`, pure): `buildGlobeScene` turns hops into markers, raised great-circle arcs, confidence rings (km, styled by confidence), anycast reach circles and labels; `nextCameraFocus` / `planFlight` decide camera flights; app-made flights stay at or above `bundledOnlyHeight` and `OnlineImageryGate` keeps the online layer off after them until the user zooms, drags or tilts (`lib/imagery.ts`). Export input lock uses the controller's per-gesture switches, not `enableInputs` (Cesium flights reset it). No Cesium import, tested in jsdom.
 - **Adapter** (`modules/app/components/globe/cesiumGlobe.ts`): the only Cesium import. `CesiumWidget` with every ion default off (`baseLayer: false`, ellipsoid terrain, no sky box), primitives (not entities), picking for hover/click. `GlobeViewport.tsx` loads it lazily behind the `GlobeController` interface (`globe/controller.ts`); tests mock that module.
 - **Render governor** (`src/renderer/lib/renderGovernor.ts`): owns the rAF loop. `requestRenderMode`, wake on data/input/resize/`scene.requestRender()`, sleep after 20 idle ticks, 60 fps cap (30 on battery), paused when hidden or minimized.
 - **Imagery** (`src/renderer/lib/imagery.ts`): bundled Blue Marble + Black Marble tiles (levels 0–4) in `src/renderer/public/imagery/` (built by `scripts/build-globe-imagery.mjs`); online Blue Marble levels 5–8 via `vistiles://` → Rust tile cache → NASA GIBS. Night imagery fades out with Cesium's lighting fade when zooming in.
@@ -194,13 +194,13 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 113 tests across 12 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 117 tests across 12 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 10 tests: store behavior, hovered hop
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
   - `src/renderer/lib/__tests__/globe.test.ts` — 26 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders, flight floor (a whole trace follow from a zoomed-in view never moves sideways below it)
   - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 8 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible (resumes a running flight), dispose, render quality
-  - `src/renderer/lib/__tests__/imagery.test.ts` — 7 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade, bundled-only height
+  - `src/renderer/lib/__tests__/imagery.test.ts` — 11 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade, bundled-only height, online layer held after app moves until user input
   - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 5 tests: scene and fly-to through a mocked `GlobeController`, hover/select sync, input lock during export, WebGL failure message, imagery notice
   - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 14 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, hover sync, scroll to selection
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 11 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing, online tile disclosure

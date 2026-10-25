@@ -364,7 +364,7 @@ flowchart LR
         mapping["lib/globe.ts (pure)<br/>buildGlobeScene: markers, arcs,<br/>rings, anycast reach, labels<br/>nextCameraFocus, planFlight"]
         adapter["globe/cesiumGlobe.ts<br/>(only module that imports Cesium)"]
         governor["lib/renderGovernor.ts<br/>wake, idle sleep, fps cap,<br/>hidden or minimized pause"]
-        imagery["lib/imagery.ts<br/>layer config, night fade,<br/>bundledOnlyHeight (flight floor)"]
+        imagery["lib/imagery.ts<br/>layer config, night fade,<br/>bundledOnlyHeight (flight floor),<br/>OnlineImageryGate"]
     end
     subgraph cesium["CesiumJS"]
         widget["CesiumWidget<br/>requestRenderMode, own render loop off"]
@@ -415,6 +415,14 @@ newest hop that got a location during the run; enrichment updates of the
 same hops do not move it. Flights keep the user's zoom unless the hop's ring
 would not fit (`flyHeight`). With `prefers-reduced-motion` the camera jumps.
 
+During a GIF or WebM export the camera does not take user input
+(`setInputEnabled(false)`), so a drag or zoom cannot get into the video.
+The lock uses `enableRotate`, `enableZoom`, `enableTilt` and
+`enableTranslate` of the camera controller, not `enableInputs`: every
+Cesium flight sets `enableInputs` to false when it starts and back to true
+when it ends (`CameraFlightPath`), which would unlock the camera after the
+first hop.
+
 Camera moves the app makes (following a trace, selecting a hop, the per-hop
 moves of a GIF or WebM export) never load online tiles: online tiles show
 NASA the areas they cover, and a camera that follows a trace would trace the
@@ -430,10 +438,15 @@ is selected:
 floor is about 4,700 km for a 1920 px wide screen. The screen size is
 included so that a larger window later does not cross the floor at the same
 height. From below the floor, the camera first rises over the place the
-user zoomed into, then moves to the hop at the floor or higher. While such a
-flight runs, the online layer is hidden, so the wider view during the rise
-loads nothing either; it shows again when the flight ends or is cancelled.
-Only zooms the user makes go below the floor and load online tiles.
+user zoomed into, then moves to the hop at the floor or higher.
+
+The online layer is also hidden from the start of such a flight
+(`OnlineImageryGate`), so the wider view during the rise loads nothing. It
+stays hidden after the flight until the user zooms, drags or tilts the globe
+(wheel, or pointer move with a button pressed; not during a flight, not
+while input is locked). So a view the app chose never loads online tiles,
+even when the window is moved to a larger monitor later and the floor no
+longer holds. Only the user's own camera moves load online tiles.
 `scripts/globe-check/check.mjs` (below) counts the tile requests to show it.
 
 Picking: the arcs end at the markers and are drawn after them, so a pick that
@@ -473,11 +486,22 @@ npm run build
 node scripts/globe-check/check.mjs [output dir]
 ```
 
-Result on 2026-10-25: 0 animation frames and 0 WebGL draws in each 5 s idle
-window; a 20-step drag ran 63 frames, then stopped. A user zoom made 47
-online tile requests. Selecting a hop, following a trace and exporting, each
-from that zoomed-in view, made 0; with the floor and the hidden layer
-removed (a control run), the same steps made 166, 99 and 42.
+Result on 2026-10-25 (18 checks pass):
+
+- 0 animation frames and 0 WebGL draws in each 5 s idle window; a 20-step
+  drag ran about 60 frames, then stopped.
+- A user zoom made 47 online tile requests. Selecting a hop, following a
+  trace and exporting, each from that zoomed-in view, made 0. Growing the
+  window from 1280 to 3840 px after those app moves made 0; the next user
+  zoom made 149.
+- A 20-step drag during a WebM export made 0 WebGL draws and left the
+  canvas unchanged.
+
+Control runs, each with one fix removed: without the floor and the hidden
+layer, the three app moves made 166, 99 and 42 requests; with the online
+layer shown again when a flight ends, the larger window made 92; with the
+lock on `enableInputs`, the drag during the export made 838 draws and moved
+the globe.
 
 ### Imagery and day/night
 
