@@ -139,12 +139,20 @@ export async function openApp({ outDir, width = 1280, height = 713, deviceScaleF
       events.push(data);
     }
   });
+  // A page that crashed or hangs never answers: fail the call instead of
+  // waiting forever.
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
       const id = ++sequence;
-      pending.set(id, (data) =>
-        data.error ? reject(new Error(`${method}: ${data.error.message}`)) : resolve(data.result)
-      );
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        const crashed = events.some((event) => event.method === "Inspector.targetCrashed");
+        reject(new Error(`${method}: no answer in 60 s${crashed ? " (the page crashed)" : ""}`));
+      }, 60000);
+      pending.set(id, (data) => {
+        clearTimeout(timer);
+        data.error ? reject(new Error(`${method}: ${data.error.message}`)) : resolve(data.result);
+      });
       socket.send(JSON.stringify({ id, method, params }));
     });
   const evaluate = async (expression) => {
@@ -172,16 +180,23 @@ export async function openApp({ outDir, width = 1280, height = 713, deviceScaleF
     await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
   };
   const exited = new Promise((resolve) => chrome.once("exit", resolve));
-  /** Resolves once Chrome has exited and released its profile. */
+  /**
+   * Resolves once Chrome has exited and released its profile. Chrome can
+   * ignore SIGTERM; it is killed after 5 s, so a failed step ends the run
+   * with its error instead of waiting forever.
+   */
   const close = async () => {
     socket.close();
     chrome.kill();
     server.close();
+    const forced = setTimeout(() => chrome.kill("SIGKILL"), 5000);
     await exited;
+    clearTimeout(forced);
   };
 
   try {
     await send("Page.enable");
+    await send("Inspector.enable");
     await send("Runtime.enable");
     await send("Network.enable");
     await send("Emulation.setDeviceMetricsOverride", {

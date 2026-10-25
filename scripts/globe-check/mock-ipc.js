@@ -1,9 +1,11 @@
 // Injected into the page before the app loads (see check.mjs). It stands in
-// for the Tauri IPC with two fixture traces, and counts what the check needs:
-// animation frames, WebGL draws, online tile requests, CSP violations and
-// page errors. Plain browser JavaScript, not bundled with the app.
+// for the Tauri IPC with two fixture traces and synthetic infrastructure data
+// (exchanges, data centres, cables; made up, not PeeringDB or TeleGeography
+// data), and counts what the check needs: animation frames, WebGL draws,
+// online tile requests, IPC calls per command, CSP violations and page
+// errors. Plain browser JavaScript, not bundled with the app.
 (() => {
-  const probe = { raf: 0, draws: 0, onlineTiles: [], csp: [], errors: [] };
+  const probe = { raf: 0, draws: 0, onlineTiles: [], ipc: {}, csp: [], errors: [] };
   window.__globeCheck = probe;
 
   const raf = window.requestAnimationFrame.bind(window);
@@ -97,34 +99,79 @@
     lookupState: "complete",
     ...extra
   });
+  const asn = (number, name) => ({ asn: { asn: number, name } });
   const ROUTES = {
     "example.com": [
       hop(1, "192.168.1.1", 1, noLocation, { isPrivate: true }),
-      hop(2, "103.21.124.1", 4, {
-        ...noLocation,
-        isRttReference: true,
-        best: estimate("geolite-city", 19.08, 72.88, 20, "medium", "Mumbai, India")
-      }),
-      hop(3, "180.87.38.5", 30, {
-        ...noLocation,
-        best: estimate("hostname-hint", 13.08, 80.27, 50, "high", "Chennai, India")
-      }),
-      hop(4, "80.231.217.17", 111, {
-        ...noLocation,
-        best: estimate("hostname-hint", 43.3, 5.37, 50, "high", "Marseille, France")
-      }),
-      hop(5, "80.81.192.96", 120, {
-        ...noLocation,
-        best: estimate("ixp", 50.11, 8.68, 30, "high", "DE-CIX Frankfurt")
-      }),
-      hop(6, "154.54.58.1", 128, {
-        ...noLocation,
-        best: estimate("hostname-hint", 51.51, -0.13, 50, "high", "London, United Kingdom")
-      }),
-      hop(7, "154.54.44.85", 200, {
-        ...noLocation,
-        best: estimate("hostname-hint", 40.71, -74.01, 50, "high", "New York, United States")
-      })
+      hop(
+        2,
+        "103.21.124.1",
+        4,
+        {
+          ...noLocation,
+          isRttReference: true,
+          best: estimate("geolite-city", 19.08, 72.88, 20, "medium", "Mumbai, India")
+        },
+        asn(9498, "BHARTI Airtel Ltd.")
+      ),
+      hop(
+        3,
+        "180.87.38.5",
+        30,
+        {
+          ...noLocation,
+          best: estimate("hostname-hint", 13.08, 80.27, 50, "high", "Chennai, India")
+        },
+        asn(6453, "TATA COMMUNICATIONS")
+      ),
+      hop(
+        4,
+        "80.231.217.17",
+        111,
+        {
+          ...noLocation,
+          best: estimate("hostname-hint", 43.3, 5.37, 50, "high", "Marseille, France")
+        },
+        asn(6453, "TATA COMMUNICATIONS")
+      ),
+      hop(
+        5,
+        "80.81.192.96",
+        120,
+        {
+          ...noLocation,
+          best: estimate("ixp", 50.11, 8.68, 30, "high", "DE-CIX Frankfurt"),
+          ixp: {
+            ixId: 31,
+            name: "DE-CIX Frankfurt",
+            city: "Frankfurt",
+            country: "DE",
+            prefix: "80.81.192.0/21",
+            facilityCount: 40
+          }
+        },
+        asn(6453, "TATA COMMUNICATIONS")
+      ),
+      hop(
+        6,
+        "154.54.58.1",
+        128,
+        {
+          ...noLocation,
+          best: estimate("hostname-hint", 51.51, -0.13, 50, "high", "London, United Kingdom")
+        },
+        asn(16509, "AMAZON-02")
+      ),
+      hop(
+        7,
+        "154.54.44.85",
+        200,
+        {
+          ...noLocation,
+          best: estimate("hostname-hint", 40.71, -74.01, 50, "high", "New York, United States")
+        },
+        asn(16509, "AMAZON-02")
+      )
     ],
     "8.8.8.8": [
       hop(1, "192.168.1.1", 1, noLocation, { isPrivate: true }),
@@ -147,6 +194,85 @@
           referenceHopIndex: 2
         }
       })
+    ]
+  };
+
+  // Synthetic exchanges and data centres in the layout of get_peeringdb_sites.
+  const CITIES = [
+    ["Frankfurt", "DE", 50.11, 8.68],
+    ["Amsterdam", "NL", 52.37, 4.9],
+    ["London", "GB", 51.51, -0.13],
+    ["Paris", "FR", 48.86, 2.35],
+    ["Marseille", "FR", 43.3, 5.37],
+    ["Mumbai", "IN", 19.08, 72.88],
+    ["Chennai", "IN", 13.08, 80.27],
+    ["Singapore", "SG", 1.29, 103.85],
+    ["Tokyo", "JP", 35.68, 139.69],
+    ["Sydney", "AU", -33.87, 151.21],
+    ["New York", "US", 40.71, -74.01],
+    ["Ashburn", "US", 39.04, -77.49],
+    ["Chicago", "US", 41.88, -87.63],
+    ["Dallas", "US", 32.78, -96.8],
+    ["Los Angeles", "US", 34.05, -118.24],
+    ["São Paulo", "BR", -23.55, -46.63],
+    ["Johannesburg", "ZA", -26.2, 28.05],
+    ["Dubai", "AE", 25.2, 55.27],
+    ["Stockholm", "SE", 59.33, 18.07],
+    ["Madrid", "ES", 40.42, -3.7]
+  ];
+  const SITES = {
+    storedAt: Date.now(),
+    complete: true,
+    exchanges: CITIES.map(([city, country, latitude, longitude], i) => ({
+      id: i === 0 ? 31 : 1000 + i,
+      name: i === 0 ? "DE-CIX Frankfurt" : `Example IX ${city}`,
+      city,
+      country,
+      latitude: latitude + 0.01,
+      longitude: longitude + 0.01,
+      radiusKm: 30,
+      facilityCount: 6,
+      networkCount: i === 0 ? 1019 : 400 - i * 10
+    })),
+    facilities: CITIES.flatMap(([city, country, latitude, longitude], i) =>
+      Array.from({ length: 8 }, (_, n) => ({
+        id: i * 100 + n,
+        name: `Example DC ${city} ${n + 1}`,
+        org: "Example Data Centres",
+        city,
+        country,
+        latitude: latitude + Math.sin(n) * 0.12,
+        longitude: longitude + Math.cos(n) * 0.12,
+        networkCount: 300 - n * 20,
+        exchangeCount: 3
+      }))
+    )
+  };
+  // Synthetic cables in the layout of get_submarine_cables.
+  const CABLES = {
+    fetchedAt: Date.now(),
+    note: null,
+    cables: [
+      {
+        id: "example-indian-ocean",
+        name: "Example Indian Ocean Cable",
+        segments: [[[80.27, 13.08], [79.9, 6.9], [60, 12], [45, 12.5], [43.2, 12.6], [38.5, 20], [32.4, 29.9], [32.3, 31.3], [20, 34], [5.37, 43.3]]]
+      },
+      {
+        id: "example-atlantic",
+        name: "Example Atlantic Cable",
+        segments: [[[-73.97, 40.59], [-60, 42], [-40, 47], [-20, 50], [-4.55, 50.83]]]
+      },
+      {
+        id: "example-pacific",
+        name: "Example Pacific Cable",
+        segments: [[[-118.4, 33.9], [-140, 30], [-160, 22], [-179.9, 25], [160, 30], [139.9, 35.3]]]
+      },
+      {
+        id: "example-south-atlantic",
+        name: "Example South Atlantic Cable",
+        segments: [[[-38.5, -3.7], [-20, 0], [-5, 4], [3.4, 6.4]], [[-38.5, -3.7], [-28, 10], [-9.1, 38.7]]]
+      }
     ]
   };
 
@@ -182,6 +308,7 @@
     },
     convertFileSrc: (filePath, protocol) => `${protocol}://localhost/${filePath}`,
     invoke: async (command, args) => {
+      probe.ipc[command] = (probe.ipc[command] ?? 0) + 1;
       switch (command) {
         case "plugin:event|listen": {
           const id = nextId++;
@@ -195,6 +322,19 @@
           return false;
         case "get_settings":
           return settings[args.key] ?? null;
+        case "set_settings":
+          settings[args.key] = args.value;
+          return null;
+        case "get_peeringdb_sites":
+          return SITES;
+        case "get_submarine_cables": {
+          // As the backend: only with the saved switch on and the notice accepted.
+          const ui = settings["preferences.ui"];
+          if (!ui?.layers?.["submarine-cables"] || !ui?.consents?.["submarine-cables"]) {
+            throw "Submarine cables are off: turn the layer on in Layers and accept its notice. Nothing was downloaded.";
+          }
+          return CABLES;
+        }
         case "get_geo_database_meta":
           return { cityDbStatus: "loaded", asnDbStatus: "loaded" };
         case "get_recent_runs":
