@@ -13,6 +13,8 @@ allows redistribution in it.
 | NASA Black Marble 2016 (night lights) | `src/renderer/public/imagery/black-marble/{z}/{x}/{y}.jpg`, levels 0–4 | 682 tiles, 1.94 MB | As above | GIBS layer `VIIRS_Black_Marble`, time `2016-01-01` (Suomi NPP VIIRS) |
 | Country borders | `src/renderer/public/world.geojson` | 177 countries, 10,654 points, 488 KB | Public domain | Natural Earth Admin-0 countries, 1:110m (<https://www.naturalearthdata.com/>) |
 | Airport table for host name hints | `src-tauri/data/airports.csv` | 104 KB | Public domain | OurAirports; see [src-tauri/data/README.md](../src-tauri/data/README.md) |
+| Cloud regions and Cloudflare data centres | `src/renderer/public/infra/cloud-regions.json`, built from `scripts/infra-data/cloud-regions.ts` | 474 sites, 77 KB (13 KB gzip); loaded only while the **Cloud regions** layer is on | Facts from the providers' public documentation (not copyrightable as such); coordinates of the Cloudflare sites from OurAirports (public domain). AWS, Google Cloud, Microsoft Azure and Cloudflare are trademarks of their owners | See [Cloud regions](#cloud-regions) |
+| Network colour palette | `src/renderer/lib/infra/asnColors.ts` | 7 colours | Paul Tol's colour schemes, free to use ("light" qualitative scheme) | <https://personal.sron.nl/~pault/> |
 
 Not bundled: Cesium imports `meshoptimizer` (MIT) for compressed glTF
 models. The globe never loads glTF, and the package compiles WebAssembly as
@@ -41,12 +43,55 @@ node scripts/build-globe-imagery.mjs src/renderer/public/imagery
 The layer ids and the maximum level in the script must match
 `BUNDLED_IMAGERY` in `src/renderer/lib/imagery.ts`.
 
+### Cloud regions
+
+`scripts/infra-data/cloud-regions.ts` is a hand-curated, typed table
+(checked by `npm run typecheck`) of the generally available public regions
+of AWS (34), Google Cloud (43) and Microsoft Azure (57), with each region's
+code, the provider's display name, the city, the country and the centre of
+the city, rounded to 0.01°. Where a provider names only an area (AWS
+`us-east-1` "N. Virginia", Azure `eastus` "Virginia"), the table uses the
+metro commonly reported for it and says so in a comment. Government,
+sovereign and China partitions and announced regions are left out; Azure
+regions with restricted access are in and marked. The table also holds the
+ASNs each provider's cloud uses (checked in PeeringDB) for the hop match.
+
+Cloudflare has no regions. Its 340 data centres come from the components of
+its public status page (names like "Frankfurt, Germany - (FRA)"); each
+takes the coordinates and country of the open airport with its IATA code
+in OurAirports. Six codes without one (Berlin TXL, Bishkek FRU, Chișinău
+KIV, Americana QWJ, Jiaxing JXG, Ramallah ZDM) are placed by hand at the
+city centre (`CLOUDFLARE_PLACES`).
+
+Every location is approximate (the city, or the airport), and the app says
+so. The snapshot's `meta` lists each source with its URL, licence, fetch
+date and record count.
+
+| Source | URL | Fetched | Records |
+| --- | --- | --- | --- |
+| AWS regions | <https://docs.aws.amazon.com/global-infrastructure/latest/regions/aws-regions.html>, <https://aws.amazon.com/about-aws/global-infrastructure/regions_az/> | 2026-10-25 | 34 |
+| Google Cloud regions | <https://cloud.google.com/compute/docs/regions-zones> | 2026-10-25 | 43 |
+| Azure regions | <https://learn.microsoft.com/en-us/azure/reliability/regions-list> | 2026-10-25 | 57 |
+| Cloudflare data centres | <https://www.cloudflarestatus.com/api/v2/components.json> (and <https://www.cloudflare.com/network/>) | 2026-10-25 | 340 |
+| Coordinates of the Cloudflare sites | <https://davidmegginson.github.io/ourairports-data/airports.csv> (OurAirports, public domain) | 2026-10-25 | 334 (+ 6 by hand) |
+
+To rebuild (two keyless downloads, saved in `.claude-runs/infra-data` and
+reused, so the same inputs give the same file; needs Node 22.18 or later):
+
+```bash
+node scripts/infra-data/build-cloud-regions.mjs
+```
+
+A test (`lib/infra/__tests__/sources.test.ts`) fails when the snapshot and
+the curated table differ.
+
 ## Downloaded at run time
 
 | What | Host | When | Terms |
 | --- | --- | --- | --- |
 | Blue Marble day tiles, levels 5–8 (EPSG:3857, `GoogleMapsCompatible_Level8`, about 600 m per pixel at level 8) | `gibs.earthdata.nasa.gov` | Only when the globe is zoomed in past the bundled levels; through the Rust tile cache (`$APPCACHE/tiles`, 500 MB) | GIBS: "NASA promotes full and open sharing of data." No API key, no stated rate limit. GIBS asks clients to add: "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS)." |
-| PeeringDB exchange list | `www.peeringdb.com` | At most once a day | See [src-tauri/data/README.md](../src-tauri/data/README.md) and [architecture.md](./architecture.md) |
+| PeeringDB exchange list (exchanges, peering LAN prefixes, facilities) | `www.peeringdb.com` | At most once a day, during traces, while exchange matching (**Internet exchanges** in Integration settings) is on | PeeringDB Acceptable Use Policy. Also the data of the exchange and data centre layers, which add no request. See [src-tauri/data/README.md](../src-tauri/data/README.md) and [architecture.md](./architecture.md) |
+| Submarine cable map (`cable-geo.json`, about 0.75 MB) | `www.submarinecablemap.com` | Only after the user turns on **Submarine cables** and accepts its notice; then at most once a week while the layer is on (saved in `$APPCACHE/submarine-cables.json`) | TeleGeography, CC BY-NC-SA 3.0: non-commercial use, attribution, share-alike. See [Submarine cables](#submarine-cables) |
 
 The tile requests show NASA the approximate areas of the globe you zoom
 into; they carry no addresses. Automatic camera moves (following a trace,
@@ -57,6 +102,49 @@ nothing and do not trace your route for NASA. Night imagery has no online
 layer: it fades out as the camera comes close, where the day imagery takes
 over (see [architecture.md](./architecture.md#globe)).
 
+### PeeringDB data is not bundled
+
+PeeringDB's Acceptable Use Policy (<https://www.peeringdb.com/aup>, read on
+2026-10-25) says that "the PeeringDB data may not be passed on in bulk to
+any other person or organization unless approved by PeeringDB". A bundled
+snapshot of every exchange and facility would pass it on in bulk to every
+user, so VisTracer does not ship one. The exchange and data centre layers
+show the list that each installation downloads for exchange matching
+(network troubleshooting, which the policy names as an operational use),
+with the extra fields `net_count` (exchanges) and `name, org_name, city,
+country, net_count, ix_count` (facilities). On 2026-10-25 that made the
+`fac` download 1.17 MB and added 5,279 facilities, about 0.98 MB, to the
+provider cache. A bundled snapshot needs PeeringDB's approval first.
+
+### Submarine cables
+
+The cable layer shows TeleGeography's Submarine Cable Map data. It is
+downloaded by the backend from
+`https://www.submarinecablemap.com/api/v3/cable/cable-geo.json` (733
+features, 14,450 points on 2026-10-25), only after the user accepted the
+layer's notice, which names the licence and the host. It is never bundled,
+and the test fixture `src-tauri/fixtures/cables/cable-geo-sample.json` is
+synthetic.
+
+- **Licence.** TeleGeography's repository for the map, which published the
+  links to these GeoJSON files, states: "Our map is made available under
+  the following Creative Commons License: Attribution-NonCommercial-
+  ShareAlike 3.0 Unported (CC BY-NC-SA 3.0)" (archived copy of
+  <https://github.com/telegeography/www.submarinecablemap.com>, 2022-11-10;
+  the repository was later deleted). TeleGeography's current citation page
+  (<https://www2.telegeography.com/cite-telegeography-map>) offers its maps
+  and screen captures under CC BY-SA 4.0 and keeps the underlying
+  databases for subscribers. VisTracer applies the stricter terms: the
+  notice says the data is for non-commercial use under CC BY-NC-SA 3.0,
+  with attribution.
+- **Attribution.** While the layer is on, the credits list "TeleGeography
+  Submarine Cable Map" with the licence and the notice "Submarine cable
+  data © TeleGeography, www.submarinecablemap.com, licensed CC BY-NC-SA
+  3.0.", and the credits chip names TeleGeography. Each cable's hover card
+  repeats the source and the licence.
+- **Privacy.** The request shows TeleGeography the user's IP address; it
+  carries nothing about traces.
+
 ## Credits shown in the app
 
 A small "NASA, GIBS, CesiumJS" button in the globe's lower right corner opens
@@ -64,8 +152,11 @@ the full list (`src/renderer/lib/attribution.ts`; keep it in step with this
 file): CesiumJS, NASA Blue Marble and Black Marble, NASA GIBS with the
 acknowledgement GIBS asks for (see the table above), Natural Earth, MaxMind
 GeoLite2 with MaxMind's notice ("This product includes GeoLite2 data created
-by MaxMind, available from https://www.maxmind.com."), PeeringDB,
-OurAirports, Team Cymru, RDAP and RIPEstat.
+by MaxMind, available from https://www.maxmind.com."), PeeringDB (also for
+the exchange and data centre layers), OurAirports, Team Cymru, RDAP and
+RIPEstat, and the cloud region sources. While the submarine cable layer is
+on, the list also has TeleGeography with its licence and notice, and the
+chip reads "NASA, GIBS, CesiumJS, TeleGeography".
 
 GIBS served the bundled day and night tiles (the build script asks the GIBS
 WMS for them, see above) as well as the online tiles. So the GIBS credit and

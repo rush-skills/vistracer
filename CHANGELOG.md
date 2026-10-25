@@ -29,6 +29,8 @@ All notable changes to VisTracer will be documented in this file.
 - Hover cards for hops on the globe and in the timeline, from data already loaded
 - Command bar (⌘K / Ctrl+K): trace a typed host, run the last trace again, go to a hop, show/hide layers and panels, switch theme, export, clear the tile cache, open settings
 - Credits button on the globe with every data source, including the NASA GIBS and MaxMind GeoLite2 acknowledgements
+- Infrastructure layers, all off by default: internet exchanges and data centres from the PeeringDB list exchange matching already downloads (sites on the route stand out; clustered at every zoom), cloud regions of AWS, Google Cloud and Azure and Cloudflare data centres (bundled, with a switch per provider and a "likely inside a region" match per hop with its confidence), network colours (one colour-blind-safe colour per ASN, with a legend), and opt-in submarine cables from TeleGeography (CC BY-NC-SA 3.0; a notice names the licence and the host before the first download, and guessed cables are labelled as a guess)
+- Hover cards for exchange, data centre, cloud region and cable markers
 
 ### Changed
 
@@ -38,10 +40,13 @@ All notable changes to VisTracer will be documented in this file.
 - The globe, camera and export draw each hop at its best location estimate instead of the raw GeoLite2 record; hop markers keep the same size on screen when zooming
 - The globe renders only when something changes and stops its animation loop when idle, hidden or minimized; frame rate is capped at 60 (30 on battery where the webview reports it)
 - The app bundle shrank from 55 MB to 23 MB (macOS): the 10k textures and README media are no longer shipped
+- Camera flights frame the hop in the part of the globe that the panels leave free
+- The PeeringDB exchange list download includes facility names, operators, places and member counts (no extra request)
 
 ### Fixed
 
 - Online imagery no longer loads at start-up before you move the camera (very wide windows could refine the start view past the bundled levels)
+- Arrow keys, Home and End no longer scroll the hop timeline while an animated export records
 - A second export started within 3.5 s of the previous one is no longer shown as finished while it still runs
 - Team Cymru lookups could never connect, PeeringDB sent the API key in the wrong header, and RIPEstat/PeeringDB fields that do not exist were read
 - macOS TCP traces only run root-owned system binaries with administrator rights

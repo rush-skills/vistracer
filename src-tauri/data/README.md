@@ -42,6 +42,14 @@ coordinates; a unit test fails when a code is missing.
 ## Data fetched at run time
 
 The PeeringDB IX list (`ixpfx`, `ixlan`, `ix`, `ixfac`, `fac`) is not
-bundled. When exchange matching is on (the default), the app downloads it at
-most once a day and keeps it in the provider cache
-(`$APPCACHE/enrichment-cache.json`). See `docs/architecture.md`.
+bundled: PeeringDB's Acceptable Use Policy does not allow passing its data
+on in bulk without approval. When exchange matching is on (the default),
+the app downloads it at most once a day and keeps it in the provider cache
+(`$APPCACHE/enrichment-cache.json`). The exchange and data centre layers of
+the globe read the same list (with facility names, operators, places and
+counts) and download nothing themselves. See `docs/architecture.md` and
+`docs/third-party-data.md`.
+
+The submarine cable map (TeleGeography, CC BY-NC-SA 3.0) is not bundled
+either: the app downloads it only after the user opts in. The test fixture
+`fixtures/cables/cable-geo-sample.json` is synthetic.
