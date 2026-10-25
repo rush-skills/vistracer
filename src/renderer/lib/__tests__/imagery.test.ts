@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUNDLED_IMAGERY,
+  CanvasDrag,
   ONLINE_IMAGERY,
   OnlineImageryGate,
   bundledOnlyHeight,
@@ -61,6 +62,26 @@ describe("bundledOnlyHeight", () => {
     const threshold = (4_892 * 1000) / (2 * 2 * Math.tan(Math.PI / 6));
     expect(bundledOnlyHeight(view)).toBeGreaterThan(threshold);
     expect(bundledOnlyHeight(view)).toBeLessThan(threshold * 1.2);
+  });
+});
+
+describe("CanvasDrag", () => {
+  it("counts a held button as a globe drag only after a press on the canvas", () => {
+    const drag = new CanvasDrag();
+    // Selecting text in a panel and crossing the globe moves no camera.
+    expect(drag.isDragging(1)).toBe(false);
+    drag.pressOnCanvas();
+    expect(drag.isDragging(1)).toBe(true);
+    drag.release();
+    expect(drag.isDragging(1)).toBe(false);
+  });
+
+  it("ends a press whose release it missed", () => {
+    const drag = new CanvasDrag();
+    drag.pressOnCanvas();
+    // A move with no button held: the release happened outside the window.
+    expect(drag.isDragging(0)).toBe(false);
+    expect(drag.isDragging(1)).toBe(false);
   });
 });
 

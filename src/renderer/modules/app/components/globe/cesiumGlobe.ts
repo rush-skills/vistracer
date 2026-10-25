@@ -36,6 +36,7 @@ import {
 } from "@renderer/lib/globe";
 import {
   BUNDLED_IMAGERY,
+  CanvasDrag,
   NIGHT_BRIGHTNESS,
   ONLINE_IMAGERY,
   OnlineImageryGate,
@@ -334,12 +335,22 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     }
     governor.wake();
   };
+  const drag = new CanvasDrag();
+  const onPointerDown = () => {
+    drag.pressOnCanvas();
+    governor.wake();
+  };
+  const onPointerRelease = () => drag.release();
   const onPointerMove = (event: PointerEvent) => {
     if (event.buttons !== 0) {
-      // A drag rotates, zooms or tilts the camera; picking would only slow it down.
-      userMovedCamera();
+      // A drag rotates, zooms or tilts the camera; picking would only slow
+      // it down. A press that started outside the globe moves nothing.
+      if (drag.isDragging(event.buttons)) {
+        userMovedCamera();
+      }
       return;
     }
+    drag.release();
     const rect = canvas.getBoundingClientRect();
     hoverPosition = new Cartesian2(event.clientX - rect.left, event.clientY - rect.top);
     hoverClient = { x: event.clientX, y: event.clientY };
@@ -352,8 +363,11 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     hoverTimer = undefined;
     setHovered(undefined);
   };
-  canvas.addEventListener("pointerdown", wake);
+  canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", wake);
+  // The release can happen over a panel or outside the window.
+  window.addEventListener("pointerup", onPointerRelease);
+  window.addEventListener("pointercancel", onPointerRelease);
   canvas.addEventListener("wheel", userMovedCamera, { passive: true });
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerleave", onPointerLeave);
@@ -567,17 +581,14 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       removePreRender();
       resizeObserver.disconnect();
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      canvas.removeEventListener("pointerdown", wake);
+      canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointerup", wake);
+      window.removeEventListener("pointerup", onPointerRelease);
+      window.removeEventListener("pointercancel", onPointerRelease);
       canvas.removeEventListener("wheel", userMovedCamera);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       clickHandler.destroy();
-      // A switched-off online layer is outside the collection that the
-      // widget destroys.
-      if (onlineLayer && !scene.imageryLayers.contains(onlineLayer)) {
-        onlineLayer.destroy();
-      }
       widget.destroy();
     }
   };

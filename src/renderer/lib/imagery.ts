@@ -109,6 +109,32 @@ export class OnlineImageryGate {
 }
 
 /**
+ * Whether a pointer move with a button held is the user dragging the globe.
+ * Only a press that started on the globe canvas moves the camera: a press
+ * in a panel (selecting text in the hop table) that crosses the globe does
+ * not, so it must not release OnlineImageryGate either.
+ */
+export class CanvasDrag {
+  private pressed = false;
+
+  pressOnCanvas(): void {
+    this.pressed = true;
+  }
+
+  release(): void {
+    this.pressed = false;
+  }
+
+  /** `buttons` of the pointer move; 0 also ends a press whose release was missed. */
+  isDragging(buttons: number): boolean {
+    if (buttons === 0) {
+      this.pressed = false;
+    }
+    return this.pressed;
+  }
+}
+
+/**
  * Cesium darkens the night side to 30 % of the imagery colour; the city
  * lights are brightened to make up for it.
  */
