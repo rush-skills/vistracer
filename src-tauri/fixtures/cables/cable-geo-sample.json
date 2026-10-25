@@ -1,0 +1,58 @@
+{
+  "type": "FeatureCollection",
+  "name": "cable-geo (synthetic sample in the layout of TeleGeography's cable-geo.json)",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "example-atlantic",
+        "name": "Example Atlantic Cable",
+        "color": "#3b8fd1",
+        "feature_id": "example-atlantic-0",
+        "coordinates": [-40.0, 47.0]
+      },
+      "geometry": {
+        "type": "MultiLineString",
+        "coordinates": [
+          [[-73.9712, 40.5899], [-60.0, 42.0], [-40.0, 47.0], [-20.0, 50.0], [-4.5521, 50.8302]],
+          [[-50.0, "45.0"], [-30.0, 44.0]]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "example-atlantic",
+        "name": "Example Atlantic Cable",
+        "color": "#3b8fd1",
+        "feature_id": "example-atlantic-1",
+        "coordinates": [-25.0, 44.0]
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-40.0, 47.0], [-25.0, 44.0], [-9.0, 43.3]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "example-indian-ocean",
+        "name": "Example Indian Ocean Cable",
+        "color": "#a05a2c",
+        "feature_id": "example-indian-ocean-0",
+        "coordinates": [60.0, 15.0]
+      },
+      "geometry": {
+        "type": "MultiLineString",
+        "coordinates": [
+          [[72.8258, 18.9388], [60.0, 15.0], [45.0, 12.5], [43.0, 12.6], [38.0, 20.0], [32.3, 31.3], [20.0, 35.0], [5.3698, 43.2965]]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "A feature without an id", "feature_id": "x-0" },
+      "geometry": { "type": "LineString", "coordinates": [[0.0, 0.0], [1.0, 1.0]] }
+    }
+  ]
+}

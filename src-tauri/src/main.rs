@@ -9,6 +9,7 @@ mod types;
 mod upstream;
 
 use commands::app_info::{updater_pubkey_configured, AppInfo};
+use commands::cables::{cable_fetcher, CableService, SubmarineCables};
 use commands::geo::{
     database_statuses, ensure_readers, reload_geo_databases, GeoReaders, SharedGeoReaders,
 };
@@ -36,6 +37,7 @@ struct AppState {
     geo_readers: Arc<SharedGeoReaders>,
     enrichment: Arc<EnrichmentService>,
     tiles: Arc<TileService<HttpFetcher>>,
+    cables: Arc<CableService<HttpFetcher>>,
     active_runs: ActiveRuns,
     app_data_dir: PathBuf,
 }
@@ -247,6 +249,21 @@ async fn get_peeringdb_sites(
     Ok(state.enrichment.peeringdb_sites())
 }
 
+/// The opt-in submarine cable map. Downloads from TeleGeography's host only
+/// while the saved settings have the layer on and its notice accepted.
+#[tauri::command]
+async fn get_submarine_cables(
+    state: tauri::State<'_, AppState>,
+) -> Result<SubmarineCables, String> {
+    let allowed = state.store().preferences.ui.submarine_cables();
+    let cables = state.cables.clone();
+    cables
+        .get(allowed)
+        .await
+        .map(|data| (*data).clone())
+        .map_err(|error| error.message())
+}
+
 #[tauri::command]
 fn get_app_info(app: tauri::AppHandle) -> AppInfo {
     AppInfo {
@@ -338,11 +355,17 @@ fn main() {
                     .online_imagery(),
             );
 
+            let cables = Arc::new(CableService::new(
+                cable_fetcher(),
+                cache_dir.join("submarine-cables.json"),
+            ));
+
             app.manage(AppState {
                 store,
                 geo_readers: readers,
                 enrichment,
                 tiles,
+                cables,
                 active_runs: create_active_runs(),
                 app_data_dir,
             });
@@ -364,6 +387,7 @@ fn main() {
             get_tile_cache_info,
             clear_tile_cache,
             get_peeringdb_sites,
+            get_submarine_cables,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

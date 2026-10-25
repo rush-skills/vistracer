@@ -48,6 +48,9 @@ pub enum Theme {
 /// The layer id of the online NASA GIBS tiles. Mirrors
 /// `ONLINE_IMAGERY_LAYER_ID` in src/common/ipc.ts.
 pub const ONLINE_IMAGERY_LAYER: &str = "online-imagery";
+/// The opt-in submarine cable layer, and the id of its licence notice in
+/// `consents`. Mirrors `SUBMARINE_CABLES_LAYER_ID` in src/common/ipc.ts.
+pub const SUBMARINE_CABLES_LAYER: &str = "submarine-cables";
 /// More entries than any registry will have; bounds what a settings file can hold.
 const MAX_UI_ENTRIES: usize = 64;
 const MAX_UI_ID_LEN: usize = 40;
@@ -63,6 +66,8 @@ pub struct UiPreferences {
     pub layers: BTreeMap<String, bool>,
     /// Panel id → collapsed. A missing id uses the panel's default.
     pub collapsed: BTreeMap<String, bool>,
+    /// Layer id → the user accepted the layer's notice (licence, host).
+    pub consents: BTreeMap<String, bool>,
 }
 
 impl UiPreferences {
@@ -75,9 +80,20 @@ impl UiPreferences {
             .unwrap_or(true)
     }
 
+    /// Whether the cable map may be downloaded: the layer is on and the
+    /// user accepted its notice. Both default to no.
+    pub fn submarine_cables(&self) -> bool {
+        self.layers.get(SUBMARINE_CABLES_LAYER) == Some(&true)
+            && self.consents.get(SUBMARINE_CABLES_LAYER) == Some(&true)
+    }
+
     /// Checks UI preferences that arrive from the renderer before they are stored.
     pub fn validated(self) -> Result<Self, String> {
-        for (what, entries) in [("layer", &self.layers), ("panel", &self.collapsed)] {
+        for (what, entries) in [
+            ("layer", &self.layers),
+            ("panel", &self.collapsed),
+            ("consent", &self.consents),
+        ] {
             if entries.len() > MAX_UI_ENTRIES {
                 return Err(format!(
                     "Too many {what} entries in the UI preferences: {} (at most {MAX_UI_ENTRIES}).",
@@ -123,6 +139,7 @@ fn lenient_ui<'de, D: serde::Deserializer<'de>>(
     };
     let layers = saved_switches(field("layers"), &mut dropped);
     let collapsed = saved_switches(field("collapsed"), &mut dropped);
+    let consents = saved_switches(field("consents"), &mut dropped);
     if dropped {
         log::warn!("Ignored invalid parts of the UI preferences in settings.json");
     }
@@ -130,6 +147,7 @@ fn lenient_ui<'de, D: serde::Deserializer<'de>>(
         theme,
         layers,
         collapsed,
+        consents,
     })
 }
 
@@ -694,6 +712,54 @@ mod tests {
             .ui;
         assert_eq!(ui.collapsed.len(), MAX_UI_ENTRIES);
         assert!(ui.validated().is_ok());
+    }
+
+    #[test]
+    fn cable_downloads_need_the_layer_and_the_accepted_notice() {
+        let ui = |layers: &[(&str, bool)], consents: &[(&str, bool)]| UiPreferences {
+            layers: layers
+                .iter()
+                .map(|(id, on)| (id.to_string(), *on))
+                .collect(),
+            consents: consents
+                .iter()
+                .map(|(id, on)| (id.to_string(), *on))
+                .collect(),
+            ..UiPreferences::default()
+        };
+        assert!(
+            !UiPreferences::default().submarine_cables(),
+            "off by default"
+        );
+        assert!(!ui(&[(SUBMARINE_CABLES_LAYER, true)], &[]).submarine_cables());
+        assert!(!ui(&[], &[(SUBMARINE_CABLES_LAYER, true)]).submarine_cables());
+        assert!(!ui(
+            &[(SUBMARINE_CABLES_LAYER, false)],
+            &[(SUBMARINE_CABLES_LAYER, true)]
+        )
+        .submarine_cables());
+        assert!(ui(
+            &[(SUBMARINE_CABLES_LAYER, true)],
+            &[(SUBMARINE_CABLES_LAYER, true)]
+        )
+        .submarine_cables());
+
+        // Saved consents are read like the other maps; a bad entry is dropped.
+        let file = r#"{"preferences":{"ui":{
+            "layers": { "submarine-cables": true },
+            "consents": { "submarine-cables": true, "Bad Id": true, "other": "yes" }
+        }}}"#;
+        let saved = serde_json::from_str::<PersistedSettings>(file)
+            .unwrap()
+            .preferences
+            .ui;
+        assert!(saved.submarine_cables());
+        assert_eq!(saved.consents.len(), 1);
+        let bad = UiPreferences {
+            consents: BTreeMap::from([("NOT VALID".to_string(), true)]),
+            ..UiPreferences::default()
+        };
+        assert!(bad.validated().unwrap_err().contains("consent id"));
     }
 
     #[test]
