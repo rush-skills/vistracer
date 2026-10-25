@@ -16,7 +16,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
-use tauri::http::{header, Response, StatusCode, Uri};
+use tauri::http::{header, Method, Request, Response, StatusCode, Uri};
 
 pub const TILE_SCHEME: &str = "vistiles";
 pub const DEFAULT_CAP_BYTES: u64 = 500_000_000;
@@ -107,6 +107,11 @@ pub enum TileError {
     Upstream(String),
     /// The app has not finished starting.
     NotReady,
+    /// Only GET and HEAD read tiles.
+    MethodNotAllowed,
+    /// The upstream URL built from the layer table is not on the allowlist:
+    /// a programming error in `TILE_LAYERS`, never caused by the request.
+    UpstreamNotAllowed,
 }
 
 impl TileError {
@@ -119,6 +124,8 @@ impl TileError {
             }
             TileError::Paused | TileError::NotReady => StatusCode::SERVICE_UNAVAILABLE,
             TileError::Upstream(_) => StatusCode::BAD_GATEWAY,
+            TileError::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
+            TileError::UpstreamNotAllowed => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -135,6 +142,10 @@ impl TileError {
             ),
             TileError::Upstream(message) => format!("Imagery server error: {message}"),
             TileError::NotReady => "The tile cache is starting.".into(),
+            TileError::MethodNotAllowed => "Tile requests must use GET or HEAD.".into(),
+            TileError::UpstreamNotAllowed => {
+                "The layer's upstream host is not on the allowlist; nothing was fetched.".into()
+            }
         }
     }
 }
@@ -554,6 +565,20 @@ impl<F: TileFetcher> TileService<F> {
             .flatten()
     }
 
+    /// The response to one webview request. Only GET and HEAD read tiles;
+    /// HEAD gets the headers without the image.
+    pub async fn respond(&self, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
+        let method = request.method();
+        if method != Method::GET && method != Method::HEAD {
+            return into_response(Err(TileError::MethodNotAllowed));
+        }
+        let mut response = into_response(self.serve(request.uri()).await);
+        if method == Method::HEAD {
+            response.body_mut().clear();
+        }
+        response
+    }
+
     pub async fn serve(&self, uri: &Uri) -> Result<Tile, TileError> {
         let address = parse_tile_uri(uri)?;
         let content_type = address.layer.content_type;
@@ -599,7 +624,11 @@ impl<F: TileFetcher> TileService<F> {
         }
         let url = address.upstream_url();
         if !is_allowed_upstream(&url) {
-            return Err(TileError::BadHost);
+            log::error!(
+                "Tile layer {} points outside the allowlist",
+                address.layer.id
+            );
+            return Err(TileError::UpstreamNotAllowed);
         }
         let fetched = match self.fetcher.fetch(url).await {
             Ok(fetched) => fetched,
@@ -669,6 +698,11 @@ pub fn into_response(result: Result<Tile, TileError>) -> Response<Vec<u8>> {
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, tile.content_type)
             .body(tile.bytes),
+        Err(TileError::MethodNotAllowed) => builder
+            .status(TileError::MethodNotAllowed.status())
+            .header(header::ALLOW, "GET, HEAD")
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(TileError::MethodNotAllowed.message().into_bytes()),
         Err(err) => builder
             .status(err.status())
             .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
@@ -1363,6 +1397,52 @@ mod tests {
         breaker.record(false, start);
         assert!(breaker.is_paused(start));
         assert!(!breaker.is_paused(start + BREAKER_PAUSE));
+    }
+
+    #[tokio::test]
+    async fn only_get_and_head_read_tiles() {
+        let root = temp_root("tiles-methods");
+        let body = jpeg(800, 4);
+        let service = TileService::new(
+            TileStore::new(root.clone(), DEFAULT_CAP_BYTES),
+            FakeFetcher::image(body.clone()),
+        );
+        let request = |method: Method| {
+            Request::builder()
+                .method(method)
+                .uri("vistiles://localhost/blue-marble/3/2/1.jpg")
+                .body(Vec::new())
+                .unwrap()
+        };
+
+        for method in [Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS] {
+            let response = service.respond(&request(method.clone())).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{method}"
+            );
+            assert_eq!(response.headers()[header::ALLOW], "GET, HEAD");
+        }
+        assert_eq!(service.fetcher.calls(), 0, "other methods never fetch");
+
+        let get = service.respond(&request(Method::GET)).await;
+        assert_eq!(get.status(), StatusCode::OK);
+        assert_eq!(get.body(), &body);
+        let head = service.respond(&request(Method::HEAD)).await;
+        assert_eq!(head.status(), StatusCode::OK);
+        assert_eq!(head.headers()[header::CONTENT_TYPE], "image/jpeg");
+        assert!(head.body().is_empty());
+        assert_eq!(service.fetcher.calls(), 1, "HEAD reads the cached tile");
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_layer_pointing_outside_the_allowlist_is_an_internal_error() {
+        let response = into_response(Err(TileError::UpstreamNotAllowed));
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let message = String::from_utf8(response.into_body()).unwrap();
+        assert!(message.contains("not on the allowlist"), "{message}");
     }
 
     #[test]

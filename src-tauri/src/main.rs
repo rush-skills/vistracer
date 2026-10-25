@@ -258,11 +258,11 @@ fn main() {
                 .try_state::<AppState>()
                 .map(|state| state.tiles.clone());
             tauri::async_runtime::spawn(async move {
-                let result = match tiles {
-                    Some(tiles) => tiles.serve(request.uri()).await,
-                    None => Err(TileError::NotReady),
+                let response = match tiles {
+                    Some(tiles) => tiles.respond(&request).await,
+                    None => into_response(Err(TileError::NotReady)),
                 };
-                responder.respond(into_response(result));
+                responder.respond(response);
             });
         })
         .plugin(
