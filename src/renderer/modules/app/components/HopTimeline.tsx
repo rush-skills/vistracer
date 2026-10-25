@@ -148,7 +148,7 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
   const maxRtt = hops.reduce((max, hop) => Math.max(max, hop.maxMs ?? hop.avgMs ?? 0), 0);
 
   return (
-    <section className="timeline glass" aria-labelledby="timeline-title">
+    <section className="timeline glass" data-globe-inset="bottom" aria-labelledby="timeline-title">
       <header className="timeline__header">
         <h2 id="timeline-title">Hop timeline</h2>
         {hops.length > 0 && (

@@ -363,7 +363,7 @@ export const TopBar: React.FC = () => {
   const isV6 = (target: string) => target.includes(":");
 
   return (
-    <header className="trace-panel glass">
+    <header className="trace-panel glass" data-globe-inset="top">
       <form className="trace-panel__form" onSubmit={handleSubmit}>
         <div className="trace-panel__row">
           <img src={logo} alt="VisTracer" className="trace-panel__logo" />

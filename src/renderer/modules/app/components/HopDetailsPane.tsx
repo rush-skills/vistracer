@@ -75,6 +75,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
         ref={toggleRef}
         type="button"
         className="hop-details__expand glass"
+        data-globe-inset="right"
         aria-label="Show hop details"
         aria-expanded={false}
         onClick={() => toggle(false)}
@@ -86,7 +87,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
   }
 
   return (
-    <aside className="hop-details glass" aria-label="Hop details">
+    <aside className="hop-details glass" data-globe-inset="right" aria-label="Hop details">
       <header className="hop-details__header">
         <div className="hop-details__heading">
           <h2>Hops</h2>

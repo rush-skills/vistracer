@@ -1,4 +1,4 @@
-import type { CameraFocus, GlobeScene } from "@renderer/lib/globe";
+import type { CameraFocus, GlobeScene, ViewInsets } from "@renderer/lib/globe";
 import type { ImageryOptions } from "@renderer/lib/layers";
 
 /**
@@ -9,7 +9,8 @@ import type { ImageryOptions } from "@renderer/lib/layers";
 export interface GlobeController {
   /** Redraws only the item groups whose lists changed (by identity). */
   setScene(scene: GlobeScene): void;
-  flyTo(focus: CameraFocus): void;
+  /** `insets`: pixels of the canvas the panels cover; the hop is framed in the rest. */
+  flyTo(focus: CameraFocus, insets?: ViewInsets): void;
   setInputEnabled(enabled: boolean): void;
   /** Day/night shading and online imagery (layer panel switches). */
   setImagery(options: ImageryOptions): void;

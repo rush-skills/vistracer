@@ -5,7 +5,8 @@ import {
   buildGlobeScene,
   hopPosition,
   nextCameraFocus,
-  type CameraTracker
+  type CameraTracker,
+  type ViewInsets
 } from "@renderer/lib/globe";
 import { MAX_CLUSTER_LEVEL } from "@renderer/lib/infra/cluster";
 import {
@@ -28,6 +29,34 @@ interface GlobeViewportProps {
 
 /** How long the "detailed imagery unavailable" note stays after the last failed tile. */
 const IMAGERY_NOTICE_MS = 30_000;
+
+/** Attribute of the panels a flight frames the hop around (see `ViewInsets`). */
+export const GLOBE_INSET = "data-globe-inset";
+
+/**
+ * Pixels of each canvas edge that the panels marked with GLOBE_INSET cover
+ * ("top", "right", "bottom"). Collapsed panels are small, so they cost
+ * little; a hidden panel has no size.
+ */
+export function measureInsets(canvas: HTMLElement): ViewInsets {
+  const box = canvas.getBoundingClientRect();
+  const insets: ViewInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  for (const panel of document.querySelectorAll<HTMLElement>(`[${GLOBE_INSET}]`)) {
+    const rect = panel.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      continue;
+    }
+    const edge = panel.getAttribute(GLOBE_INSET);
+    if (edge === "right") {
+      insets.right = Math.max(insets.right, box.right - rect.left);
+    } else if (edge === "bottom") {
+      insets.bottom = Math.max(insets.bottom, box.bottom - rect.top);
+    } else if (edge === "top") {
+      insets.top = Math.max(insets.top, rect.bottom - box.top);
+    }
+  }
+  return insets;
+}
 
 export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIndex }) => {
   const hoveredHopIndex = useTracerouteStore((state) => state.hoveredHopIndex);
@@ -125,7 +154,8 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
     const { tracker, focus } = nextCameraFocus(trackerRef.current, runKey, hops, selectedHopIndex);
     trackerRef.current = tracker;
     if (focus) {
-      controller.flyTo(focus);
+      const canvas = containerRef.current;
+      controller.flyTo(focus, canvas ? measureInsets(canvas) : undefined);
     }
   }, [controller, runKey, hops, selectedHopIndex]);
 

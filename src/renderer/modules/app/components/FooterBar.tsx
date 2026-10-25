@@ -40,7 +40,7 @@ export const FooterBar: React.FC = () => {
 
   return (
     <>
-      <footer className="footer-bar glass">
+      <footer className="footer-bar glass" data-globe-inset="bottom">
         {geoMeta && (
           <GeoWarningBanner geoMeta={geoMeta} onConfigure={() => setIsSettingsOpen(true)} />
         )}

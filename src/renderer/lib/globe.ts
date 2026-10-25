@@ -592,6 +592,66 @@ export interface FlightStep extends CameraPosition {
   kind: "rise" | "move";
 }
 
+/** Pixels of each canvas edge that panels cover. */
+export interface ViewInsets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** The canvas and its camera, to frame a hop in the area the panels leave free. */
+export interface ViewFrame {
+  insets: ViewInsets;
+  widthPx: number;
+  heightPx: number;
+  /** Horizontal field of view of the camera. */
+  fovRad: number;
+}
+
+/** A free area smaller than this share of the canvas is not worth framing in. */
+const MIN_FREE_SHARE = 0.3;
+
+function freeArea(frame: ViewFrame): { width: number; height: number } | null {
+  const width = frame.widthPx - frame.insets.left - frame.insets.right;
+  const height = frame.heightPx - frame.insets.top - frame.insets.bottom;
+  return width >= frame.widthPx * MIN_FREE_SHARE && height >= frame.heightPx * MIN_FREE_SHARE
+    ? { width, height }
+    : null;
+}
+
+/**
+ * Where a top-down camera at `heightM` must look so that `focus` appears at
+ * the centre of the free area instead of the centre of the canvas. The
+ * offset is the pixel offset times the ground distance of a pixel at the
+ * centre, so it is exact near the ground and an estimate far out, where
+ * the Earth curves away.
+ */
+export function framedTarget(
+  focus: { latitude: number; longitude: number },
+  heightM: number,
+  frame: ViewFrame
+): { latitude: number; longitude: number } {
+  if (!freeArea(frame)) {
+    return { latitude: focus.latitude, longitude: focus.longitude };
+  }
+  // Panels on the right push the free centre left: the camera looks right
+  // (east) of the hop so the hop shows left of the canvas centre.
+  const dxPx = (frame.insets.right - frame.insets.left) / 2;
+  const dyPx = (frame.insets.bottom - frame.insets.top) / 2;
+  if (dxPx === 0 && dyPx === 0) {
+    return { latitude: focus.latitude, longitude: focus.longitude };
+  }
+  const kmPerPx = (2 * heightM * Math.tan(frame.fovRad / 2)) / frame.widthPx / 1000;
+  // North is up in a top-down view: panels at the bottom move the camera south.
+  const bearing = Math.atan2(dxPx, -dyPx);
+  const target = destination(focus, bearing, Math.hypot(dxPx, dyPx) * kmPerPx);
+  return {
+    latitude: Math.max(-89, Math.min(89, target.latitude)),
+    longitude: target.longitude
+  };
+}
+
 /**
  * Camera moves the app makes itself (following a trace, selecting a hop,
  * exports) stay at or above `floorM`, the height where the globe uses only
@@ -599,17 +659,27 @@ export interface FlightStep extends CameraPosition {
  * they cover, so only zooms the user makes may fetch them. From below the
  * floor, the camera first rises over the place the user zoomed into, then
  * moves to the hop; it never crosses new ground below the floor.
+ *
+ * With `frame`, the hop is framed in the area the panels leave free: the
+ * ring must fit that area, and the camera looks past the hop so the hop
+ * sits at the free area's centre.
  */
 export function planFlight(
   current: CameraPosition,
   focus: CameraFocus,
-  floorM: number
+  floorM: number,
+  frame?: ViewFrame
 ): FlightStep[] {
+  const free = frame ? freeArea(frame) : null;
+  const shrink =
+    frame && free ? Math.max(frame.widthPx / free.width, frame.heightPx / free.height) : 1;
+  const height = flyHeight(current.height, focus.radiusKm * shrink, floorM);
+  const target = frame ? framedTarget(focus, height, frame) : focus;
   const move: FlightStep = {
     kind: "move",
-    latitude: focus.latitude,
-    longitude: focus.longitude,
-    height: flyHeight(current.height, focus.radiusKm, floorM)
+    latitude: target.latitude,
+    longitude: target.longitude,
+    height
   };
   if (current.height >= floorM) {
     return [move];

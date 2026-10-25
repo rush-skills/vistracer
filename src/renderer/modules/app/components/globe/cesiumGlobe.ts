@@ -638,7 +638,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       }
     },
 
-    flyTo(focus) {
+    flyTo(focus, insets) {
       // A new app flight cancels the running one. The cancelled flight only
       // ends the gate's flight state; OnlineImageryGate keeps the online
       // layer hidden until the user moves the camera.
@@ -666,7 +666,13 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           height: position.height
         },
         focus,
-        floor
+        floor,
+        insets && {
+          insets,
+          widthPx: canvas.clientWidth,
+          heightPx: canvas.clientHeight,
+          fovRad: horizontalFov()
+        }
       );
       // App-made moves load no online tiles, not even the wider view while
       // the camera rises. The layer stays hidden after the move until the

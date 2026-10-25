@@ -7,7 +7,7 @@ import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
 import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
 import type { GlobeCallbacks, GlobeController } from "../globe/controller";
-import { GlobeViewport } from "../GlobeViewport";
+import { GlobeViewport, measureInsets } from "../GlobeViewport";
 
 // WebGL does not exist in jsdom: the Cesium adapter is replaced at the seam.
 const fake = vi.hoisted(() => ({
@@ -119,18 +119,16 @@ describe("GlobeViewport", () => {
       [1, "selected"]
     ]);
     expect(lastScene()?.arcs).toHaveLength(1);
-    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({
-      latitude: 50.1,
-      longitude: 8.7,
-      radiusKm: 50
-    });
+    expect(fake.controller.flyTo).toHaveBeenLastCalledWith(
+      { latitude: 50.1, longitude: 8.7, radiusKm: 50 },
+      { top: 0, right: 0, bottom: 0, left: 0 }
+    );
 
     rerender(<GlobeViewport run={run} selectedHopIndex={2} />);
-    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({
-      latitude: 52.4,
-      longitude: 4.9,
-      radiusKm: 50
-    });
+    expect(fake.controller.flyTo).toHaveBeenLastCalledWith(
+      { latitude: 52.4, longitude: 4.9, radiusKm: 50 },
+      { top: 0, right: 0, bottom: 0, left: 0 }
+    );
     const flights = fake.controller.flyTo.mock.calls.length;
     // An enrichment update with the same hops does not move the camera.
     rerender(<GlobeViewport run={runWith([...run.hops])} selectedHopIndex={2} />);
@@ -256,5 +254,31 @@ describe("GlobeViewport", () => {
     );
     act(() => fake.callbacks?.onHoverSite(undefined));
     expect(useInfraStore.getState().hoveredSite).toBeUndefined();
+  });
+});
+
+describe("measureInsets", () => {
+  it("measures how far the marked panels reach into the canvas from each edge", () => {
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height }) as DOMRect;
+    const canvas = document.createElement("div");
+    canvas.getBoundingClientRect = () => rect(0, 0, 960, 640);
+    const panel = (edge: string, box: DOMRect) => {
+      const element = document.createElement("div");
+      element.setAttribute("data-globe-inset", edge);
+      element.getBoundingClientRect = () => box;
+      document.body.append(element);
+      return element;
+    };
+    const panels = [
+      panel("right", rect(612, 12, 336, 500)),
+      panel("bottom", rect(12, 440, 500, 120)),
+      panel("bottom", rect(12, 572, 600, 56)),
+      panel("top", rect(12, 12, 420, 68)),
+      // A hidden panel has no size and covers nothing.
+      panel("right", rect(0, 0, 0, 0))
+    ];
+    expect(measureInsets(canvas)).toEqual({ top: 80, right: 348, bottom: 200, left: 0 });
+    panels.forEach((element) => element.remove());
   });
 });

@@ -12,6 +12,7 @@ import {
   buildRings,
   circlePositions,
   flyHeight,
+  framedTarget,
   greatCircleKm,
   hopIndexToColor,
   latencyToColor,
@@ -497,6 +498,51 @@ describe("network colours", () => {
     expect(scene.arcs).toHaveLength(3);
     expect(scene.arcs[0].color).toBe(latencyToColor(11));
     expect(scene.markers.find((m) => m.hopIndex === 3)?.color).toBe(hopIndexToColor(3));
+  });
+});
+
+describe("flights frame the hop in the area the panels leave free", () => {
+  // 960 × 640 window: hop pane 336 px on the right, timeline and status bar
+  // 200 px at the bottom, trace panel 80 px at the top.
+  const frame = {
+    insets: { top: 80, right: 348, bottom: 200, left: 0 },
+    widthPx: 960,
+    heightPx: 640,
+    fovRad: Math.PI / 3
+  };
+  const kmPerPx = (heightM: number) => (2 * heightM * Math.tan(Math.PI / 6)) / 960 / 1000;
+
+  it("looks east and south of the hop by half the covered width and height", () => {
+    const target = framedTarget(FRANKFURT, 2_000_000, frame);
+    expect(target.longitude).toBeGreaterThan(FRANKFURT.longitude);
+    expect(target.latitude).toBeLessThan(FRANKFURT.latitude);
+    // The hop then sits (348/2, (200-80)/2) px from the canvas centre: the
+    // centre of the free area.
+    const expectedKm = Math.hypot(174, 60) * kmPerPx(2_000_000);
+    expect(greatCircleKm(FRANKFURT, target)).toBeCloseTo(expectedKm, 0);
+  });
+
+  it("keeps the hop centred with no panels, or when the free area is too small", () => {
+    const none = { ...frame, insets: { top: 0, right: 0, bottom: 0, left: 0 } };
+    expect(framedTarget(FRANKFURT, 2_000_000, none)).toEqual(FRANKFURT);
+    const crowded = { ...frame, insets: { top: 0, right: 800, bottom: 0, left: 0 } };
+    expect(framedTarget(FRANKFURT, 2_000_000, crowded)).toEqual(FRANKFURT);
+  });
+
+  it("moves to the framed target, fits the ring in the free area and keeps the floor", () => {
+    const current = { latitude: 0, longitude: 0, height: 3_000_000 };
+    const focus = { ...FRANKFURT, radiusKm: 1000 };
+    const floorM = 2_500_000;
+    const [plain] = planFlight(current, focus, floorM);
+    const [framed] = planFlight(current, focus, floorM, frame);
+    // A 1,000 km ring needs 4,000 km of height; the free area is 612 × 360 px
+    // of 960 × 640, so it needs 640/360 times that.
+    expect(plain.height).toBe(4_000_000);
+    expect(framed.height).toBeCloseTo(4_000_000 * (640 / 360), -3);
+    expect(framed.longitude).toBeGreaterThan(FRANKFURT.longitude);
+    const low = planFlight({ ...current, height: 300_000 }, focus, floorM, frame);
+    expect(low.map((step) => step.kind)).toEqual(["rise", "move"]);
+    expect(low.every((step) => step.height >= floorM)).toBe(true);
   });
 });
 
