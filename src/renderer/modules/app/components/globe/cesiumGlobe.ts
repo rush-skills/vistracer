@@ -324,40 +324,49 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   let minimized = false;
   const updateVisibility = () =>
     governor.setVisible(document.visibilityState === "visible" && !minimized);
-  document.addEventListener("visibilitychange", updateVisibility);
-  // Not every webview reports a minimized window as hidden.
-  let unlistenResize: (() => void) | undefined;
-  let minimizedTimer: number | undefined;
-  if (isTauri()) {
-    const appWindow = getCurrentWindow();
+  // Not every webview reports a minimized window as hidden, so the Tauri
+  // window is asked too: after a resize and on every visibility change.
+  const appWindow = isTauri() ? getCurrentWindow() : undefined;
+  const checkMinimized = () => {
     void appWindow
-      .onResized(() => {
-        window.clearTimeout(minimizedTimer);
-        minimizedTimer = window.setTimeout(() => {
-          void appWindow
-            .isMinimized()
-            .then((value) => {
-              minimized = value;
-              updateVisibility();
-            })
-            .catch(() => undefined);
-        }, MINIMIZED_CHECK_MS);
-      })
-      .then((unlisten) => {
-        if (destroyed) {
-          unlisten();
-        } else {
-          unlistenResize = unlisten;
+      ?.isMinimized()
+      .then((value) => {
+        if (!destroyed) {
+          minimized = value;
+          updateVisibility();
         }
       })
       .catch(() => undefined);
-  }
+  };
+  const onVisibilityChange = () => {
+    updateVisibility();
+    checkMinimized();
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  let unlistenResize: (() => void) | undefined;
+  let minimizedTimer: number | undefined;
+  void appWindow
+    ?.onResized(() => {
+      window.clearTimeout(minimizedTimer);
+      minimizedTimer = window.setTimeout(checkMinimized, MINIMIZED_CHECK_MS);
+    })
+    .then((unlisten) => {
+      if (destroyed) {
+        unlisten();
+      } else {
+        unlistenResize = unlisten;
+      }
+    })
+    .catch(() => undefined);
 
   let removeBatteryListener: (() => void) | undefined;
   const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryLike> };
   void nav
     .getBattery?.()
     .then((battery) => {
+      if (destroyed) {
+        return;
+      }
       const update = () => governor.setOnBattery(!battery.charging);
       update();
       battery.addEventListener("chargingchange", update);
@@ -462,7 +471,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       removePostRender();
       removePreRender();
       resizeObserver.disconnect();
-      document.removeEventListener("visibilitychange", updateVisibility);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       canvas.removeEventListener("pointerdown", wake);
       canvas.removeEventListener("pointerup", wake);
       canvas.removeEventListener("wheel", wake);

@@ -29,7 +29,6 @@ export interface GeoPoint {
 export type Emphasis = "normal" | "hovered" | "selected";
 
 export interface MarkerSpec {
-  id: string;
   hopIndex: number;
   position: GeoPoint;
   color: string;
@@ -37,7 +36,6 @@ export interface MarkerSpec {
 }
 
 export interface ArcSpec {
-  id: string;
   fromHopIndex: number;
   toHopIndex: number;
   positions: GeoPoint[];
@@ -59,7 +57,6 @@ export const RING_STYLES: Record<LocationConfidence, RingStyle> = {
 };
 
 export interface RingSpec extends RingStyle {
-  id: string;
   hopIndex: number;
   radiusKm: number;
   confidence: LocationConfidence;
@@ -73,7 +70,6 @@ export interface RingSpec extends RingStyle {
  * site that answered is somewhere inside it.
  */
 export interface ReachSpec {
-  id: string;
   hopIndex: number;
   referenceHopIndex: number;
   radiusKm: number;
@@ -83,7 +79,6 @@ export interface ReachSpec {
 }
 
 export interface LabelSpec {
-  id: string;
   hopIndex: number;
   position: GeoPoint;
   text: string;
@@ -274,7 +269,6 @@ export function buildArcs(hops: HopResolution[]): ArcSpec[] {
       continue;
     }
     arcs.push({
-      id: `arc-${from.hop.hopIndex}-${to.hop.hopIndex}`,
       fromHopIndex: from.hop.hopIndex,
       toHopIndex: to.hop.hopIndex,
       positions: arcPositions(from.position, to.position),
@@ -301,7 +295,6 @@ export function buildRings(
     const emphasised = emphasisOf(hop.hopIndex, selectedHopIndex, hoveredHopIndex) !== "normal";
     return [
       {
-        id: `ring-${hop.hopIndex}`,
         hopIndex: hop.hopIndex,
         radiusKm: position.radiusKm,
         confidence: position.confidence,
@@ -335,7 +328,6 @@ function buildReaches(
     const emphasised = emphasisOf(hop.hopIndex, selectedHopIndex, hoveredHopIndex) !== "normal";
     return [
       {
-        id: `reach-${hop.hopIndex}`,
         hopIndex: hop.hopIndex,
         referenceHopIndex: anycast.referenceHopIndex,
         radiusKm,
@@ -353,7 +345,6 @@ export function buildMarkers(
   hoveredHopIndex?: number
 ): MarkerSpec[] {
   const markers = locatedHops(hops).map(({ hop, position }) => ({
-    id: `hop-${hop.hopIndex}`,
     hopIndex: hop.hopIndex,
     position: { latitude: position.latitude, longitude: position.longitude, height: 0 },
     color: hopIndexToColor(hop.hopIndex),
@@ -383,7 +374,6 @@ function buildLabels(
     if (position) {
       return [
         {
-          id: `label-${hopIndex}`,
           hopIndex,
           position: { latitude: position.latitude, longitude: position.longitude, height: 0 },
           text: `${hopIndex} · ${position.label}`
@@ -395,7 +385,6 @@ function buildLabels(
       // The northernmost point of the circle: on the area, not at a site.
       return [
         {
-          id: `label-${hopIndex}`,
           hopIndex,
           position: reach.positions[0],
           text: `${hopIndex} · anycast (${hop.location.anycast.service}), within ${Math.round(
