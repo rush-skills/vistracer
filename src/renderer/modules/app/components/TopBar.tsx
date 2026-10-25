@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   type GeoDatabaseMeta,
@@ -12,7 +12,7 @@ import { FiSliders } from "react-icons/fi";
 import { usePanel } from "@renderer/hooks/usePanel";
 import { IntegrationSettingsModal } from "./IntegrationSettingsModal";
 import logo from "@assets/logo.png";
-import { UI_EVENTS } from "../lib/uiEvents";
+import { UI_EVENTS, type StartTraceDetail } from "../lib/uiEvents";
 import { INTEGRATION_DEFAULTS, normalizeIntegrations } from "../lib/integrationSettings";
 import "./TopBar.css";
 
@@ -101,6 +101,46 @@ export const TopBar: React.FC = () => {
   const { data: recentRuns } = useRecentRuns();
 
   const isRunning = status === "running";
+
+  // The command bar starts traces through UI_EVENTS.START_TRACE; they use
+  // the options in this form, read from the latest render.
+  const formRef = useRef(form);
+  formRef.current = form;
+  const traceTo = React.useCallback(
+    async (rawTarget: string) => {
+      const target = rawTarget.trim();
+      if (!target || useTracerouteStore.getState().status === "running") {
+        return;
+      }
+      const options = formRef.current;
+      await startRun({
+        target,
+        protocol: options.protocol,
+        maxHops: options.maxHops,
+        timeoutMs: options.timeoutMs,
+        packetCount: options.packetCount,
+        forceFresh: options.forceFresh
+      });
+    },
+    [startRun]
+  );
+
+  useEffect(() => {
+    const handleStartTrace = (event: Event) => {
+      const { target } = (event as CustomEvent<StartTraceDetail>).detail;
+      setForm((previous) => ({ ...previous, target }));
+      void traceTo(target);
+    };
+    window.addEventListener(UI_EVENTS.START_TRACE, handleStartTrace);
+    return () => window.removeEventListener(UI_EVENTS.START_TRACE, handleStartTrace);
+  }, [traceTo]);
+
+  // Every finished run, from this form or the command bar, is a recent run.
+  useEffect(() => {
+    if (status === "success" || status === "error") {
+      void queryClient.invalidateQueries({ queryKey: ["recent-runs"] });
+    }
+  }, [status, queryClient]);
 
   useEffect(() => {
     const handleOpenSettings = () => setSettingsModalOpen(true);
@@ -289,27 +329,11 @@ export const TopBar: React.FC = () => {
       });
     };
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isSubmitEnabled) {
-      return;
+    if (isSubmitEnabled) {
+      void traceTo(form.target);
     }
-
-    const target = form.target.trim();
-    if (!target) {
-      return;
-    }
-
-    await startRun({
-      target,
-      protocol: form.protocol,
-      maxHops: form.maxHops,
-      timeoutMs: form.timeoutMs,
-      packetCount: form.packetCount,
-      forceFresh: form.forceFresh
-    });
-
-    void queryClient.invalidateQueries({ queryKey: ["recent-runs"] });
   };
 
   const handleRecentRunSelect = (event: React.ChangeEvent<HTMLSelectElement>) => {

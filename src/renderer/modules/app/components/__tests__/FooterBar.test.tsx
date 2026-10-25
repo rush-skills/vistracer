@@ -13,6 +13,7 @@ const exports = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/exportCapture", () => ({
+  DEFAULT_DWELL_SECONDS: 2,
   runExport: (options: ExportOptions) =>
     new Promise<{ filename: string }>((resolve) => {
       exports.pending.push({ options, resolve: (filename) => resolve({ filename }) });

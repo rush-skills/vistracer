@@ -5,6 +5,9 @@ import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 
 export type ExportFormat = "png" | "jpg" | "webp" | "webm" | "gif";
 
+/** Seconds each hop stays on screen in an animation, unless the dialog sets another value. */
+export const DEFAULT_DWELL_SECONDS = 2;
+
 export interface ExportOptions {
   format: ExportFormat;
   dwellSeconds: number;

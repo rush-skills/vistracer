@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useGeoDatabaseMeta } from "@renderer/hooks/useGeoDatabaseMeta";
-import { useTracerouteStore, selectCurrentRun } from "@renderer/state/tracerouteStore";
 import { useExportStore } from "@renderer/state/exportStore";
+import { useCommand } from "@renderer/hooks/useCommands";
 import { useNoticeStore } from "@renderer/state/noticeStore";
 import { GeoWarningBanner } from "./GeoWarningBanner";
 import { GeoSettingsModal } from "./GeoSettingsModal";
@@ -11,10 +11,10 @@ import "./FooterBar.css";
 
 export const FooterBar: React.FC = () => {
   const { data: geoMeta, refetch: refetchGeoMeta } = useGeoDatabaseMeta();
-  const currentRun = useTracerouteStore(selectCurrentRun);
   const exporting = useExportStore((state) => state.working);
   const dialogOpen = useExportStore((state) => state.dialogOpen);
-  const { openDialog, closeDialog, start } = useExportStore.getState();
+  const { closeDialog, start } = useExportStore.getState();
+  const exportRoute = useCommand("export.dialog");
   const notice = useNoticeStore((state) => state.notice);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -23,7 +23,6 @@ export const FooterBar: React.FC = () => {
     await refetchGeoMeta();
   };
 
-  const exportDisabled = !currentRun || exporting;
   const updated = geoMeta?.updatedAt
     ? ` (updated ${new Date(geoMeta.updatedAt).toLocaleDateString()})`
     : "";
@@ -60,8 +59,9 @@ export const FooterBar: React.FC = () => {
           <button
             type="button"
             className="button footer-bar__export"
-            onClick={openDialog}
-            disabled={exportDisabled}
+            onClick={exportRoute.run}
+            disabled={Boolean(exportRoute.disabledReason)}
+            title={exportRoute.disabledReason}
           >
             {exporting ? "Exporting…" : "Export route"}
           </button>

@@ -1,0 +1,102 @@
+.command-palette__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: var(--color-scrim);
+}
+
+.command-palette {
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(480px, 72vh);
+  overflow: hidden;
+}
+
+.command-palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-text-muted);
+}
+
+.command-palette__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  outline: none;
+}
+
+.command-palette__search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.command-palette__list {
+  flex: 1;
+  margin: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.command-palette__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: var(--text-md);
+}
+
+.command-palette__option.is-active {
+  background: var(--color-accent-soft);
+}
+
+.command-palette__option[aria-disabled="true"] {
+  cursor: default;
+}
+
+.command-palette__option[aria-disabled="true"] .command-palette__title {
+  color: var(--color-text-muted);
+}
+
+.command-palette__detail {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-palette__group {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.command-palette__empty {
+  margin: 0;
+  padding: var(--space-5) var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+  text-align: center;
+}
+
+.command-palette__keys {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--color-line);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
