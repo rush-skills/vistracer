@@ -63,3 +63,9 @@ export const MAX_SATELLITES_PER_GROUP = 12_000;
  * (`SATELLITE_TTL_MS`); after that, turning the group on again asks for it.
  */
 export const SATELLITE_DATA_TTL_MS = 12 * 3_600_000;
+
+/**
+ * A copy dated more than this ahead of the clock was saved while the clock
+ * was wrong; it counts as stale (as `CLOCK_TOLERANCE_MS` in the backend).
+ */
+export const CLOCK_TOLERANCE_MS = 5 * 60_000;

@@ -46,6 +46,11 @@ const MIN_REQUEST_INTERVAL_MS: i64 = 2 * 3_600_000;
 const HTTP_ERROR_PAUSE_MS: i64 = 2 * 3_600_000;
 /// No answer at all (offline, DNS, timeout): the same group again after this.
 const NETWORK_ERROR_PAUSE_MS: i64 = 15 * 60_000;
+/// Saved times further in the future than this are wrong (the system clock
+/// was ahead when they were saved): a copy that new is stale, and a request
+/// or pause time that new is counted again from now
+/// (`RequestLog::correct_clock`).
+const CLOCK_TOLERANCE_MS: i64 = 5 * 60_000;
 /// More objects than any group has; bounds what one answer can hold.
 const MAX_SATELLITES: usize = 20_000;
 const MAX_NAME_LEN: usize = 100;
@@ -142,11 +147,33 @@ pub enum SatelliteError {
     Download { message: String, retry_at: i64 },
 }
 
-/// "18:40 UTC" for a time in ms since the epoch.
+/// "2026-10-26 18:40 UTC" for a time in ms since the epoch.
 fn clock_time(ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ms)
-        .map(|time| time.format("%H:%M UTC").to_string())
+        .map(|time| time.format("%Y-%m-%d %H:%M UTC").to_string())
         .unwrap_or_else(|| "later".to_string())
+}
+
+/// Whether a copy downloaded at `fetched_at` may be used at `now`. A copy
+/// dated in the future (beyond the tolerance) is not: the clock was wrong.
+fn is_fresh(fetched_at: i64, now: i64) -> bool {
+    let age = now - fetched_at;
+    (-CLOCK_TOLERANCE_MS..SATELLITE_TTL_MS).contains(&age)
+}
+
+/// How the note names an older copy.
+fn copy_age(fetched_at: i64, now: i64) -> String {
+    if fetched_at - now > CLOCK_TOLERANCE_MS {
+        format!(
+            "the saved copy dated {} (the system clock was ahead when it was saved)",
+            clock_time(fetched_at)
+        )
+    } else {
+        format!(
+            "the copy from {} hours ago",
+            (now - fetched_at).max(0) / 3_600_000
+        )
+    }
 }
 
 impl SatelliteError {
@@ -320,6 +347,32 @@ struct RequestLog {
     paused_until: Option<(i64, String)>,
 }
 
+impl RequestLog {
+    /// Times saved while the system clock was ahead are counted again from
+    /// `now`, once: a request time becomes now, a pause its full length from
+    /// now. So a wait never lasts longer than its own length and does not
+    /// start again on the next call. True when a time changed.
+    fn correct_clock(&mut self, now: i64) -> bool {
+        let mut changed = false;
+        let mut cap = |at: &mut i64, length: i64| {
+            if *at > now + length + CLOCK_TOLERANCE_MS {
+                *at = now + length;
+                changed = true;
+            }
+        };
+        for at in self.requested_at.values_mut() {
+            cap(at, 0);
+        }
+        for (until, _) in self.retry_at.values_mut() {
+            cap(until, NETWORK_ERROR_PAUSE_MS);
+        }
+        if let Some((until, _)) = self.paused_until.as_mut() {
+            cap(until, HTTP_ERROR_PAUSE_MS);
+        }
+        changed
+    }
+}
+
 #[derive(Default)]
 struct SatelliteState {
     log: Option<RequestLog>,
@@ -439,16 +492,16 @@ impl<F: Fetcher> SatelliteService<F> {
             }
         }
         let saved = state.loaded.get(def.group).cloned();
-        if let Some(fresh) = saved
-            .as_ref()
-            .filter(|g| (now - g.fetched_at).max(0) < SATELLITE_TTL_MS)
-        {
+        if let Some(fresh) = saved.as_ref().filter(|g| is_fresh(g.fetched_at, now)) {
             return Ok(fresh.clone());
         }
         if state.log.is_none() {
             state.log = Some(read_json(self.log_path()).await.unwrap_or_default());
         }
         let log = state.log.get_or_insert_with(RequestLog::default);
+        if log.correct_clock(now) {
+            let _ = write_json(self.log_path(), log).await;
+        }
         let failure = match Self::next_request(log, def).filter(|(until, _)| now < *until) {
             Some((until, reason)) => SatelliteError::Waiting { until, reason },
             None => {
@@ -481,8 +534,8 @@ impl<F: Fetcher> SatelliteService<F> {
         match saved {
             Some(older) => Ok(Arc::new(SatelliteGroup {
                 note: Some(format!(
-                    "Showing the copy from {} hours ago. {}",
-                    (now - older.fetched_at).max(0) / 3_600_000,
+                    "Showing {}. {}",
+                    copy_age(older.fetched_at, now),
                     failure.message()
                 )),
                 ..(*older).clone()
@@ -672,6 +725,15 @@ mod tests {
         SatelliteService::with_clock(FakeFetcher::new(replies), dir.to_path_buf(), move || {
             time.load(Ordering::SeqCst)
         })
+    }
+
+    /// A service whose clock stands at `at`.
+    fn service_at(
+        replies: Vec<Result<Fetched, FetchError>>,
+        dir: &std::path::Path,
+        at: i64,
+    ) -> SatelliteService<FakeFetcher> {
+        SatelliteService::with_clock(FakeFetcher::new(replies), dir.to_path_buf(), move || at)
     }
 
     fn starlink() -> &'static SatelliteGroupDef {
@@ -1021,6 +1083,117 @@ mod tests {
         );
         assert_eq!(service.fetcher.calls(), 0);
         std::fs::remove_file(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_copy_dated_in_the_future_is_stale() {
+        // The system clock ran a day ahead when the copy was saved, then
+        // was set right.
+        let dir = temp_dir();
+        let clock = Clock::new();
+        let ahead = |fetched_at: i64| SatelliteGroup {
+            group: "starlink".into(),
+            fetched_at,
+            source: "saved".into(),
+            note: None,
+            satellites: parse_gp_csv(FIXTURE.as_bytes()).unwrap(),
+        };
+        let path = dir.join("starlink.json");
+        // A minute of drift is no reason to ask again.
+        write_atomic(&path, &serde_json::to_vec(&ahead(T0 + 60_000)).unwrap()).unwrap();
+        let drift = service(vec![reply(200, FIXTURE)], &dir, &clock);
+        assert_eq!(
+            drift.get(starlink(), ON).await.unwrap().fetched_at,
+            T0 + 60_000
+        );
+        assert_eq!(drift.fetcher.calls(), 0);
+
+        write_atomic(&path, &serde_json::to_vec(&ahead(T0 + 24 * HOUR)).unwrap()).unwrap();
+        let fixed = service(vec![reply(200, FIXTURE)], &dir, &clock);
+        assert_eq!(fixed.get(starlink(), ON).await.unwrap().fetched_at, T0);
+        assert_eq!(fixed.fetcher.calls(), 1);
+
+        // When no new copy may be had, the note says what is wrong with the old one.
+        write_atomic(&path, &serde_json::to_vec(&ahead(T0 + 24 * HOUR)).unwrap()).unwrap();
+        let refused = service(vec![reply(403, "")], &dir, &clock);
+        clock.advance(2 * HOUR);
+        let shown = refused.get(starlink(), ON).await.unwrap();
+        let note = shown.note.as_deref().unwrap();
+        assert!(
+            note.contains("dated 2026-09-22 14:13 UTC (the system clock was ahead"),
+            "{note}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_request_or_pause_dated_in_the_future_waits_no_longer_than_its_length() {
+        let dir = temp_dir();
+        let clock = Clock::new();
+        let day = 24 * HOUR;
+        let log = RequestLog {
+            requested_at: BTreeMap::from([("gps-ops".to_string(), T0 + day)]),
+            retry_at: BTreeMap::from([("stations".to_string(), (T0 + day, "timed out".into()))]),
+            paused_until: None,
+        };
+        write_atomic(
+            &dir.join("requests.json"),
+            &serde_json::to_vec(&log).unwrap(),
+        )
+        .unwrap();
+        let service = service(vec![reply(200, FIXTURE)], &dir, &clock);
+        // Counted from now: 2 hours, not a day and 2 hours; the message has the date.
+        let gps = service
+            .get(group_def("gps-ops").unwrap(), ON)
+            .await
+            .unwrap_err();
+        assert!(matches!(gps, SatelliteError::Waiting { until, .. } if until == T0 + 2 * HOUR));
+        assert!(
+            gps.message().contains("before 2026-09-21 16:13 UTC"),
+            "{}",
+            gps.message()
+        );
+        let stations = service
+            .get(group_def("stations").unwrap(), ON)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(stations, SatelliteError::Waiting { until, .. } if until == T0 + 15 * 60_000)
+        );
+        assert_eq!(service.fetcher.calls(), 0);
+        // The correction is saved: an hour later, after a restart, the wait
+        // still ends at the same time (it does not start again).
+        let restarted = service_at(vec![reply(200, FIXTURE)], &dir, T0 + HOUR);
+        assert!(matches!(
+            restarted.get(group_def("gps-ops").unwrap(), ON).await.unwrap_err(),
+            SatelliteError::Waiting { until, .. } if until == T0 + 2 * HOUR
+        ));
+        clock.advance(2 * HOUR);
+        service
+            .get(group_def("gps-ops").unwrap(), ON)
+            .await
+            .unwrap();
+        assert_eq!(service.fetcher.calls(), 1);
+
+        // A pause after an HTTP error: at most 2 hours from now.
+        let paused = temp_dir();
+        let log = RequestLog {
+            paused_until: Some((T0 + 3 * day, "HTTP 403".into())),
+            ..RequestLog::default()
+        };
+        write_atomic(
+            &paused.join("requests.json"),
+            &serde_json::to_vec(&log).unwrap(),
+        )
+        .unwrap();
+        let later = service_at(vec![reply(200, FIXTURE)], &paused, T0);
+        assert!(matches!(
+            later.get(starlink(), ON).await.unwrap_err(),
+            SatelliteError::Waiting { until, .. } if until == T0 + 2 * HOUR
+        ));
+        for path in [dir, paused] {
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
 
     /// Downloads one small group from CelesTrak once:

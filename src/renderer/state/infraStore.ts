@@ -8,6 +8,7 @@ import type {
   SatelliteGroupData
 } from "@renderer/lib/infra/sources";
 import {
+  CLOCK_TOLERANCE_MS,
   MAX_SATELLITES_PER_GROUP,
   SATELLITE_DATA_TTL_MS,
   SATELLITE_GROUPS,
@@ -97,10 +98,14 @@ function satelliteLoader(
       count > MAX_SATELLITES_PER_GROUP
         ? `Showing ${plural(MAX_SATELLITES_PER_GROUP, "satellite")} of ${count.toLocaleString("en-US")}, evenly chosen, to keep the globe fast.`
         : plural(count, "satellite") + ".";
+    // A copy dated in the future is asked for again the next time the group
+    // is turned on; the backend decides whether it may download.
+    const now = Date.now();
     return {
       data,
       note: [shown, data.note].filter(Boolean).join(" "),
-      staleAt: data.fetchedAt + SATELLITE_DATA_TTL_MS
+      staleAt:
+        data.fetchedAt > now + CLOCK_TOLERANCE_MS ? now : data.fetchedAt + SATELLITE_DATA_TTL_MS
     };
   };
 }

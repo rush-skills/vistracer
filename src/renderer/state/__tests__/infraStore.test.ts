@@ -221,6 +221,33 @@ describe("infraStore", () => {
     expect(readySource(useInfraStore.getState().sources, "celestrak-starlink")).toBe(first);
   });
 
+  it("asks again for a satellite group dated in the future the next time it is shown", async () => {
+    const now = Date.parse("2026-10-25T00:00:00Z");
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    // Saved while the clock was a day ahead.
+    api.getSatellites.mockResolvedValueOnce(
+      satellitesAnswer("starlink", now + 24 * 3_600_000, [starlinkRow(99902, 10)])
+    );
+    await useInfraStore.getState().ensure("celestrak-starlink");
+    expect(useInfraStore.getState().sources["celestrak-starlink"]).toMatchObject({
+      status: "ready",
+      staleAt: now
+    });
+    await useInfraStore.getState().ensure("celestrak-starlink");
+    expect(api.getSatellites).toHaveBeenCalledTimes(2);
+    expect(useInfraStore.getState().sources["celestrak-starlink"]).toMatchObject({
+      staleAt: now + 12 * 3_600_000
+    });
+    // A minute of drift is not a wrong clock.
+    api.getSatellites.mockResolvedValueOnce(
+      satellitesAnswer("starlink", now + 60_000, [starlinkRow(99902, 10)])
+    );
+    await useInfraStore.getState().reload("celestrak-starlink");
+    expect(useInfraStore.getState().sources["celestrak-starlink"]).toMatchObject({
+      staleAt: now + 60_000 + 12 * 3_600_000
+    });
+  });
+
   it("says when a group is thinned to the drawing limit", async () => {
     const rows = Array.from({ length: 12_003 }, (_, i) => starlinkRow(i + 1, i % 360));
     api.getSatellites.mockResolvedValueOnce(satellitesAnswer("starlink", Date.now(), rows));

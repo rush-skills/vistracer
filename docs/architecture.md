@@ -1122,6 +1122,7 @@ the address in its firewall). `commands/satellites.rs` follows it:
 | After a failure that may have reached CelesTrak (a timeout, a broken answer) | It counts as the group's download: the group waits 2 hours |
 | After a failed connection (no request sent, `FetchError.sent` false) | That group again after 15 minutes |
 | At a time | One request, for all groups |
+| A time in the future (the clock was ahead, more than 5 minutes, `CLOCK_TOLERANCE_MS`) | A saved copy counts as stale (its note gives the date and time, UTC); a saved request or pause time is moved to now plus its own length (2 hours, 15 minutes) and saved once, so a wrong clock never waits longer than the rule itself |
 | Answer | HTTPS to `celestrak.org` only, no redirect elsewhere, 8 MB cap |
 
 When no new copy may or can be had, an older saved copy is shown with a
