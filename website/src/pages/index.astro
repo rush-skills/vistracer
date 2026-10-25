@@ -23,6 +23,21 @@ const features = [
     desc: 'Cross-check with Team Cymru, RDAP, RIPE Stat, and PeeringDB to fill metadata gaps and validate GeoIP output.',
   },
   {
+    icon: '&#x1F4CD;',
+    title: 'Honest Hop Locations',
+    desc: 'Each hop is placed from internet exchange LANs, router host names and GeoLite2, checked against the speed of light, and drawn with a confidence ring true to scale. Anycast addresses are marked, not placed.',
+  },
+  {
+    icon: '&#x1F3E2;',
+    title: 'Infrastructure Layers',
+    desc: 'Show internet exchanges and data centres (PeeringDB), AWS, Google Cloud and Azure regions and Cloudflare data centres, one colour per network, and opt-in submarine cables from TeleGeography. All off until you turn them on.',
+  },
+  {
+    icon: '&#x1F6F0;&#xFE0F;',
+    title: 'Satellites (Opt-In)',
+    desc: 'Starlink, OneWeb, GPS, space station and geostationary satellites where they are now, computed with SGP4 from CelesTrak data and moved once a second. A hop in a satellite provider\'s network is marked as a likely satellite link.',
+  },
+  {
     icon: '&#x1F4F7;',
     title: 'Export & Share',
     desc: 'Capture still images (PNG/JPG/WebP) or animated routes (WebM/GIF) with per-hop tooltips showing ASN and location.',
@@ -139,6 +154,9 @@ const platforms = [
       <p class="mx-auto mt-4 max-w-2xl text-[var(--color-text-dim)]">
         VisTracer runs traceroute from your machine and enriches every hop with geolocation, ASN data, and registry metadata.
       </p>
+      <p class="mx-auto mt-2 max-w-2xl text-sm text-[var(--color-text-dim)]">
+        The globe, hop locations, layers and satellites come with the next release after v{version}.
+      </p>
     </div>
 
     <div class="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -224,6 +242,8 @@ const platforms = [
       <span>Vite</span>
       <span class="text-[var(--color-border)]">|</span>
       <span>MaxMind GeoLite2</span>
+      <span class="text-[var(--color-border)]">|</span>
+      <span>satellite.js</span>
     </div>
   </section>
 
