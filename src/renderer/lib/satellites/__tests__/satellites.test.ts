@@ -9,7 +9,9 @@ import {
   satelliteLink,
   satelliteLinks
 } from "@renderer/lib/satellites/isp";
-import { hoveredSatelliteStyle, satelliteDrawing, thinEvenly } from "@renderer/lib/satellites/scene";
+import { hoveredSatelliteStyle } from "@renderer/lib/globe";
+import { planSatelliteGroups } from "@renderer/lib/satellites/reconcile";
+import { satelliteDrawing, thinEvenly } from "@renderer/lib/satellites/scene";
 import { makeHop } from "@renderer/test/fixtures";
 import { VANGUARD_ROW, groupData, starlinkRow } from "@renderer/test/satelliteFixtures";
 
@@ -169,6 +171,31 @@ describe("satelliteDrawing", () => {
         expect(ratio, `${group.id} on ${backdrop}`).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+});
+
+describe("planSatelliteGroups (the adapter's point collections)", () => {
+  it("keeps a group with the same satellites, rebuilds a changed one and removes a gone one", () => {
+    const starlink = groupData("starlink", [starlinkRow(1, 0), starlinkRow(2, 90)]);
+    const gps = groupData("gps", [VANGUARD_ROW]);
+    const first = satelliteDrawing([starlink, gps], new Set());
+    const drawn = new Map(first.map((group) => [group.group, group.satellites]));
+
+    // The route's highlight and GPS switched off: Starlink keeps its points.
+    const highlighted = satelliteDrawing([starlink], new Set(["starlink"]));
+    expect(planSatelliteGroups(drawn, highlighted)).toEqual({
+      remove: ["gps"],
+      keep: highlighted,
+      build: []
+    });
+    // A newer download: Starlink is rebuilt, GPS kept.
+    const newer = satelliteDrawing([groupData("starlink", [starlinkRow(3, 0)]), gps], new Set());
+    const plan = planSatelliteGroups(drawn, newer);
+    expect(plan.remove).toEqual(["starlink"]);
+    expect(plan.keep.map((group) => group.group)).toEqual(["gps"]);
+    expect(plan.build.map((group) => group.group)).toEqual(["starlink"]);
+    // Nothing drawn yet: everything is built.
+    expect(planSatelliteGroups(new Map(), first).build).toEqual(first);
   });
 });
 

@@ -1,5 +1,12 @@
 import type { HopResolution } from "@common/ipc";
-import type { CableSpec, GeoPoint, InfraScene, SiteLayer, SiteSpec } from "../globe";
+import {
+  SITE_OUTLINE_LIT,
+  type CableSpec,
+  type GeoPoint,
+  type InfraScene,
+  type SiteLayer,
+  type SiteSpec
+} from "../globe";
 import {
   SITE_COLORS,
   hiddenFilterKeys,
@@ -270,7 +277,6 @@ export function buildSiteClusters(
 /** Pick ids of site markers: "<layer>|<site key>". */
 export const siteSpecKey = (layer: SiteLayer, key: string) => `${layer}|${key}`;
 
-const OUTLINE_ON_ROUTE = "#FFFFFF";
 
 function siteColors(site: SiteCluster): { fill: string; outline: string } {
   if (site.layer === "exchanges") {
@@ -280,14 +286,6 @@ function siteColors(site: SiteCluster): { fill: string; outline: string } {
     return SITE_COLORS.facility;
   }
   return SITE_COLORS[site.provider as keyof typeof SITE_COLORS] ?? SITE_COLORS.exchange;
-}
-
-/**
- * The style of the marker under the pointer. The adapter applies it to
- * that one point, so a hover does not rebuild the site markers.
- */
-export function hoveredSiteStyle(spec: SiteSpec): { pixelSize: number; outline: string } {
-  return { pixelSize: spec.pixelSize + 2, outline: OUTLINE_ON_ROUTE };
 }
 
 /** Marker specs, built once per clustering. */
@@ -303,7 +301,7 @@ export function siteSpecs(sites: readonly SiteCluster[]): SiteSpec[] {
       layer: site.layer,
       position: { latitude, longitude, height: 0 },
       color: fill,
-      outline: site.linked ? OUTLINE_ON_ROUTE : outline,
+      outline: site.linked ? SITE_OUTLINE_LIT : outline,
       // A ring (facility) needs a wider outline to read as a ring.
       outlineWidth: (site.layer === "facilities" ? 2 : 1) + (site.linked ? 1 : 0),
       pixelSize: base + extra + (site.linked ? 4 : 0),

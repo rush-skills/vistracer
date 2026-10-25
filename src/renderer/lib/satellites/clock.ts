@@ -52,11 +52,12 @@ export class PeriodicTicker {
   }
 
   /**
-   * Updates now, for new data, if the ticker is active; the next update
-   * then follows one interval later.
+   * Updates now, for new data, if the ticker is active and the last update
+   * is at least an interval old. Otherwise the next update, at most an
+   * interval away, includes the new data: never two in one interval.
    */
   poke(): void {
-    if (this.active) {
+    if (this.active && this.timers.now() - this.lastTick >= this.intervalMs) {
       this.clear();
       this.fire();
     }

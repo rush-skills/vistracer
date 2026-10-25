@@ -175,11 +175,25 @@ export const useInfraStore = create<InfraStore>((set, get) => {
           `The ${id} layer data had ${loaded.data.rejected} malformed records; they are not shown.`
         );
       }
-      update(
-        "unavailable" in loaded
-          ? { status: "unavailable", message: loaded.unavailable }
-          : { status: "ready", data: loaded.data, note: loaded.note, staleAt: loaded.staleAt }
-      );
+      if ("unavailable" in loaded) {
+        update({ status: "unavailable", message: loaded.unavailable });
+      } else {
+        // The same download again (an older copy the backend keeps while it
+        // may not ask CelesTrak) keeps its object: the globe then rebuilds
+        // no points and no SGP4 records.
+        const before = shown.status === "ready" ? shown.data : undefined;
+        const same =
+          before != null &&
+          "fetchedAt" in before &&
+          "fetchedAt" in loaded.data &&
+          before.fetchedAt === loaded.data.fetchedAt;
+        update({
+          status: "ready",
+          data: same ? before : loaded.data,
+          note: loaded.note,
+          staleAt: loaded.staleAt
+        });
+      }
     } catch (error) {
       console.warn(`Could not load the ${id} layer data.`, error);
       update(

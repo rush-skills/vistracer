@@ -206,6 +206,19 @@ describe("infraStore", () => {
       data: first,
       note: "Could not load a newer copy: CelesTrak asks to wait."
     });
+
+    // The backend may send the same old copy with a note: same data object,
+    // so the globe rebuilds nothing.
+    api.getSatellites.mockResolvedValueOnce({
+      ...satellitesAnswer("starlink", start, [starlinkRow(99902, 10), starlinkRow(99903, 20)]),
+      note: "Showing the copy from 13 hours ago."
+    });
+    await useInfraStore.getState().ensure("celestrak-starlink");
+    expect(useInfraStore.getState().sources["celestrak-starlink"]).toMatchObject({
+      status: "ready",
+      note: "2 satellites. Showing the copy from 13 hours ago."
+    });
+    expect(readySource(useInfraStore.getState().sources, "celestrak-starlink")).toBe(first);
   });
 
   it("says when a group is thinned to the drawing limit", async () => {

@@ -29,6 +29,37 @@ describe("createPropagator (SGP4, satellite.js)", () => {
     }
   );
 
+  it("turns TEME into Earth-fixed with the right sidereal angle (a geostationary check)", () => {
+    // Over the equator, circular, one turn per sidereal day: the longitude
+    // is Ω + ω + M minus Greenwich mean sidereal time, and it stays put.
+    const epoch = "2026-10-24T12:00:00.000000";
+    const geo = {
+      ...starlinkRow(99950, 100),
+      epoch,
+      meanMotion: 1.00273791,
+      eccentricity: 0.0001,
+      inclination: 0.01,
+      raan: 30,
+      argOfPericenter: 20,
+      bstar: 0,
+      meanMotionDot: 0
+    };
+    const epochMs = Date.parse(`${epoch}Z`);
+    // IAU 1982 GMST in degrees, independent of satellite.js.
+    const jd = epochMs / 86_400_000 + 2_440_587.5;
+    const gmst = (280.46061837 + 360.98564736629 * (jd - 2_451_545)) % 360;
+    const expected = (((30 + 20 + 100 - gmst) % 360) + 540) % 360 - 180;
+    const propagator = createPropagator([elements("geo", geo)]);
+    const longitudeAt = (hours: number) => {
+      const out = new Float64Array(3);
+      propagator.positions(new Date(epochMs + hours * 3_600_000), out);
+      expect(Math.hypot(out[0], out[1], out[2]) / 1000).toBeCloseTo(42_164, -2);
+      return (Math.atan2(out[1], out[0]) * 180) / Math.PI;
+    };
+    expect(Math.abs(longitudeAt(0) - expected)).toBeLessThan(0.2);
+    expect(Math.abs(longitudeAt(6) - expected)).toBeLessThan(0.2);
+  });
+
   it("places a Starlink-like satellite about 550 km up", () => {
     const out = new Float64Array(6);
     const propagator = createPropagator([

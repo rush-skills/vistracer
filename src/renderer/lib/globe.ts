@@ -112,6 +112,25 @@ export interface SiteSpec {
   label?: string;
 }
 
+/** The outline of a site on the route, and of the marker under the pointer. */
+export const SITE_OUTLINE_LIT = "#FFFFFF";
+
+/**
+ * The style of the site marker under the pointer. The adapter applies it to
+ * that one point, so a hover does not rebuild the site markers.
+ */
+export function hoveredSiteStyle(spec: SiteSpec): { pixelSize: number; outline: string } {
+  return { pixelSize: spec.pixelSize + 2, outline: SITE_OUTLINE_LIT };
+}
+
+/** The satellite under the pointer: larger, with a white outline. */
+export function hoveredSatelliteStyle(group: { pixelSize: number }): {
+  pixelSize: number;
+  outlineWidth: number;
+} {
+  return { pixelSize: group.pixelSize + 4, outlineWidth: 2 };
+}
+
 export interface CableSpec {
   key: string;
   positions: GeoPoint[];

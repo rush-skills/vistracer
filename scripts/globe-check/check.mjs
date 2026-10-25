@@ -452,15 +452,31 @@ try {
     await evaluate(`document.querySelector('#layers-toggle').click()`);
     await sleep(300);
   };
+  // The layer code (lib/infra/code.ts) loads with the first layer data,
+  // not with the app or the globe: until then the page loads only the
+  // start-up chunk and the globe chunk.
+  const layerCode = () => requestsTo("/assets/code-");
+  const scriptsLoaded = () => [
+    ...new Set(
+      events
+        .filter((event) => event.method === "Network.requestWillBeSent")
+        .map((event) => /\/assets\/([A-Za-z.]+)-[^/]*\.js$/.exec(event.params.request.url)?.[1])
+        .filter(Boolean)
+    )
+  ];
   const off = {
     sites: await ipcCalls("get_peeringdb_sites"),
     cables: await ipcCalls("get_submarine_cables"),
-    files: requestsTo("/infra/")
+    files: requestsTo("/infra/"),
+    scripts: scriptsLoaded()
   };
   check(
-    "with the infrastructure layers off, the session made no layer request",
-    off.sites === 0 && off.cables === 0 && off.files === 0,
-    `${off.sites} exchange list, ${off.cables} cable map, ${off.files} layer file requests`
+    "with the infrastructure layers off, the session made no layer request and loaded no layer code",
+    off.sites === 0 &&
+      off.cables === 0 &&
+      off.files === 0 &&
+      off.scripts.every((name) => ["index", "cesiumGlobe"].includes(name)),
+    `${off.sites} exchange list, ${off.cables} cable map, ${off.files} layer file requests; scripts: ${off.scripts.join(", ")}`
   );
 
   // An app move first: the gate holds the online layer, so any online tile
@@ -480,8 +496,8 @@ try {
   };
   check(
     "switched on, exchanges, data centres and cloud regions each load once",
-    on.sites === 1 && on.files === 1 && on.cables === 0 && on.drawn,
-    `${on.sites} exchange list, ${on.files} cloud region file, ${on.cables} cable map requests; legend shown: ${on.drawn}`
+    on.sites === 1 && on.files === 1 && on.cables === 0 && on.drawn && layerCode() === 1,
+    `${on.sites} exchange list, ${on.files} cloud region file, ${on.cables} cable map, ${layerCode()} layer code requests; legend shown: ${on.drawn}`
   );
   check("the infrastructure layers load no online tile", layerTiles === 0, `${layerTiles} requests`);
   await screenshot("06-infrastructure-layers");

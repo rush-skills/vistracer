@@ -30,6 +30,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CAMERA_LIMITS,
   borderRings,
+  hoveredSatelliteStyle,
+  hoveredSiteStyle,
   kmPerPixel,
   planFlight,
   type Emphasis,
@@ -39,7 +41,6 @@ import {
   type SiteSpec
 } from "@renderer/lib/globe";
 import { clusterLevel } from "@renderer/lib/infra/cluster";
-import { hoveredSiteStyle } from "@renderer/lib/infra/scene";
 import {
   BUNDLED_IMAGERY,
   CanvasDrag,
@@ -53,11 +54,10 @@ import {
 import { prefersReducedMotion } from "@renderer/lib/motion";
 import { GOVERNOR_RULES, RenderGovernor, renderQuality } from "@renderer/lib/renderGovernor";
 import { PeriodicTicker, SATELLITE_UPDATE_MS } from "@renderer/lib/satellites/clock";
+import { planSatelliteGroups } from "@renderer/lib/satellites/reconcile";
 import type { GroupPropagator } from "@renderer/lib/satellites/propagate";
-import {
-  hoveredSatelliteStyle,
-  type SatelliteGroupDrawing
-} from "@renderer/lib/satellites/scene";
+import type { SatelliteGroupId } from "@renderer/lib/satellites/groups";
+import type { SatelliteGroupDrawing } from "@renderer/lib/satellites/scene";
 import type { CreateGlobe } from "./controller";
 
 // Cesium loads its workers and images from here. vite.config.ts serves the
@@ -337,7 +337,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     propagator: GroupPropagator;
     positions: Float64Array;
   }
-  const satelliteGroups = new Map<string, DrawnGroup>();
+  const satelliteGroups = new Map<SatelliteGroupId, DrawnGroup>();
   const satellitePointByKey = new Map<string, { point: PointPrimitive; group: DrawnGroup }>();
   const satellitePosition = new Cartesian3();
   const moveSatellites = () => {
@@ -380,10 +380,12 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       return false;
     }
     const { drawing } = entry.group;
-    const style = hovered ? hoveredSatelliteStyle(drawing) : drawing;
+    const style = hovered
+      ? hoveredSatelliteStyle(drawing)
+      : { pixelSize: drawing.pixelSize, outlineWidth: SATELLITE_OUTLINE.width };
     entry.point.pixelSize = style.pixelSize;
+    entry.point.outlineWidth = style.outlineWidth;
     entry.point.outlineColor = hovered ? Color.WHITE : SATELLITE_OUTLINE.color;
-    entry.point.outlineWidth = hovered ? hoveredSatelliteStyle(drawing).outlineWidth : SATELLITE_OUTLINE.width;
     return true;
   };
   const removeSatelliteGroup = (group: DrawnGroup) => {
@@ -847,20 +849,24 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           if (destroyed || request !== satelliteRequest) {
             return;
           }
-          const wanted = new Map(drawings.map((drawing) => [drawing.group, drawing]));
-          for (const group of [...satelliteGroups.values()]) {
-            if (wanted.get(group.drawing.group)?.satellites !== group.drawing.satellites) {
-              removeSatelliteGroup(group);
+          const drawn = new Map(
+            [...satelliteGroups.values()].map((group) => [group.drawing.group, group.drawing.satellites])
+          );
+          const plan = planSatelliteGroups(drawn, drawings);
+          for (const group of plan.remove) {
+            const old = satelliteGroups.get(group);
+            if (old) {
+              removeSatelliteGroup(old);
             }
           }
-          for (const drawing of drawings) {
+          for (const drawing of plan.keep) {
             const kept = satelliteGroups.get(drawing.group);
             if (kept) {
-              // Same satellites: only the style can change (the route's highlight).
               kept.drawing = drawing;
               styleSatellites(kept);
-              continue;
             }
+          }
+          for (const drawing of plan.build) {
             const collection = new PointPrimitiveCollection();
             scene.primitives.add(collection);
             const group: DrawnGroup = {
@@ -884,7 +890,8 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           }
           styleSatellite(hoveredSiteKey, true);
           satelliteTicker.setRunning(true);
-          // Positions for the new points now, not a second later.
+          // Positions for new points now, or with the next move (at most a
+          // second away): never two moves in one second.
           satelliteTicker.poke();
           scene.requestRender();
         })

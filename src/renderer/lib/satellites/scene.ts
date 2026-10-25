@@ -56,11 +56,3 @@ export function satelliteDrawing(
     };
   });
 }
-
-/** The point under the pointer: larger, with a white outline. */
-export function hoveredSatelliteStyle(drawing: SatelliteGroupDrawing): {
-  pixelSize: number;
-  outlineWidth: number;
-} {
-  return { pixelSize: drawing.pixelSize + 4, outlineWidth: 2 };
-}

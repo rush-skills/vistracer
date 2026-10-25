@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { HopLocation, HopResolution } from "@common/ipc";
+import { hoveredSiteStyle } from "@renderer/lib/globe";
 import { SITE_COLORS, layerVisibility } from "@renderer/lib/layers";
 import {
   GUESSED_CABLE_COLOR,
   buildSiteClusters,
   cableLines,
   cableSpecs,
-  hoveredSiteStyle,
   infraScene,
   keepUnchanged,
   routeInfra,

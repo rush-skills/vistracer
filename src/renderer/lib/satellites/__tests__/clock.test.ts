@@ -32,14 +32,28 @@ describe("PeriodicTicker (satellite updates)", () => {
     expect(tick).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(10_000);
     expect(tick).toHaveBeenCalledTimes(11);
-    // New data moves them at once; the next update is a second after that.
+    // New data right after an update waits for the next one.
+    vi.advanceTimersByTime(400);
     ticker.poke();
+    expect(tick).toHaveBeenCalledTimes(11);
+    vi.advanceTimersByTime(600);
     expect(tick).toHaveBeenCalledTimes(12);
-    vi.advanceTimersByTime(999);
-    expect(tick).toHaveBeenCalledTimes(12);
-    vi.advanceTimersByTime(1);
-    expect(tick).toHaveBeenCalledTimes(13);
     expect(SATELLITE_UPDATE_MS).toBe(1000);
+  });
+
+  it("moves the first data at once, and only once", () => {
+    const tick = vi.fn();
+    const ticker = new PeriodicTicker(tick, SATELLITE_UPDATE_MS, timers);
+    // The adapter starts the ticker and pokes it when the first group is drawn.
+    ticker.setRunning(true);
+    ticker.poke();
+    expect(tick).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(0);
+    expect(tick).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(999);
+    expect(tick).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
+    expect(tick).toHaveBeenCalledTimes(2);
   });
 
   it("pauses while the window is hidden and catches up once when shown", () => {
