@@ -17,7 +17,6 @@ export interface Exchange {
   country: string | null;
   latitude: number;
   longitude: number;
-  radiusKm: number;
   facilityCount: number;
   networkCount: number;
 }
@@ -37,12 +36,11 @@ export interface Facility {
 }
 
 export interface PeeringDbSiteData {
-  /** When exchange matching downloaded the list, ms since the epoch. */
-  storedAt: number;
   /** False for a list saved by an older version: it has no data centres. */
   complete: boolean;
   exchanges: Exchange[];
   facilities: Facility[];
+  /** Records dropped at the edge; logged by the loader. */
   rejected: number;
 }
 
@@ -70,17 +68,7 @@ export interface CloudRegion {
   longitude: number;
 }
 
-export interface SnapshotSource {
-  what: string;
-  urls: string[];
-  licence: string;
-  fetchedAt: string;
-  recordCount: number;
-}
-
 export interface CloudRegionData {
-  builtAt: string;
-  sources: SnapshotSource[];
   providers: CloudProvider[];
   regions: CloudRegion[];
   rejected: number;
@@ -96,7 +84,6 @@ export interface SubmarineCable {
 }
 
 export interface CableData {
-  fetchedAt: number;
   /** Set when a refresh failed and the backend sent its saved copy. */
   note: string | null;
   cables: SubmarineCable[];
@@ -157,7 +144,6 @@ function exchange(row: Fields): Exchange | null {
   const name = text(row.name);
   const lat = latitude(row.latitude);
   const lon = longitude(row.longitude);
-  const radiusKm = typeof row.radiusKm === "number" && row.radiusKm > 0 ? row.radiusKm : null;
   const city = optionalText(row.city);
   const country = optionalText(row.country);
   const facilityCount = count(row.facilityCount);
@@ -167,7 +153,6 @@ function exchange(row: Fields): Exchange | null {
     !name ||
     lat == null ||
     lon == null ||
-    radiusKm == null ||
     city === undefined ||
     country === undefined ||
     facilityCount == null ||
@@ -183,7 +168,6 @@ function exchange(row: Fields): Exchange | null {
     country,
     latitude: lat,
     longitude: lon,
-    radiusKm,
     facilityCount,
     networkCount
   };
@@ -234,14 +218,12 @@ export function parsePeeringDbSites(raw: unknown): PeeringDbSiteData | null {
   if (!isRecord(raw)) {
     throw new Error("The exchange list from the backend is not an object.");
   }
-  const storedAt = count(raw.storedAt);
-  if (storedAt == null || typeof raw.complete !== "boolean") {
-    throw new Error("The exchange list from the backend has no download time.");
+  if (typeof raw.complete !== "boolean") {
+    throw new Error("The exchange list from the backend does not say whether it is complete.");
   }
   const exchanges = records(list(raw, "exchanges", "The exchange list"), exchange);
   const facilities = records(list(raw, "facilities", "The exchange list"), facility);
   return {
-    storedAt,
     complete: raw.complete,
     exchanges: exchanges.kept,
     facilities: facilities.kept,
@@ -260,21 +242,6 @@ function provider(row: Fields): (CloudProvider & { key: string }) | null {
     return null;
   }
   return { key: id, id, name, shortName, operator, asns: asns as number[], sites };
-}
-
-function source(row: unknown): SnapshotSource | null {
-  if (!isRecord(row)) {
-    return null;
-  }
-  const what = text(row.what);
-  const licence = text(row.licence);
-  const fetchedAt = text(row.fetchedAt);
-  const recordCount = count(row.recordCount);
-  const urls = Array.isArray(row.urls) ? row.urls.map(text) : null;
-  if (!what || !licence || !fetchedAt || recordCount == null || !urls || urls.includes(null)) {
-    return null;
-  }
-  return { what, licence, fetchedAt, recordCount, urls: urls as string[] };
 }
 
 /** `public/infra/cloud-regions.json` (scripts/infra-data/build-cloud-regions.mjs). */
@@ -314,10 +281,7 @@ export function parseCloudRegions(raw: unknown): CloudRegionData {
       longitude: lon
     };
   });
-  const sources = Array.isArray(raw.meta.sources) ? raw.meta.sources.map(source) : [];
   return {
-    builtAt: text(raw.meta.builtAt) ?? "unknown",
-    sources: sources.filter((entry): entry is SnapshotSource => entry !== null),
     providers: providers.kept.map(({ id, name, shortName, operator, asns, sites }) => ({
       id,
       name,
@@ -352,10 +316,6 @@ export function parseSubmarineCables(raw: unknown): CableData {
   if (!isRecord(raw)) {
     throw new Error("The cable map from the backend is not an object.");
   }
-  const fetchedAt = count(raw.fetchedAt);
-  if (fetchedAt == null) {
-    throw new Error("The cable map from the backend has no download time.");
-  }
   const cables = records(list(raw, "cables", "The cable map"), (row) => {
     const id = text(row.id);
     const name = text(row.name);
@@ -365,5 +325,5 @@ export function parseSubmarineCables(raw: unknown): CableData {
     }
     return { key: `cable:${id}`, id, name, segments: segments as Array<Array<[number, number]>> };
   });
-  return { fetchedAt, note: text(raw.note), cables: cables.kept, rejected: cables.rejected };
+  return { note: text(raw.note), cables: cables.kept, rejected: cables.rejected };
 }

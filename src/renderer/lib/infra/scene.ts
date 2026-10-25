@@ -293,14 +293,12 @@ export function siteSpecs(sites: readonly SiteCluster[], hoveredKey: string | un
     return {
       key,
       layer: site.layer,
-      members: site.cluster.members,
       position: { latitude, longitude, height: 0 },
       color: fill,
       outline: site.linked || hovered ? OUTLINE_ON_ROUTE : outline,
       // A ring (facility) needs a wider outline to read as a ring.
       outlineWidth: (site.layer === "facilities" ? 2 : 1) + (site.linked ? 1 : 0),
       pixelSize: base + extra + (site.linked ? 4 : 0) + (hovered ? 2 : 0),
-      filterKey: site.provider,
       label: site.label
     };
   });

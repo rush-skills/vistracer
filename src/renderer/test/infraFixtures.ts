@@ -24,7 +24,6 @@ export const exchange = (
   country: null,
   latitude,
   longitude,
-  radiusKm: 25,
   facilityCount: 3,
   networkCount
 });
@@ -49,7 +48,6 @@ export const facility = (
 });
 
 export const PEERINGDB: PeeringDbSiteData = {
-  storedAt: 1,
   complete: true,
   exchanges: [
     exchange(31, "DE-CIX Frankfurt", 50.11, 8.68, 1019),
@@ -89,8 +87,6 @@ export const region = (
 });
 
 export const CLOUD: CloudRegionData = {
-  builtAt: "2026-10-25",
-  sources: [],
   providers: PROVIDERS,
   regions: [
     region("aws", "eu-central-1", "Frankfurt", 50.11, 8.68),
@@ -103,7 +99,6 @@ export const CLOUD: CloudRegionData = {
 };
 
 export const CABLES: CableData = {
-  fetchedAt: 1,
   note: null,
   cables: [
     {

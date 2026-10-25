@@ -45,7 +45,6 @@ const facilityRow = {
 describe("parsePeeringDbSites", () => {
   it("reads the backend's list and keys sites like the phase 2 IX match", () => {
     const data = parsePeeringDbSites({
-      storedAt: 10,
       complete: true,
       exchanges: [exchangeRow],
       facilities: [facilityRow, { ...facilityRow, id: 59, org: null, city: null }]
@@ -63,13 +62,12 @@ describe("parsePeeringDbSites", () => {
 
   it("drops malformed records one by one and counts them", () => {
     const data = parsePeeringDbSites({
-      storedAt: 10,
       complete: false,
       exchanges: [
         exchangeRow,
         { ...exchangeRow, id: 32, latitude: 95 },
         { ...exchangeRow, id: 33, name: "  " },
-        { ...exchangeRow, id: 34, radiusKm: 0 },
+        { ...exchangeRow, id: 34, facilityCount: 1.5 },
         { ...exchangeRow, id: 35, networkCount: -1 },
         { ...exchangeRow, id: 36, city: 7 },
         "not a record",
@@ -86,8 +84,8 @@ describe("parsePeeringDbSites", () => {
 
   it("rejects a list without the expected outer shape", () => {
     expect(() => parsePeeringDbSites("sites")).toThrow("not an object");
-    expect(() => parsePeeringDbSites({ complete: true, exchanges: [], facilities: [] })).toThrow(
-      "no download time"
+    expect(() => parsePeeringDbSites({ exchanges: [], facilities: [] })).toThrow(
+      "whether it is complete"
     );
     expect(() => parsePeeringDbSites({ storedAt: 1, complete: true, exchanges: [] })).toThrow(
       "no facilities list"
@@ -100,8 +98,13 @@ describe("parseCloudRegions", () => {
     const data = parseCloudRegions(snapshot);
     expect(data.rejected).toBe(0);
     expect(data.regions).toHaveLength(snapshot.meta.recordCount);
-    expect(data.providers.map((provider) => provider.id)).toEqual(["aws", "gcp", "azure", "cloudflare"]);
-    expect(data.sources.length).toBeGreaterThanOrEqual(4);
+    expect(data.providers.map((provider) => provider.id)).toEqual([
+      "aws",
+      "gcp",
+      "azure",
+      "cloudflare"
+    ]);
+    expect(snapshot.meta.sources.length).toBeGreaterThanOrEqual(4);
     const counts = Object.fromEntries(
       data.providers.map((provider) => [
         provider.id,
@@ -163,14 +166,13 @@ describe("parseSubmarineCables", () => {
   const cable = { id: "2africa", name: "2Africa", segments: [[[1, 2], [3, 4]]] };
 
   it("reads the backend's compact cable map", () => {
-    const data = parseSubmarineCables({ fetchedAt: 5, note: null, cables: [cable] });
+    const data = parseSubmarineCables({ note: null, cables: [cable] });
     expect(data.cables).toEqual([{ key: "cable:2africa", ...cable }]);
     expect(data.note).toBeNull();
   });
 
   it("drops cables with a bad line and keeps the note of an old copy", () => {
     const data = parseSubmarineCables({
-      fetchedAt: 5,
       note: "A refresh failed; showing the saved copy.",
       cables: [cable, { ...cable, id: "x", segments: [[[1, 2]]] }, { ...cable, id: "y", segments: [[[200, 0], [1, 1]]] }]
     });
@@ -181,6 +183,6 @@ describe("parseSubmarineCables", () => {
 
   it("rejects an answer without the expected outer shape", () => {
     expect(() => parseSubmarineCables([])).toThrow("not an object");
-    expect(() => parseSubmarineCables({ cables: [] })).toThrow("no download time");
+    expect(() => parseSubmarineCables({ note: null })).toThrow("has no cables list");
   });
 });

@@ -59,6 +59,20 @@ describe("infraStore", () => {
     expect(api.getSubmarineCables).not.toHaveBeenCalled();
   });
 
+  it("logs how many malformed records a source dropped", async () => {
+    api.getPeeringDbSites.mockResolvedValueOnce({
+      ...sites,
+      facilities: [...sites.facilities, { id: "bad" }, { ...sites.facilities[0], latitude: 91 }]
+    });
+    await useInfraStore.getState().ensure("peeringdb-sites");
+    expect(
+      readySource(useInfraStore.getState().sources, "peeringdb-sites")?.facilities
+    ).toHaveLength(1);
+    expect(console.warn).toHaveBeenCalledWith(
+      "The peeringdb-sites layer data had 2 malformed records; they are not shown."
+    );
+  });
+
   it("says what to do when there is no exchange list, or an old one", async () => {
     api.getPeeringDbSites.mockResolvedValueOnce(null);
     await useInfraStore.getState().ensure("peeringdb-sites");

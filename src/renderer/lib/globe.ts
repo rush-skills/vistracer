@@ -103,15 +103,11 @@ export interface SiteSpec {
   /** Pick id: unique in the scene. */
   key: string;
   layer: SiteLayer;
-  /** Site keys (lib/infra/sources.ts), the one drawn first. */
-  members: string[];
   position: GeoPoint;
   color: string;
   outline: string;
   pixelSize: number;
   outlineWidth: number;
-  /** The layer filter this site belongs to (a cloud provider). */
-  filterKey?: string;
   /** Sites on the route are labelled. */
   label?: string;
 }

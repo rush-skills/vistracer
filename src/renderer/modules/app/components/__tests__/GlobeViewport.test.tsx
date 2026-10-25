@@ -218,8 +218,10 @@ describe("GlobeViewport", () => {
     const scene = lastScene();
     expect(scene?.exchanges.length).toBeGreaterThan(0);
     expect(scene?.facilities).toEqual([]);
-    expect(scene?.cloudRegions.some((site) => site.filterKey === "gcp")).toBe(false);
-    expect(scene?.cloudRegions.some((site) => site.filterKey === "aws")).toBe(true);
+    expect(scene?.cloudRegions.some((site) => site.key.startsWith("cloudRegions|gcp:"))).toBe(
+      false
+    );
+    expect(scene?.cloudRegions.some((site) => site.key.startsWith("cloudRegions|aws:"))).toBe(true);
   });
 
   it("clusters again when the adapter reports a new zoom level, and not on a hop hover", async () => {
@@ -240,14 +242,17 @@ describe("GlobeViewport", () => {
     render(<GlobeViewport run={runWith([])} />);
     await waitFor(() => expect(fake.callbacks).toBeDefined());
     act(() => fake.callbacks?.onClusterLevel(10));
-    const frankfurt = lastScene()?.facilities.find((site) => site.members.length > 1);
+    // Far out, the two Frankfurt data centres form one cluster at the larger one.
+    const frankfurt = lastScene()?.facilities.find((site) => site.key === "facilities|fac:58");
     act(() => fake.callbacks?.onHoverSite(frankfurt?.key, { x: 5, y: 6 }));
-    expect(useInfraStore.getState().hoveredSite).toEqual({
+    const hovered = useInfraStore.getState().hoveredSite;
+    expect(hovered).toMatchObject({
       specKey: frankfurt?.key,
       layer: "facilities",
-      keys: frankfurt?.members,
       anchor: { kind: "point", x: 5, y: 6 }
     });
+    expect(hovered?.keys.length).toBeGreaterThan(1);
+    expect(frankfurt?.key).toBe(`facilities|${hovered?.keys[0]}`);
     // The hovered marker is drawn larger.
     expect(lastScene()?.facilities.find((site) => site.key === frankfurt?.key)?.pixelSize).toBe(
       (frankfurt?.pixelSize ?? 0) + 2

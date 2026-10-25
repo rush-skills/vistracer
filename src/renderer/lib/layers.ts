@@ -31,7 +31,7 @@ export interface SceneStyle {
   asnColors: boolean;
 }
 
-/** Scene items whose entries carry a `filterKey` (lib/globe.ts SiteSpec). */
+/** Scene items that a filter switch thins before clustering (`hiddenFilterKeys`). */
 export type FilterableItems = "cloudRegions";
 
 /**

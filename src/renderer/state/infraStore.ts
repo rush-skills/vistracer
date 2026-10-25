@@ -101,6 +101,12 @@ export const useInfraStore = create<InfraStore>((set, get) => {
     update({ status: "loading" });
     try {
       const loaded = await LOADERS[id]();
+      if ("data" in loaded && loaded.data.rejected > 0) {
+        // One bad record never hides the others; the count says the source changed shape.
+        console.warn(
+          `The ${id} layer data had ${loaded.data.rejected} malformed records; they are not shown.`
+        );
+      }
       update(
         "unavailable" in loaded
           ? { status: "unavailable", message: loaded.unavailable }
