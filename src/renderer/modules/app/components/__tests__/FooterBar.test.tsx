@@ -32,7 +32,7 @@ const run: TracerouteRun = {
   hops: []
 };
 
-const exportButton = () => screen.getByRole("button", { name: /Download export|Exporting/ });
+const exportButton = () => screen.getByRole("button", { name: /Export route|Exporting/ });
 
 const exportAs = (format: string) => {
   fireEvent.click(exportButton());
@@ -83,7 +83,7 @@ describe("FooterBar export", () => {
     expect((exportButton() as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => exports.pending[1].resolve("vistracer-route-b.webm"));
-    expect(exportButton().textContent).toBe("Download export");
+    expect(exportButton().textContent).toBe("Export route");
     await advance(3000);
     expect(screen.getByRole("status").textContent).toBe("Saved vistracer-route-b.webm");
     await advance(600);

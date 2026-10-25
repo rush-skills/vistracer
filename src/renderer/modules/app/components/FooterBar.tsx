@@ -24,63 +24,56 @@ export const FooterBar: React.FC = () => {
   };
 
   const exportDisabled = !currentRun || exporting;
-  const updatedLabel = geoMeta?.updatedAt
-    ? new Date(geoMeta.updatedAt).toLocaleDateString()
-    : "unknown";
+  const updated = geoMeta?.updatedAt
+    ? ` (updated ${new Date(geoMeta.updatedAt).toLocaleDateString()})`
+    : "";
 
   const geoStatus =
     geoMeta?.cityDbStatus === "loaded" && geoMeta?.asnDbStatus === "loaded"
-      ? `GeoLite2 loaded (updated ${updatedLabel})`
+      ? `GeoLite2 loaded${updated}`
       : geoMeta?.cityDbStatus === "loaded" || geoMeta?.asnDbStatus === "loaded"
-        ? `GeoLite2 partially loaded (updated ${updatedLabel})`
-        : "GeoLite2 database not configured";
+        ? `GeoLite2 partly loaded${updated}`
+        : "GeoLite2 not configured";
 
   return (
     <>
-      <footer className="footer-bar">
-        <div className="footer-bar__content">
-          <div className="footer-bar__legend">
-            <span className="footer-bar__legend-item">
-              <span className="footer-bar__color footer-bar__color--fast"></span>
-              Fast (&lt; 50ms)
-            </span>
-            <span className="footer-bar__legend-item">
-              <span className="footer-bar__color footer-bar__color--moderate"></span>
-              Moderate (50-150ms)
-            </span>
-            <span className="footer-bar__legend-item">
-              <span className="footer-bar__color footer-bar__color--slow"></span>
-              Slow (&gt; 150ms)
-            </span>
-          </div>
-          <div className="footer-bar__meta">
-            <span>{geoStatus}</span>
-            <button
-              type="button"
-              className="footer-bar__export"
-              onClick={openDialog}
-              disabled={exportDisabled}
-            >
-              {exporting ? "Exporting…" : "Download export"}
-            </button>
-            {notice && (
-              <span
-                className={`footer-bar__message footer-bar__message--${notice.tone}`}
-                role="status"
-              >
-                {notice.text}
-              </span>
-            )}
-          </div>
-        </div>
+      <footer className="footer-bar glass">
         {geoMeta && (
-          <div className="footer-bar__warning">
-            <GeoWarningBanner
-              geoMeta={geoMeta}
-              onConfigure={() => setIsSettingsOpen(true)}
-            />
-          </div>
+          <GeoWarningBanner geoMeta={geoMeta} onConfigure={() => setIsSettingsOpen(true)} />
         )}
+        <div className="footer-bar__content">
+          <ul className="footer-bar__legend" aria-label="Arc colour: round-trip time">
+            <li>
+              <span className="footer-bar__color footer-bar__color--fast" />
+              &lt; 50 ms
+            </li>
+            <li>
+              <span className="footer-bar__color footer-bar__color--moderate" />
+              50–150 ms
+            </li>
+            <li>
+              <span className="footer-bar__color footer-bar__color--slow" />
+              &gt; 150 ms
+            </li>
+          </ul>
+          <span className="footer-bar__geo">{geoStatus}</span>
+          <button
+            type="button"
+            className="button footer-bar__export"
+            onClick={openDialog}
+            disabled={exportDisabled}
+          >
+            {exporting ? "Exporting…" : "Export route"}
+          </button>
+          {notice && (
+            <span
+              className={`footer-bar__message footer-bar__message--${notice.tone}`}
+              role="status"
+            >
+              {notice.text}
+            </span>
+          )}
+        </div>
       </footer>
       {geoMeta && (
         <GeoSettingsModal

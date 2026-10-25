@@ -1,84 +1,72 @@
 .footer-bar {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
-  gap: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(135deg, rgba(18, 20, 29, 0.92), rgba(8, 9, 13, 0.92));
-  font-size: 0.85rem;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-radius: var(--radius-panel);
+  font-size: var(--text-xs);
 }
 
 .footer-bar__content {
   display: flex;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
-  padding: 0.85rem 1.75rem;
-}
-
-.footer-bar__warning {
-  padding: 0 1.75rem 0.85rem;
+  gap: var(--space-2) var(--space-4);
 }
 
 .footer-bar__legend {
   display: flex;
-  gap: 1.25rem;
-  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
-.footer-bar__legend-item {
+.footer-bar__legend li {
   display: flex;
-  gap: 0.5rem;
   align-items: center;
-  opacity: 0.75;
+  gap: var(--space-1);
+  white-space: nowrap;
 }
 
 .footer-bar__color {
-  width: 22px;
-  height: 6px;
-  border-radius: 999px;
   display: inline-block;
+  width: 16px;
+  height: 4px;
+  border-radius: var(--radius-round);
 }
 
 .footer-bar__color--fast {
-  background: #5FA897;
+  background: var(--latency-fast);
 }
 
 .footer-bar__color--moderate {
-  background: #ffc773;
+  background: var(--latency-moderate);
 }
 
 .footer-bar__color--slow {
-  background: #ff5f5f;
+  background: var(--latency-slow);
 }
 
-.footer-bar__meta {
-  display: flex;
-  gap: 1.5rem;
-  align-items: center;
-  opacity: 0.8;
+.footer-bar__geo {
+  color: var(--color-text-muted);
 }
 
 .footer-bar__export {
-  padding: 0.55rem 1.25rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text);
-  cursor: pointer;
-  opacity: 0.85;
-  transition: transform 0.18s ease, opacity 0.18s ease;
-}
-
-.footer-bar__export:hover:not([disabled]) {
-  transform: translateY(-1px);
-  opacity: 1;
-}
-
-.footer-bar__export[disabled] {
-  cursor: not-allowed;
-  opacity: 0.4;
+  min-height: 30px;
 }
 
 .footer-bar__message {
-  font-size: 0.75rem;
-  opacity: 0.7;
+  max-width: 320px;
+  overflow: hidden;
+  color: var(--color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer-bar__message--error {
+  color: var(--color-danger);
 }

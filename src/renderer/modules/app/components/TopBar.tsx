@@ -8,7 +8,8 @@ import {
 } from "@common/ipc";
 import { useRecentRuns } from "@renderer/hooks/useRecentRuns";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
-import { FiChevronDown, FiChevronUp, FiHelpCircle, FiSettings } from "react-icons/fi";
+import { FiSliders } from "react-icons/fi";
+import { usePanel } from "@renderer/hooks/usePanel";
 import { IntegrationSettingsModal } from "./IntegrationSettingsModal";
 import logo from "@assets/logo.png";
 import { UI_EVENTS } from "../lib/uiEvents";
@@ -50,25 +51,25 @@ const integrationToggleConfig: Array<{
   {
     key: "teamCymru",
     label: "Team Cymru",
-    description: "IP ↔ ASN mapping",
+    description: "Network (ASN) of each address",
     providerId: "team-cymru"
   },
   {
     key: "rdap",
     label: "RDAP",
-    description: "Registry metadata fallback",
+    description: "Registry owner and address block",
     providerId: "rdap"
   },
   {
     key: "ripeStat",
-    label: "RIPE Stat",
-    description: "Prefix + holder enrichment",
+    label: "RIPEstat",
+    description: "Announced prefix from live BGP data",
     providerId: "ripe-stat"
   },
   {
     key: "peeringDb",
     label: "PeeringDB",
-    description: "Facility & operator context",
+    description: "Network type and peering policy",
     providerId: "peeringdb"
   },
   {
@@ -85,7 +86,7 @@ export const TopBar: React.FC = () => {
   const [integrationsLoading, setIntegrationsLoading] = useState(true);
   const [integrationSaveError, setIntegrationSaveError] = useState<string | undefined>(undefined);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
-  const [integrationsExpanded, setIntegrationsExpanded] = useState(false);
+  const [optionsCollapsed, setOptionsCollapsed] = usePanel("trace-options");
   const [geoMeta, setGeoMeta] = useState<GeoDatabaseMeta | undefined>(undefined);
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoError, setGeoError] = useState<string | undefined>(undefined);
@@ -103,7 +104,7 @@ export const TopBar: React.FC = () => {
 
   useEffect(() => {
     const handleOpenSettings = () => setSettingsModalOpen(true);
-    const handleExpandIntegrations = () => setIntegrationsExpanded(true);
+    const handleExpandIntegrations = () => setOptionsCollapsed(false);
 
     window.addEventListener(UI_EVENTS.OPEN_SETTINGS_MODAL, handleOpenSettings);
     window.addEventListener(UI_EVENTS.EXPAND_INTEGRATIONS_PANEL, handleExpandIntegrations);
@@ -112,7 +113,7 @@ export const TopBar: React.FC = () => {
       window.removeEventListener(UI_EVENTS.OPEN_SETTINGS_MODAL, handleOpenSettings);
       window.removeEventListener(UI_EVENTS.EXPAND_INTEGRATIONS_PANEL, handleExpandIntegrations);
     };
-  }, []);
+  }, [setOptionsCollapsed]);
 
   useEffect(() => {
     let mounted = true;
@@ -327,26 +328,28 @@ export const TopBar: React.FC = () => {
     }
   };
 
-  const runButtonClass = `top-bar__run${!isSubmitEnabled ? " top-bar__run--disabled" : ""}`;
+  const optionsId = "trace-options";
+  const isV6 = (target: string) => target.includes(":");
 
   return (
-    <header className="top-bar">
-      <form className="top-bar__form" onSubmit={handleSubmit}>
-        <div className="top-bar__input-group">
-          <img src={logo} alt="VisTracer" className="top-bar__logo" />
+    <header className="trace-panel glass">
+      <form className="trace-panel__form" onSubmit={handleSubmit}>
+        <div className="trace-panel__row">
+          <img src={logo} alt="VisTracer" className="trace-panel__logo" />
           <input
-            className="top-bar__input"
+            className="trace-panel__target"
             type="text"
             name="target"
-            placeholder="example.com or 8.8.8.8"
+            placeholder="Host name or IP address"
             autoComplete="off"
+            spellCheck={false}
             value={form.target}
             onChange={handleChange("target")}
             disabled={isRunning}
             aria-label="Traceroute target"
           />
           <select
-            className="top-bar__select"
+            className="trace-panel__protocol"
             name="protocol"
             value={form.protocol}
             onChange={handleChange("protocol")}
@@ -357,163 +360,151 @@ export const TopBar: React.FC = () => {
             <option value="UDP">UDP</option>
             <option value="TCP">TCP</option>
           </select>
-          <button
-            type="button"
-            className="top-bar__toggle"
-            aria-label={integrationsExpanded ? "Hide enrichment services" : "Show enrichment services"}
-            aria-expanded={integrationsExpanded}
-            onClick={() => setIntegrationsExpanded((prev) => !prev)}
-          >
-            {integrationsExpanded ? <FiChevronUp /> : <FiChevronDown />}
-          </button>
-          <button type="submit" className={runButtonClass} disabled={!isSubmitEnabled}>
-            {isRunning ? "Running…" : "Run"}
-          </button>
           {isRunning ? (
-            <button type="button" className="top-bar__cancel" onClick={() => void cancelRun()}>
+            <button type="button" className="button button--danger" onClick={() => void cancelRun()}>
               Cancel
             </button>
           ) : (
-            <button
-              type="button"
-              className="top-bar__reset"
-              onClick={() => setForm(defaultState)}
-              disabled={isRunning}
-            >
-              Clear
+            <button type="submit" className="button button--primary" disabled={!isSubmitEnabled}>
+              Trace
             </button>
           )}
           <button
             type="button"
-            className="top-bar__guide"
-            onClick={() => window.dispatchEvent(new CustomEvent(UI_EVENTS.SHOW_ONBOARDING))}
-            aria-label="Show onboarding guide"
+            className="icon-button"
+            aria-label="Trace options"
+            aria-expanded={!optionsCollapsed}
+            aria-controls={optionsId}
+            onClick={() => setOptionsCollapsed(!optionsCollapsed)}
           >
-            <FiHelpCircle />
-          </button>
-          <button
-            type="button"
-            className="top-bar__settings"
-            onClick={() => setSettingsModalOpen(true)}
-            aria-label="Integration settings"
-          >
-            <FiSettings />
+            <FiSliders aria-hidden />
           </button>
         </div>
-        {integrationsExpanded && (
-          <>
-            <div className="top-bar__integrations">
-              {integrationToggleConfig.map((config) => {
-                const section = integrationSettings[config.key];
-                const providerError = providerErrors[config.providerId];
-                return (
-                  <label key={config.key} className="top-bar__integration-toggle">
-                    <span className="top-bar__integration-header">
-                      <input
-                        type="checkbox"
-                        checked={section.enabled}
-                        onChange={handleIntegrationToggle(config.key)}
-                        disabled={integrationsLoading}
-                      />
-                      <span>{config.label}</span>
-                    </span>
-                    <small className="top-bar__integration-note">{config.description}</small>
-                    {providerError && (
-                      <small className="top-bar__integration-error" role="status">
-                        {providerError}
-                      </small>
-                    )}
-                  </label>
-                );
-              })}
-            </div>
-            {integrationSaveError && (
-              <div className="top-bar__integration-error top-bar__integration-error--global" role="status">
-                {integrationSaveError}
-              </div>
-            )}
-          </>
-        )}
-        <div className="top-bar__advanced">
-          <label className="top-bar__number">
-            Max hops
-            <input
-              type="number"
-              min={1}
-              max={64}
-              value={form.maxHops}
-              onChange={handleChange("maxHops")}
-              disabled={isRunning}
-            />
-          </label>
-          <label className="top-bar__number">
-            Timeout (ms)
-            <input
-              type="number"
-              min={1000}
-              max={10000}
-              step={250}
-              value={form.timeoutMs}
-              onChange={handleChange("timeoutMs")}
-              disabled={isRunning}
-            />
-          </label>
-          <label className="top-bar__number">
-            Probes/hop
-            <input
-              type="number"
-              min={1}
-              max={5}
-              value={form.packetCount}
-              onChange={handleChange("packetCount")}
-              disabled={isRunning}
-            />
-          </label>
-          <label className="top-bar__checkbox">
-            <input
-              type="checkbox"
-              checked={form.forceFresh}
-              onChange={handleChange("forceFresh")}
-              disabled={isRunning}
-            />
-            Force fresh lookups
-          </label>
-          <select
-            className="top-bar__recent"
-            onChange={handleRecentRunSelect}
-            value=""
-            disabled={!recentRuns?.length}
-          >
-            <option value="">Recent runs</option>
-            {recentRuns?.map((run) => (
-              <option key={run.id} value={run.id}>{`${run.target} (${run.protocol})`}</option>
-            ))}
-          </select>
-        </div>
-        <div className="top-bar__status" role="status" aria-live="polite">
+        <div className="trace-panel__status" role="status" aria-live="polite">
           {isRunning && pendingRequest ? (
             <span>
-              Running traceroute to <strong>{pendingRequest.target}</strong>…
-              {pendingRequest.target.includes(":") && (
-                <span className="top-bar__protocol-badge top-bar__protocol-badge--v6">IPv6</span>
-              )}
+              Tracing <strong>{pendingRequest.target}</strong>…
+              {isV6(pendingRequest.target) && <span className="trace-panel__badge">IPv6</span>}
             </span>
           ) : status === "success" && currentRunId ? (
             <span>
               Completed run <code>{currentRunId.slice(0, 8)}</code>
-              {currentRun?.request.target.includes(":") && (
-                <span className="top-bar__protocol-badge top-bar__protocol-badge--v6">IPv6</span>
-              )}
-              {currentRun && !currentRun.request.target.includes(":") && (
-                <span className="top-bar__protocol-badge top-bar__protocol-badge--v4">IPv4</span>
+              {currentRun && (
+                <span className="trace-panel__badge">
+                  {isV6(currentRun.request.target) ? "IPv6" : "IPv4"}
+                </span>
               )}
             </span>
           ) : status === "error" && error ? (
-            <span className="top-bar__status-error">{error}</span>
+            <span className="trace-panel__status-error">{error}</span>
           ) : (
-            <span>Ready for next target.</span>
+            <span>Enter a host to trace the route from this computer.</span>
           )}
         </div>
+        {!optionsCollapsed && (
+          <div id={optionsId} className="trace-panel__options">
+            <div className="trace-panel__fields">
+              <label className="trace-panel__number">
+                Max hops
+                <input
+                  type="number"
+                  min={1}
+                  max={64}
+                  value={form.maxHops}
+                  onChange={handleChange("maxHops")}
+                  disabled={isRunning}
+                />
+              </label>
+              <label className="trace-panel__number">
+                Timeout (ms)
+                <input
+                  type="number"
+                  min={1000}
+                  max={10000}
+                  step={250}
+                  value={form.timeoutMs}
+                  onChange={handleChange("timeoutMs")}
+                  disabled={isRunning}
+                />
+              </label>
+              <label className="trace-panel__number">
+                Probes per hop
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={form.packetCount}
+                  onChange={handleChange("packetCount")}
+                  disabled={isRunning}
+                />
+              </label>
+              <select
+                className="trace-panel__recent"
+                aria-label="Recent runs"
+                onChange={handleRecentRunSelect}
+                value=""
+                disabled={!recentRuns?.length}
+              >
+                <option value="">Recent runs</option>
+                {recentRuns?.map((run) => (
+                  <option key={run.id} value={run.id}>{`${run.target} (${run.protocol})`}</option>
+                ))}
+              </select>
+            </div>
+            <div className="trace-panel__fields">
+              <label className="trace-panel__check">
+                <input
+                  type="checkbox"
+                  className="switch"
+                  checked={form.forceFresh}
+                  onChange={handleChange("forceFresh")}
+                  disabled={isRunning}
+                />
+                Force fresh lookups
+              </label>
+              <button
+                type="button"
+                className="button"
+                onClick={() => setForm(defaultState)}
+                disabled={isRunning}
+              >
+                Reset options
+              </button>
+            </div>
+            <fieldset className="trace-panel__providers">
+              <legend>Lookups for each hop</legend>
+              {integrationToggleConfig.map((config) => {
+                const section = integrationSettings[config.key];
+                const providerError = providerErrors[config.providerId];
+                return (
+                  <label key={config.key} className="trace-panel__provider">
+                    <input
+                      type="checkbox"
+                      className="switch"
+                      checked={section.enabled}
+                      onChange={handleIntegrationToggle(config.key)}
+                      disabled={integrationsLoading}
+                    />
+                    <span>
+                      {config.label}
+                      <small>{config.description}</small>
+                      {providerError && (
+                        <small className="trace-panel__provider-error" role="status">
+                          {providerError}
+                        </small>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
+            </fieldset>
+            {integrationSaveError && (
+              <div className="trace-panel__provider-error" role="status">
+                {integrationSaveError}
+              </div>
+            )}
+          </div>
+        )}
       </form>
       <IntegrationSettingsModal
         isOpen={settingsModalOpen}

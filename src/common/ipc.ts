@@ -283,6 +283,26 @@ export interface IntegrationSettings {
   ixMatching: IxMatchingSettings;
 }
 
+export type ThemeName = "dark" | "light";
+
+/**
+ * Theme, globe layers and collapsed panels (`preferences.ui`). Mirrors
+ * `UiPreferences` in src-tauri/src/commands/persistence.rs.
+ */
+export interface UiPreferences {
+  theme: ThemeName;
+  /** Layer id → shown. A missing id uses the layer's default. */
+  layers: Record<string, boolean>;
+  /** Panel id → collapsed. A missing id uses the panel's default. */
+  collapsed: Record<string, boolean>;
+}
+
+/**
+ * The online NASA GIBS imagery layer. Mirrors `ONLINE_IMAGERY_LAYER` in
+ * persistence.rs: while it is off, the tile cache downloads nothing.
+ */
+export const ONLINE_IMAGERY_LAYER_ID = "online-imagery";
+
 export interface AppInfo {
   version: string;
   /** False while tauri.conf.json carries the updater public key placeholder. */
