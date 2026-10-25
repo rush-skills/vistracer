@@ -31,7 +31,9 @@ export const HoverCard: React.FC = () => {
         { width: window.innerWidth, height: window.innerHeight }
       )
     );
-  }, [anchor, content]);
+    // `capturing`: the card is not rendered during an export, so it must be
+    // measured and placed again when the export ends.
+  }, [anchor, content, capturing]);
 
   if (!content || !anchor || capturing) {
     return null;

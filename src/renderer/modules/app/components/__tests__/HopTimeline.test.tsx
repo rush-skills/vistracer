@@ -99,6 +99,16 @@ describe("HopTimeline", () => {
     }
   });
 
+  it("hides the card of a focused hop with Escape and keeps the highlight", () => {
+    render(<Connected />);
+    act(() => option(3).focus());
+    expect(useTracerouteStore.getState().hoverAnchor).toBeDefined();
+    fireEvent.keyDown(option(3), { key: "Escape" });
+    expect(useTracerouteStore.getState().hoverAnchor).toBeUndefined();
+    expect(useTracerouteStore.getState().hoveredHopIndex).toBe(3);
+    expect(option(3).className).toContain("timeline__hop--hovered");
+  });
+
   it("shares the hovered hop with the globe and the hop pane", () => {
     render(<Connected />);
     fireEvent.mouseEnter(option(3));

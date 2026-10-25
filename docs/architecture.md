@@ -751,7 +751,9 @@ it, and the focus returns to where it was.
   lookups. It reads the run in the store only, so hovering sends no request.
   `placeCard` keeps it in the window: next to the pointer and flipped near
   the right and bottom edges, or centred above a timeline hop and below it
-  near the top. It ignores the pointer and hides during exports.
+  near the top. It ignores the pointer and hides during exports (and is
+  placed again when the export ends). Escape hides the card shown for a hop
+  focused in the timeline and keeps the highlight (WCAG 1.4.13).
 
 ### Attribution
 

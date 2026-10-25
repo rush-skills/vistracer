@@ -63,6 +63,19 @@ describe("HoverCard", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("places the card again when an export ends", () => {
+    render(<HoverCard />);
+    act(() => useTracerouteStore.getState().setHoveredHop(3, { kind: "point", x: 200, y: 150 }));
+    act(() => useTracerouteStore.getState().setCaptureActive(true));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    // The pointer moved on while the export recorded.
+    act(() => useTracerouteStore.getState().setHoveredHop(3, { kind: "point", x: 300, y: 150 }));
+    act(() => useTracerouteStore.getState().setCaptureActive(false));
+    const card = screen.getByRole("tooltip");
+    expect(card.style.visibility).toBe("");
+    expect(card.style.left).toBe("312px");
+  });
+
   it("shows nothing for a hover from the hop table, during an export, or after the pointer leaves", () => {
     render(<HoverCard />);
     act(() => useTracerouteStore.getState().setHoveredHop(3));

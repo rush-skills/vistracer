@@ -108,6 +108,18 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
     ? selectedHopIndex
     : hops[0]?.hopIndex;
 
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // The card shown for a focused hop must be dismissable (WCAG 1.4.13);
+    // the hop stays highlighted.
+    const { hoveredHopIndex: hovered, hoverAnchor } = useTracerouteStore.getState();
+    if (event.key === "Escape" && hoverAnchor) {
+      event.preventDefault();
+      setHoveredHop(hovered);
+      return;
+    }
+    moveSelection(event);
+  };
+
   const moveSelection = (event: React.KeyboardEvent<HTMLDivElement>) => {
     // An animated export moves the selection itself (selectHopByUser).
     if (hops.length === 0 || useTracerouteStore.getState().captureActive) {
@@ -167,7 +179,7 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
             role="listbox"
             aria-label="Hops by round-trip time"
             aria-orientation="horizontal"
-            onKeyDown={moveSelection}
+            onKeyDown={onKeyDown}
           >
             {hops.map((hop) => {
               const selected = hop.hopIndex === selectedHopIndex;

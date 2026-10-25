@@ -210,7 +210,7 @@ For detailed instructions on downloading, installing, and updating databases, se
 | ↑ ↓, Enter, Esc | In the command bar: move, run, close |
 | ← → (or ↑ ↓), Home, End | In the hop timeline: select the previous, next, first or last hop |
 | Enter, Space | In the hop table: select the hop |
-| Esc | Close the command bar, the layer panel, the credits or a dialog |
+| Esc | Close the command bar, the layer panel, the credits or a dialog; hide the hover card of a hop focused in the timeline |
 
 ## Globe imagery and day/night
 
