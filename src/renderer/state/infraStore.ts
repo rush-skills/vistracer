@@ -47,7 +47,10 @@ export interface SiteHover {
 export interface InfraStore {
   sources: InfraSources;
   hoveredSite?: SiteHover;
-  /** Loads a source unless it is loaded or loading; a failed load is tried again. */
+  /**
+   * Loads a source unless it is loaded or loading. A failed load, or one
+   * that had nothing to show yet, is tried again.
+   */
   ensure: (id: InfraSourceId) => Promise<void>;
   /** Loads again: the PeeringDB list after a trace, when there was none. */
   reload: (id: InfraSourceId) => Promise<void>;
@@ -121,7 +124,7 @@ export const useInfraStore = create<InfraStore>((set, get) => {
     sources: INITIAL,
     ensure: async (id) => {
       const { status } = get().sources[id];
-      if (status === "idle" || status === "error") {
+      if (status === "idle" || status === "error" || status === "unavailable") {
         await load(id);
       }
     },

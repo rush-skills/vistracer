@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { HopResolution } from "@common/ipc";
 import { EMPTY_INFRA_SCENE, type InfraScene, type SiteLayer } from "@renderer/lib/globe";
-import { layerVisibility, sourcesForLayers } from "@renderer/lib/layers";
+import { LAYER_LIST, layerActive, layerVisibility, type LayerId } from "@renderer/lib/layers";
 import {
   buildSiteClusters,
   cableLines,
@@ -13,7 +13,6 @@ import {
   type InfraInput,
   type RouteInfra
 } from "@renderer/lib/infra/scene";
-import type { InfraSourceId } from "@renderer/lib/infra/sources";
 import { readySource, useInfraStore, type InfraSources } from "@renderer/state/infraStore";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
@@ -21,27 +20,39 @@ import { useUiStore } from "@renderer/state/uiStore";
 const NO_HOPS: HopResolution[] = [];
 
 /**
- * Loads the data of the infrastructure layers the user shows, the first
- * time each is shown. It runs when the set of needed sources changes (a
- * user action), so a failed load is tried again only when the user turns
- * the layer on again. After a trace, a missing or old PeeringDB list is read
- * again: exchange matching may have downloaded one during the trace.
+ * Loads the data of the infrastructure layers the user shows. Each layer
+ * that is turned on (or shown at start) asks for its source; a source that
+ * failed or had nothing yet is tried again then, so "turn the layer off and
+ * on" works also while another layer with the same source stays on. After a
+ * trace, a missing or old PeeringDB list is read again: exchange matching
+ * may have downloaded one during the trace.
  */
 export function useInfraLoading(): void {
   const saved = useUiStore((state) => state.layers);
-  const needed = useMemo(() => [...sourcesForLayers(layerVisibility(saved))].sort(), [saved]);
-  const neededKey = needed.join(",");
+  const shownKey = useMemo(() => {
+    const visibility = layerVisibility(saved);
+    return LAYER_LIST.filter((layer) => layer.data && layerActive(visibility, layer.id))
+      .map((layer) => layer.id)
+      .join(",");
+  }, [saved]);
+  const shownBefore = useRef<ReadonlySet<string>>(new Set());
   const status = useTracerouteStore((state) => state.status);
 
   useEffect(() => {
+    const shown = new Set(shownKey ? shownKey.split(",") : []);
     const { ensure } = useInfraStore.getState();
-    for (const id of neededKey ? (neededKey.split(",") as InfraSourceId[]) : []) {
-      void ensure(id);
+    for (const layer of LAYER_LIST) {
+      if (layer.data && shown.has(layer.id) && !shownBefore.current.has(layer.id)) {
+        void ensure(layer.data);
+      }
     }
-  }, [neededKey]);
+    shownBefore.current = shown;
+  }, [shownKey]);
 
   useEffect(() => {
-    if (status !== "success" || !neededKey.split(",").includes("peeringdb-sites")) {
+    const exchangeLayers: LayerId[] = ["exchanges", "data-centres"];
+    const shown = shownKey.split(",");
+    if (status !== "success" || !exchangeLayers.some((id) => shown.includes(id))) {
       return;
     }
     const { sources, reload } = useInfraStore.getState();
@@ -52,7 +63,7 @@ export function useInfraLoading(): void {
     ) {
       void reload("peeringdb-sites");
     }
-  }, [status, neededKey]);
+  }, [status, shownKey]);
 }
 
 function infraInput(sources: InfraSources): InfraInput {
