@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUNDLED_IMAGERY,
   ONLINE_IMAGERY,
+  bundledOnlyHeight,
   nightImageryShare,
   onlineTileTemplate
 } from "@renderer/lib/imagery";
@@ -38,5 +39,26 @@ describe("nightImageryShare", () => {
 
   it("keeps the night imagery when the fade range is empty", () => {
     expect(nightImageryShare(1, 5, 5)).toBe(1);
+  });
+});
+
+describe("bundledOnlyHeight", () => {
+  const view = {
+    levelGeometricErrorM: 4_892,
+    viewportPx: 1000,
+    fovRad: Math.PI / 3,
+    maximumScreenSpaceError: 2
+  };
+
+  it("rises with the size of the view and falls with the allowed error", () => {
+    const base = bundledOnlyHeight(view);
+    expect(bundledOnlyHeight({ ...view, viewportPx: 2000 })).toBeCloseTo(2 * base, 6);
+    expect(bundledOnlyHeight({ ...view, maximumScreenSpaceError: 4 })).toBeCloseTo(base / 2, 6);
+  });
+
+  it("adds a margin above Cesium's refinement threshold", () => {
+    const threshold = (4_892 * 1000) / (2 * 2 * Math.tan(Math.PI / 6));
+    expect(bundledOnlyHeight(view)).toBeGreaterThan(threshold);
+    expect(bundledOnlyHeight(view)).toBeLessThan(threshold * 1.2);
   });
 });

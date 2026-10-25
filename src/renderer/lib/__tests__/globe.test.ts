@@ -15,8 +15,11 @@ import {
   greatCircleKm,
   hopIndexToColor,
   latencyToColor,
-  nextCameraFocus
+  nextCameraFocus,
+  planFlight,
+  type CameraPosition
 } from "@renderer/lib/globe";
+import { bundledOnlyHeight } from "@renderer/lib/imagery";
 import type { AnycastInfo, HopLocation, HopResolution, LocationConfidence } from "@common/ipc";
 
 const noLocation: HopLocation = {
@@ -367,11 +370,89 @@ describe("camera", () => {
     expect(next.focus).toEqual({ latitude: 5, longitude: 5, radiusKm: 30 });
   });
 
-  it("keeps the zoom but fits the ring", () => {
-    expect(flyHeight(5_000_000, 25)).toBe(5_000_000);
-    expect(flyHeight(200_000, 1000)).toBe(4_000_000);
-    expect(flyHeight(1_000, 1)).toBe(CAMERA_LIMITS.minHeight);
-    expect(flyHeight(90_000_000, 1)).toBe(CAMERA_LIMITS.maxHeight);
+  it("keeps the zoom but fits the ring and stays above the floor", () => {
+    expect(flyHeight(5_000_000, 25, 0)).toBe(5_000_000);
+    expect(flyHeight(200_000, 1000, 0)).toBe(4_000_000);
+    expect(flyHeight(1_000, 1, 0)).toBe(CAMERA_LIMITS.minHeight);
+    expect(flyHeight(90_000_000, 1, 0)).toBe(CAMERA_LIMITS.maxHeight);
+    expect(flyHeight(200_000, 25, 3_000_000)).toBe(3_000_000);
+  });
+});
+
+describe("automatic camera moves use only bundled imagery", () => {
+  // Cesium 1.146 EllipsoidTerrainProvider: level 0 error is
+  // R × 2π × 0.25 / (64 × 2); each level halves it. Online tiles start at
+  // terrain level 5, so level 4 must not be refined.
+  const LEVEL_4_ERROR_M = (6_378_137 * 2 * Math.PI * 0.25) / (64 * 2) / 16;
+  const VIEW_PX = 1920;
+  const FOV = Math.PI / 3;
+  const floor = bundledOnlyHeight({
+    levelGeometricErrorM: LEVEL_4_ERROR_M,
+    viewportPx: VIEW_PX,
+    fovRad: FOV,
+    maximumScreenSpaceError: 2
+  });
+  /** QuadtreePrimitive `screenSpaceError` of the level 4 tile under a camera looking down. */
+  const levelFourError = (heightM: number) =>
+    (LEVEL_4_ERROR_M * VIEW_PX) / (heightM * 2 * Math.tan(FOV / 2));
+
+  it("puts the floor where Cesium stops refining the last bundled level", () => {
+    expect(levelFourError(floor)).toBeLessThan(2);
+    expect(levelFourError(floor / 1.2)).toBeGreaterThan(2);
+    expect(floor / 1000).toBeCloseTo(4_680, -1);
+  });
+
+  it("rises over the user's zoomed-in view before it moves to a hop", () => {
+    const zoomedIn = { latitude: 19.08, longitude: 72.88, height: 300_000 };
+    const steps = planFlight(zoomedIn, { latitude: 50.11, longitude: 8.68, radiusKm: 25 }, floor);
+    expect(steps).toEqual([
+      { kind: "rise", latitude: 19.08, longitude: 72.88, height: floor },
+      { kind: "move", latitude: 50.11, longitude: 8.68, height: floor }
+    ]);
+  });
+
+  it("keeps the user's height when it is above the floor", () => {
+    const far = { latitude: 0, longitude: 0, height: 14_000_000 };
+    expect(planFlight(far, { latitude: 50, longitude: 8, radiusKm: 25 }, floor)).toEqual([
+      { kind: "move", latitude: 50, longitude: 8, height: 14_000_000 }
+    ]);
+  });
+
+  it("follows a whole trace from a zoomed-in view without crossing new ground below the floor", () => {
+    const route: Array<[number, number]> = [
+      [19.08, 72.88],
+      [13.08, 80.27],
+      [43.3, 5.37],
+      [50.11, 8.68],
+      [51.51, -0.13],
+      [40.71, -74.01]
+    ];
+    let position: CameraPosition = { latitude: 19.0, longitude: 72.8, height: 250_000 };
+    let tracker = INITIAL_CAMERA_TRACKER;
+    const hops: HopResolution[] = [];
+    let moves = 0;
+    route.forEach(([latitude, longitude], index) => {
+      const hopIndex = index + 1;
+      hops.push(baseHop({ hopIndex, location: at(latitude, longitude, "high", 30) }));
+      // The store selects each new hop during a run.
+      const next = nextCameraFocus(tracker, "run", [...hops], hopIndex);
+      tracker = next.tracker;
+      if (!next.focus) {
+        return;
+      }
+      for (const step of planFlight(position, next.focus, floor)) {
+        if (step.kind === "move") {
+          moves += 1;
+          // Cesium interpolates the height of a flat flight between both ends.
+          expect(Math.min(position.height, step.height)).toBeGreaterThanOrEqual(floor);
+          expect(levelFourError(step.height)).toBeLessThan(2);
+        } else {
+          expect([step.latitude, step.longitude]).toEqual([position.latitude, position.longitude]);
+        }
+        position = step;
+      }
+    });
+    expect(moves).toBe(route.length);
   });
 });
 

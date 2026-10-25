@@ -12,6 +12,7 @@ import {
   LabelCollection,
   Material,
   Math as CesiumMath,
+  PerspectiveFrustum,
   PointPrimitiveCollection,
   PolylineCollection,
   ScreenSpaceEventHandler,
@@ -27,8 +28,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CAMERA_LIMITS,
   borderRings,
-  flyHeight,
+  planFlight,
   type Emphasis,
+  type FlightStep,
   type GeoPoint,
   type GlobeScene
 } from "@renderer/lib/globe";
@@ -36,6 +38,7 @@ import {
   BUNDLED_IMAGERY,
   NIGHT_BRIGHTNESS,
   ONLINE_IMAGERY,
+  bundledOnlyHeight,
   nightImageryShare,
   onlineTileTemplate
 } from "@renderer/lib/imagery";
@@ -52,6 +55,7 @@ const MARKER_OUTLINE = Color.fromCssColorString("rgba(8, 10, 16, 0.9)");
 const LABEL_BACKGROUND = Color.fromCssColorString("rgba(12, 14, 21, 0.85)");
 const BORDER_COLOR = Color.WHITE.withAlpha(0.22);
 const FLY_SECONDS = 1.2;
+const RISE_SECONDS = 0.6;
 const HOVER_PICK_MS = 50;
 /** Objects to look through under the pointer: two arcs, then the marker. */
 const PICK_DEPTH = 4;
@@ -162,6 +166,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   scene.imageryLayers.add(nightLayer);
   scene.imageryLayers.add(dayLayers[0]);
   const onlineTemplate = onlineTileTemplate(isTauri() ? convertFileSrc : undefined);
+  let onlineLayer: ImageryLayer | undefined;
   if (onlineTemplate) {
     const online = new UrlTemplateImageryProvider({
       url: onlineTemplate,
@@ -173,7 +178,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     online.errorEvent.addEventListener((error: TileProviderError) =>
       callbacks.onImageryError(error.message)
     );
-    const onlineLayer = new ImageryLayer(online, {
+    onlineLayer = new ImageryLayer(online, {
       dayAlpha: 1,
       nightAlpha: 0,
       minimumTerrainLevel: ONLINE_IMAGERY.minimumTerrainLevel
@@ -442,18 +447,59 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     },
 
     flyTo(focus) {
-      const currentHeight = camera.positionCartographic.height;
-      const height = flyHeight(currentHeight, focus.radiusKm);
+      // Cancelling a running app flight shows the online layer again; this
+      // flight hides it until it ends.
       camera.cancelFlight();
-      camera.flyTo({
-        destination: Cartesian3.fromDegrees(focus.longitude, focus.latitude, height),
-        orientation: { heading: 0, pitch: -CesiumMath.PI_OVER_TWO, roll: 0 },
-        duration: reducedMotion ? 0 : FLY_SECONDS,
-        // Keeps the flight at the user's zoom instead of arcing out to space.
-        maximumHeight: Math.max(height, currentHeight),
-        easingFunction: EasingFunction.QUADRATIC_IN_OUT
+      const position = camera.positionCartographic;
+      const floor = bundledOnlyHeight({
+        levelGeometricErrorM: scene.terrainProvider.getLevelMaximumGeometricError(
+          ONLINE_IMAGERY.minimumTerrainLevel - 1
+        ),
+        // The screen size too, so a larger window later at the same height
+        // still needs no online level.
+        viewportPx: Math.max(
+          canvas.clientWidth,
+          canvas.clientHeight,
+          window.screen.width,
+          window.screen.height
+        ),
+        fovRad:
+          camera.frustum instanceof PerspectiveFrustum && camera.frustum.fov !== undefined
+            ? camera.frustum.fov
+            : CesiumMath.PI_OVER_THREE,
+        maximumScreenSpaceError: globe.maximumScreenSpaceError
       });
-      scene.requestRender();
+      const steps = planFlight(
+        {
+          latitude: CesiumMath.toDegrees(position.latitude),
+          longitude: CesiumMath.toDegrees(position.longitude),
+          height: position.height
+        },
+        focus,
+        floor
+      );
+      // App-made moves load no online tiles, not even the wider view while
+      // the camera rises; at the end the floor keeps the view on bundled levels.
+      const showOnline = (show: boolean) => {
+        if (onlineLayer) {
+          onlineLayer.show = show;
+        }
+      };
+      showOnline(false);
+      const fly = (step: FlightStep, next: FlightStep[]) => {
+        camera.flyTo({
+          destination: Cartesian3.fromDegrees(step.longitude, step.latitude, step.height),
+          orientation: { heading: 0, pitch: -CesiumMath.PI_OVER_TWO, roll: 0 },
+          duration: reducedMotion ? 0 : step.kind === "rise" ? RISE_SECONDS : FLY_SECONDS,
+          // A flat path: without it, Cesium arcs the camera out towards space.
+          maximumHeight: Math.max(step.height, camera.positionCartographic.height),
+          easingFunction: EasingFunction.QUADRATIC_IN_OUT,
+          complete: () => (next.length > 0 ? fly(next[0], next.slice(1)) : showOnline(true)),
+          cancel: () => showOnline(true)
+        });
+        scene.requestRender();
+      };
+      fly(steps[0], steps.slice(1));
     },
 
     setInputEnabled(enabled) {

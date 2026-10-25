@@ -496,14 +496,51 @@ export const CAMERA_LIMITS = {
 
 /**
  * Keeps the user's zoom when flying to a hop, but high enough to show the
- * hop's whole ring.
+ * hop's whole ring and never below `floorM`.
  */
-export function flyHeight(currentHeightM: number, radiusKm: number): number {
+export function flyHeight(currentHeightM: number, radiusKm: number, floorM: number): number {
   const fitRing = radiusKm * 1000 * 4;
   return Math.min(
     CAMERA_LIMITS.maxHeight,
-    Math.max(CAMERA_LIMITS.minHeight, currentHeightM, fitRing)
+    Math.max(CAMERA_LIMITS.minHeight, currentHeightM, fitRing, floorM)
   );
+}
+
+export interface CameraPosition {
+  latitude: number;
+  longitude: number;
+  /** Metres above the ellipsoid. */
+  height: number;
+}
+
+export interface FlightStep extends CameraPosition {
+  /** `rise` goes straight up; `move` goes to the hop at a constant height. */
+  kind: "rise" | "move";
+}
+
+/**
+ * Camera moves the app makes itself (following a trace, selecting a hop,
+ * exports) stay at or above `floorM`, the height where the globe uses only
+ * bundled imagery (`bundledOnlyHeight`). Online tiles show NASA the areas
+ * they cover, so only zooms the user makes may fetch them. From below the
+ * floor, the camera first rises over the place the user zoomed into, then
+ * moves to the hop; it never crosses new ground below the floor.
+ */
+export function planFlight(
+  current: CameraPosition,
+  focus: CameraFocus,
+  floorM: number
+): FlightStep[] {
+  const move: FlightStep = {
+    kind: "move",
+    latitude: focus.latitude,
+    longitude: focus.longitude,
+    height: flyHeight(current.height, focus.radiusKm, floorM)
+  };
+  if (current.height >= floorM) {
+    return [move];
+  }
+  return [{ ...current, kind: "rise", height: Math.min(floorM, CAMERA_LIMITS.maxHeight) }, move];
 }
 
 /** Country outlines from a GeoJSON FeatureCollection, as [lon, lat] rings. */

@@ -140,6 +140,14 @@ describe("IntegrationSettingsModal providers", () => {
 });
 
 describe("IntegrationSettingsModal globe imagery", () => {
+  it("says what online tiles reveal and that automatic moves do not fetch them", async () => {
+    await renderModal();
+    const hint = screen.getByText(/These downloads show NASA the approximate areas you zoom into/);
+    expect(hint.textContent).toContain(
+      "Automatic camera moves (following a trace, exports) stay zoomed out and use only the bundled imagery."
+    );
+  });
+
   it("shows the tile cache size and clears it", async () => {
     await renderModal();
     expect(await screen.findByText("Tile cache: 49 MB of 500 MB (2,311 tiles).")).toBeTruthy();

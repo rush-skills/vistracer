@@ -193,6 +193,8 @@ const GlobeImagerySection: React.FC = () => {
       <small className="integration-settings-modal__hint">
         NASA Blue Marble and Black Marble imagery ships with the app. When you zoom in, sharper
         tiles are downloaded from NASA GIBS (gibs.earthdata.nasa.gov) and kept on this computer.
+        These downloads show NASA the approximate areas you zoom into. Automatic camera moves
+        (following a trace, exports) stay zoomed out and use only the bundled imagery.
       </small>
       <p className="integration-settings-modal__hint" role="status">
         Tile cache: {info ? describeTileCache(info) : error ? "unknown." : "reading…"}
