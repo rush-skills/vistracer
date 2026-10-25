@@ -12,6 +12,7 @@
 //   npm run build
 //   node scripts/globe-check/check.mjs [output dir]
 //
+// Needs Node.js 22.4 or later (global WebSocket).
 // CHROME=/path/to/chrome selects the browser (default: Google Chrome on
 // macOS). Screenshots and the browser profile go to the output dir (default:
 // a new temp dir). Exits 1 when a check fails. Not part of CI: it needs a
@@ -22,8 +23,9 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "..", "..");
 const dist = path.join(repo, "dist", "renderer");
 const chromePath =
@@ -36,6 +38,9 @@ function exitWith(message) {
 
 if (!fs.existsSync(path.join(dist, "index.html"))) {
   exitWith("dist/renderer is missing: run `npm run build` first.");
+}
+if (typeof WebSocket !== "function") {
+  exitWith("This check needs Node.js 22.4 or later (global WebSocket).");
 }
 if (!fs.existsSync(chromePath)) {
   exitWith(`No browser at ${chromePath}. Set CHROME to a Chrome or Chromium binary.`);
