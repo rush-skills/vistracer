@@ -141,7 +141,8 @@ synthetic.
   Submarine Cable Map" with the licence and the notice "Submarine cable
   data © TeleGeography, www.submarinecablemap.com, licensed CC BY-NC-SA
   3.0.", and the credits chip names TeleGeography. Each cable's hover card
-  repeats the source and the licence.
+  repeats the source and the licence, and exported images and videos carry
+  the same notice in their lower right corner while the layer is on.
 - **Privacy.** The request shows TeleGeography the user's IP address; it
   carries nothing about traces.
 

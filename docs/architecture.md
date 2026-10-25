@@ -429,7 +429,8 @@ of a pixel at the centre (`framedTarget`), so the hop shows at the centre
 of the free area, and the ring must fit the free area. That is exact near
 the ground and an estimate far out, where the Earth curves away. A free
 area under 30 % of the canvas is ignored. The flight floor (below) does
-not change.
+not change. During a GIF or WebM export, flights centre the hop in the
+whole canvas: the recording has no panels.
 
 During a GIF or WebM export the camera does not take user input
 (`setInputEnabled(false)`), so a drag or zoom cannot get into the video.
@@ -942,7 +943,9 @@ flowchart LR
   a spatial hash. A site joins the nearest seed within one cell, so each
   marker stands for an area and sits at a real site. The cell is 2^n km
   (1 km to 4,096 km), the smallest power of two at least 36 px wide at the
-  centre of the view. The adapter computes the level in `postRender`, so
+  centre of the view. The search for a seed covers every column of
+  longitude that can be within a cell (from the haversine formula; all
+  columns near a pole). The adapter computes the level in `postRender`, so
   only frames that are drawn anyway can change it; a new level re-clusters
   once and asks for one frame.
 - **Sites on the route** never join another site: the exchange of a
@@ -958,11 +961,17 @@ flowchart LR
 - **Cloud match** (`lib/infra/cloudMatch.ts`), per hop, against the
   providers whose switch is on: high when the hop's ASN is the provider's
   and one of its regions is within 100 km (or the estimate's radius) of an
-  estimate with a radius up to 200 km; medium when such a region is within
-  500 km; low when the provider's network has no region near (an edge
-  site) or the hop has no location, and when the hop has no ASN at all but
-  a precise estimate lies within 50 km of a region. Another network's
-  router never matches. The reason is shown in the hop details and the
+  estimate with a radius up to 200 km, of medium or high confidence and
+  not disputed by the RTT check; medium when such a region is within
+  500 km (also a close region with a weak or disputed estimate); low when
+  the provider's network has no region near (an edge site) or the hop has
+  no location, and when the hop has no ASN at all but a trusted, precise
+  estimate lies within 50 km of a region. Another network's router never
+  matches. The ASNs are the operators' networks (Amazon, Google,
+  Microsoft, Cloudflare), which also carry their other services and edge
+  sites, so the reason names the operator ("AS15169 is Google's network")
+  and says that an edge site in the same city looks the same. The reason
+  is shown in the hop details, the site card, and as the confidence in the
   hover card.
 - **Network colours** (`lib/infra/asnColors.ts`): Paul Tol's "light"
   scheme, 7 colours; tests check 3:1 against the dark globe and a CIELAB
@@ -983,6 +992,15 @@ flowchart LR
 - **Adapter**: route items, site markers and cables are separate
   collections, each rebuilt only when its lists change by identity; a hop
   hover does not rebuild the cables. A pick prefers a hop to a site.
+- **No rebuild per hop event.** A trace emits an event per line and per
+  finished lookup, each with a new hop list. `keepUnchanged`
+  (`lib/infra/scene.ts`) keeps the previous links, matches and guesses
+  when their content is the same, so clustering, site markers and cable
+  lines are built again only when the route really changes them.
+- **Exports**: an exported image or video carries the notice of opt-in
+  data whose layer is on (`exportCredits`): with the cables on,
+  "Submarine cable data © TeleGeography, …, licensed CC BY-NC-SA 3.0." in
+  the lower right corner.
 
 ## Settings and storage
 

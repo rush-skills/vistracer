@@ -28,7 +28,7 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (296 tests across 33 files)
+npm run test           # Run unit + component tests (304 tests across 34 files)
 npm run test:e2e       # Run e2e tests (82 tests across 7 files)
 npm run test:watch     # Run tests in watch mode
 node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): wide start view, idle frames and compositor frames, online tile requests (incl. the online imagery switch), export input lock, infrastructure layers (no request while off, each source once, cable consent, no request to TeleGeography) in headless Chrome (36 checks)
@@ -220,28 +220,28 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 296 tests across 33 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 304 tests across 34 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 11 tests: store behavior, hovered hop, user selections ignored during an export
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
-  - `src/renderer/lib/__tests__/globe.test.ts` — 32 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders, flight floor (a whole trace follow from a zoomed-in view never moves sideways below it), network colours (split arcs), flight framing in the free area
+  - `src/renderer/lib/__tests__/globe.test.ts` — 33 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders, flight floor (a whole trace follow from a zoomed-in view never moves sideways below it), network colours (split arcs), flight framing in the free area (the trace-follow floor test runs framed too)
   - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 8 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible (resumes a running flight), dispose, render quality
   - `src/renderer/lib/__tests__/imagery.test.ts` — 13 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade, bundled-only height, online layer held at start and after app moves until user input, only drags that start on the globe count
   - `src/renderer/lib/__tests__/layers.test.ts` — 13 tests: registry ids and groups, every scene item has a switch, online imagery entry, infrastructure entries off with their data, cable consent text, provider filters match the snapshot, visibility defaults, needed sources, filters, style, shared empty lists, scene and imagery mapping
   - `src/renderer/lib/infra/__tests__/sources.test.ts` — 11 tests: edge parsers (PeeringDB sites, cloud snapshot, cable map), malformed records dropped and counted, bad outer shape or layout rejected, the bundled snapshot parses fully and matches the curated table
-  - `src/renderer/lib/infra/__tests__/cluster.test.ts` — 7 tests: level steps, km per pixel, heaviest seed, order independence, every site once and seeds a cell apart, route sites as seeds, antimeridian and high latitude
+  - `src/renderer/lib/infra/__tests__/cluster.test.ts` — 8 tests: level steps, km per pixel, heaviest seed, order independence, every site once and seeds a cell apart, route sites as seeds, large cells at high latitude and the poles, antimeridian
   - `src/renderer/lib/infra/__tests__/asnColors.test.ts` — 9 tests: stable colour per ASN, distinct per route, repeats past 7, unknown grey and last, hop ranges, 3:1 on the dark globe, ΔE ≥ 12 under protanopia/deuteranopia/tritanopia
-  - `src/renderer/lib/infra/__tests__/cloudMatch.test.ts` — 10 tests: high/medium/low rules, vague estimates, anycast, another network never matches, proximity only without an ASN, hidden providers, km text
+  - `src/renderer/lib/infra/__tests__/cloudMatch.test.ts` — 11 tests: high/medium/low rules, vague estimates, weak or disputed estimates at most medium, anycast, another network never matches, proximity only without an ASN, hidden providers, km text
   - `src/renderer/lib/infra/__tests__/routeLinks.test.ts` — 3 tests: phase 2 IX match lights its exchange, nearest exchange and data centre, weak or disputed hops not linked
   - `src/renderer/lib/infra/__tests__/cableGuess.test.ts` — 4 tests: great-circle densifying, guess for a long crossing, none for short/low-confidence/no cable, at most two nearest first
-  - `src/renderer/lib/infra/__tests__/scene.test.ts` — 11 tests: nothing for hidden layers, route sites lit and labelled, clustering and filters before clustering, marker styles, guessed cables, marker contrast, site cards
+  - `src/renderer/lib/infra/__tests__/scene.test.ts` — 12 tests: nothing for hidden layers, route sites lit and labelled, clustering and filters before clustering, marker styles, guessed cables (every line, one label), unchanged route results kept, marker contrast, site cards
   - `src/renderer/lib/__tests__/timeline.test.ts` — 5 tests: RTT stats, samples, loss, latency jumps, location kinds, screen reader text
   - `src/renderer/lib/__tests__/hoverCard.test.ts` — 7 tests: card content (anycast, private, no reply, conflict), placement next to the pointer or a timeline hop, always inside the window
   - `src/renderer/lib/__tests__/commands.test.ts` — 13 tests: provider switch names and showing the parent, registry contents, toggle titles, hop search, disabled reasons (incl. no trace or hop flight during an export), typed host and its place in the results, word-by-word fuzzy ranking, ⌘K vs Ctrl+K, auto repeat, non-Latin layouts
   - `src/renderer/styles/__tests__/tokens.test.ts` — 17 tests: WCAG AA for text tokens in both themes (glass and solid), text on the globe, reduced motion and transparency rules
   - `src/renderer/state/__tests__/uiStore.test.ts` — 6 tests: parsing saved UI preferences (incl. consents), defaults, saving, choices made while the read is in flight, no writes after a failed read, write failures
   - `src/renderer/state/__tests__/infraStore.test.ts` — 8 tests: nothing loaded until asked then once, no list / old list messages, retry only when asked again, cable switch written before the backend is asked, cloud file layout check, layer notice accept/decline/once
-  - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 11 tests: scene and fly-to (with panel insets) through a mocked `GlobeController`, hover/select sync, no flight for a click during an export, input lock during export, hidden layers and imagery switches, WebGL failure message, imagery notice, infrastructure items on/off, re-clustering on a new level only, site hover to the store, `measureInsets`
+  - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 13 tests: scene and fly-to (with panel insets) through a mocked `GlobeController`, hover/select sync, no flight for a click during an export, input lock during export, hidden layers and imagery switches, WebGL failure message, imagery notice, infrastructure items on/off, re-clustering on a new level only, site hover to the store, no framing during an export, no rebuild for an unchanged hop update, `measureInsets`
   - `src/renderer/modules/app/components/__tests__/LayerPanel.test.tsx` — 6 tests: switches from the registry by group, online imagery off saved, Escape returns focus, child switches, data status, cable notice before the first show and only once
   - `src/renderer/modules/app/components/__tests__/AsnLegend.test.tsx` — 2 tests: legend of the route's networks, status bar legend switches
   - `src/renderer/modules/app/components/__tests__/HopTimeline.test.tsx` — 9 tests: RTT/loss/confidence/jumps, selection sync both ways, arrow keys/Home/End, selection left to an export (keys still prevented), Escape hides the card, hover sync, scroll into view, aria-controls only to an existing list, collapse saved
@@ -252,6 +252,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 17 tests: infrastructure section (cloud match, nearest data centre), dots in network colours, multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, row selection (not during an export), hover sync, scroll to selection, focus kept when the pane collapses
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 11 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing, online tile disclosure
   - `src/renderer/modules/app/lib/__tests__/tileCache.test.ts` — 2 tests: cache size text
+  - `src/renderer/modules/app/lib/__tests__/exportCredits.test.ts` — 2 tests: TeleGeography credit in exports only while the cable layer is on, drawn in the lower right corner
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
@@ -276,7 +277,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - Settings validation (including `ixMatching` defaults for old settings files), UI preferences (defaults, bad ids and unbounded maps rejected, a damaged `ui` section keeps the rest of the file, one bad field keeps the other saved choices), updater key detection
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
   - PeeringDB sites: facilities and counts from real rows, served from memory and the disk cache with no download, a dataset of the previous version used and refreshed
-  - Cable map: GeoJSON parsing (synthetic fixture), malformed features, nothing read or sent while not allowed, one download for concurrent calls, disk copy after a restart, backoff and stale copy, damaged copy replaced, host allowlist; `UiPreferences::submarine_cables` needs layer and consent
+  - Cable map: GeoJSON parsing (synthetic fixture), malformed features, nothing read or sent while not allowed, one download for concurrent calls, disk copy after a restart, backoff, retry after it, stale copy, damaged copy replaced, host allowlist; `UiPreferences::submarine_cables` needs layer and consent
   - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers and interrupted clears, clear, single flight for one tile, concurrent writes of many tiles, failure pause, no download while online imagery is off (cached tiles still served), GET/HEAD only (405 otherwise), `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
 
 ## Key Implementation Details
