@@ -133,9 +133,6 @@ export function nightImageryShare(
   return Math.min(1, Math.max(0, (cameraDistanceM - fadeOutM) / (fadeInM - fadeOutM)));
 }
 
-export const IMAGERY_CREDIT =
-  "Imagery: NASA Blue Marble and Black Marble, served by NASA GIBS (ESDIS)";
-
 /**
  * URL template for online tiles, or null outside the desktop app (a plain
  * browser has no `vistiles` scheme). `convertFileSrc` is Tauri's helper,

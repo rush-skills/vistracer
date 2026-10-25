@@ -19,31 +19,31 @@
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-control);
-  background: var(--color-scrim);
-  color: var(--color-text);
+  background: var(--globe-chip-bg);
+  color: var(--color-on-globe);
   font-size: var(--text-md);
   text-align: center;
   pointer-events: none;
 }
 
 .globe-viewport__overlay--error {
-  color: var(--color-danger);
+  font-weight: 600;
 }
 
-.globe-viewport__credits {
-  position: absolute;
-  right: var(--space-3);
-  bottom: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-1);
-  font-size: var(--text-xs);
-  color: #c9d2e3;
-  text-shadow: 0 0 3px #000;
-  pointer-events: none;
-}
-
+/* Below the trace panel row, centred; the HUD panels sit above the globe. */
 .globe-viewport__notice {
-  color: #ffd59a;
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  z-index: calc(var(--z-hud) + 1);
+  transform: translateX(-50%);
+  max-width: min(420px, 80vw);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-chip);
+  background: var(--globe-chip-bg);
+  color: var(--color-on-globe);
+  font-size: var(--text-xs);
+  text-align: center;
+  pointer-events: none;
 }

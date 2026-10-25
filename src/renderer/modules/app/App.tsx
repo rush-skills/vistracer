@@ -12,6 +12,7 @@ import { LayerPanel } from "./components/LayerPanel";
 import { HopTimeline } from "./components/HopTimeline";
 import { HoverCard } from "./components/HoverCard";
 import { CommandPalette } from "./components/CommandPalette";
+import { Attribution } from "./components/Attribution";
 import { useUpdateStore } from "@renderer/state/updateStore";
 import { selectTheme, useUiStore } from "@renderer/state/uiStore";
 import { UI_EVENTS } from "./lib/uiEvents";
@@ -158,6 +159,9 @@ export const App: React.FC = () => {
         </div>
         <div className="hud__status">
           <FooterBar />
+        </div>
+        <div className="hud__credits">
+          <Attribution />
         </div>
       </div>
       <HoverCard />

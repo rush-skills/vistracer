@@ -52,6 +52,10 @@
   --latency-slow: #ff5f5f;
   --latency-unknown: #4f5d75;
 
+  /* Text straight on the globe, which looks the same in both themes. */
+  --globe-chip-bg: rgba(5, 8, 14, 0.72);
+  --color-on-globe: #eef2f8;
+
   color-scheme: dark;
   --color-space: #05070c;
   --glass-bg: rgba(12, 18, 32, 0.8);

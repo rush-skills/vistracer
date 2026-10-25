@@ -179,10 +179,10 @@ describe("GlobeViewport", () => {
     );
   });
 
-  it("notes when detailed imagery fails and credits the imagery", async () => {
+  it("notes when detailed imagery fails", async () => {
     render(<GlobeViewport />);
     await waitFor(() => expect(fake.callbacks).toBeDefined());
-    expect(screen.getByText(/NASA Blue Marble and Black Marble/)).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
     act(() => fake.callbacks?.onImageryError("HTTP 503"));
     expect(screen.getByRole("status").textContent).toContain("Detailed imagery is unavailable");
   });

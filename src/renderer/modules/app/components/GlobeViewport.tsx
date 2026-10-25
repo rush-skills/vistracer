@@ -7,7 +7,6 @@ import {
   nextCameraFocus,
   type CameraTracker
 } from "@renderer/lib/globe";
-import { IMAGERY_CREDIT } from "@renderer/lib/imagery";
 import { imageryForLayers, layerVisibility, sceneForLayers } from "@renderer/lib/layers";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
@@ -117,14 +116,11 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
       {!loadError && run && !hasRenderableHops && (
         <p className="globe-viewport__overlay">Waiting for geolocation data…</p>
       )}
-      <footer className="globe-viewport__credits">
-        {imageryNotice && (
-          <span className="globe-viewport__notice" role="status">
-            Detailed imagery is unavailable (offline?); showing the bundled imagery.
-          </span>
-        )}
-        <span>{IMAGERY_CREDIT} · Globe: CesiumJS</span>
-      </footer>
+      {imageryNotice && (
+        <p className="globe-viewport__notice" role="status">
+          Detailed imagery is unavailable (offline?); showing the bundled imagery.
+        </p>
+      )}
     </section>
   );
 };

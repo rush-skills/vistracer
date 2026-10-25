@@ -93,6 +93,14 @@ describe.each([
   });
 });
 
+describe("text on the globe", () => {
+  it("keeps 4.5:1 on its chip over the brightest imagery, in both themes", () => {
+    const chip = over(parse(dark["--globe-chip-bg"]), WHITE);
+    expect(contrast(parse(dark["--color-on-globe"]), chip)).toBeGreaterThanOrEqual(4.5);
+    expect(light["--globe-chip-bg"]).toBe(dark["--globe-chip-bg"]);
+  });
+});
+
 describe("motion and transparency preferences", () => {
   it("drops every duration with prefers-reduced-motion", () => {
     const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
