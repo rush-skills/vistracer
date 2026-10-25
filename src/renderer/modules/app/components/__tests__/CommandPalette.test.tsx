@@ -64,6 +64,13 @@ describe("CommandPalette", () => {
     expect(document.activeElement).toBe(before);
   });
 
+  it("stays open while the shortcut is held and its key repeats", () => {
+    pressShortcut({ ctrlKey: true });
+    pressShortcut({ ctrlKey: true, repeat: true });
+    pressShortcut({ ctrlKey: true, repeat: true });
+    expect(screen.getByRole("dialog", { name: "Command bar" })).toBeTruthy();
+  });
+
   it("uses ⌘K on macOS and ignores Ctrl+K there", () => {
     setPlatform("MacIntel");
     pressShortcut({ ctrlKey: true });

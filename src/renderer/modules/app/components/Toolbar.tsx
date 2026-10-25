@@ -3,7 +3,7 @@ import { FiHelpCircle, FiLayers, FiMoon, FiSearch, FiSettings, FiSun } from "rea
 import { useCommands } from "@renderer/hooks/useCommands";
 import type { Command } from "@renderer/lib/commands";
 import { commandBarShortcutLabel } from "@renderer/lib/shortcuts";
-import { selectTheme, useUiStore } from "@renderer/state/uiStore";
+import { selectPanelCollapsed, selectTheme, useUiStore } from "@renderer/state/uiStore";
 import { LAYERS_TOGGLE_ID, LAYER_PANEL_ID } from "./LayerPanel";
 import "./Toolbar.css";
 
@@ -34,6 +34,7 @@ export const Toolbar: React.FC = () => {
     return found;
   };
   const theme = useUiStore(selectTheme);
+  const layersCollapsed = useUiStore(selectPanelCollapsed("layers"));
   const layers = command("panel.layers");
   const shortcut = commandBarShortcutLabel();
 
@@ -55,7 +56,7 @@ export const Toolbar: React.FC = () => {
         className="icon-button"
         aria-label="Layers"
         title={layers.title}
-        aria-expanded={layers.title.startsWith("Hide")}
+        aria-expanded={!layersCollapsed}
         aria-controls={LAYER_PANEL_ID}
         onClick={layers.run}
       >

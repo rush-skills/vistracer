@@ -197,4 +197,26 @@ describe("command bar shortcut", () => {
       false
     );
   });
+
+  it("ignores auto repeat while the keys are held", () => {
+    expect(isCommandBarShortcut(key({ metaKey: true, repeat: true }), true)).toBe(false);
+    expect(isCommandBarShortcut(key({ ctrlKey: true, repeat: true }), false)).toBe(false);
+  });
+
+  it("works on layouts without Latin letters and follows the letter on Latin ones", () => {
+    // Russian: the K position types "л".
+    expect(
+      isCommandBarShortcut(new KeyboardEvent("keydown", { key: "л", code: "KeyK", ctrlKey: true }), false)
+    ).toBe(true);
+    expect(
+      isCommandBarShortcut(new KeyboardEvent("keydown", { key: "κ", code: "KeyK", metaKey: true }), true)
+    ).toBe(true);
+    // Dvorak: "k" sits on the KeyV position, and KeyK types "t".
+    expect(
+      isCommandBarShortcut(new KeyboardEvent("keydown", { key: "k", code: "KeyV", ctrlKey: true }), false)
+    ).toBe(true);
+    expect(
+      isCommandBarShortcut(new KeyboardEvent("keydown", { key: "t", code: "KeyK", ctrlKey: true }), false)
+    ).toBe(false);
+  });
 });
