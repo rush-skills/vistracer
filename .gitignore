@@ -16,5 +16,8 @@ src/**/*.js.map
 src-tauri/target
 src-tauri/gen
 
+# Downloads of scripts/infra-data/build-cloud-regions.mjs
+scripts/infra-data/.cache/
+
 # Local agent run artifacts
 .claude-runs/

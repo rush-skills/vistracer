@@ -54,7 +54,10 @@ the city, rounded to 0.01°. Where a provider names only an area (AWS
 metro commonly reported for it and says so in a comment. Government,
 sovereign and China partitions and announced regions are left out; Azure
 regions with restricted access are in and marked. The table also holds the
-ASNs each provider's cloud uses (checked in PeeringDB) for the hop match.
+ASNs each provider's cloud uses (checked in PeeringDB and the registry
+records at `https://rdap.org/autnum/<asn>`) for the hop match. Google's
+YouTube networks (AS36040, AS43515, registered as YOUTUBE) are not in the
+Google Cloud list.
 
 Cloudflare has no regions. Its 340 data centres come from the components of
 its public status page (names like "Frankfurt, Germany - (FRA)"); each
@@ -75,8 +78,9 @@ date and record count.
 | Cloudflare data centres | <https://www.cloudflarestatus.com/api/v2/components.json> (and <https://www.cloudflare.com/network/>) | 2026-10-25 | 340 |
 | Coordinates of the Cloudflare sites | <https://davidmegginson.github.io/ourairports-data/airports.csv> (OurAirports, public domain) | 2026-10-25 | 334 (+ 6 by hand) |
 
-To rebuild (two keyless downloads, saved in `.claude-runs/infra-data` and
-reused, so the same inputs give the same file; needs Node 22.18 or later):
+To rebuild (two keyless downloads, saved in `scripts/infra-data/.cache`
+(gitignored) and reused, so the same inputs give the same file; needs Node
+22.18 or later):
 
 ```bash
 node scripts/infra-data/build-cloud-regions.mjs
