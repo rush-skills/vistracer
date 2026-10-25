@@ -121,8 +121,7 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
   };
 
   const moveSelection = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    // An animated export moves the selection itself (selectHopByUser).
-    if (hops.length === 0 || useTracerouteStore.getState().captureActive) {
+    if (hops.length === 0) {
       return;
     }
     const current = hops.findIndex((hop) => hop.hopIndex === focusIndex);
@@ -139,7 +138,12 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
     if (target === undefined) {
       return;
     }
+    // Handled keys never scroll the strip, also while an export records.
     event.preventDefault();
+    // An animated export moves the selection itself (selectHopByUser).
+    if (useTracerouteStore.getState().captureActive) {
+      return;
+    }
     const hopIndex = hops[target].hopIndex;
     selectHopByUser(hopIndex);
     optionRefs.current.get(hopIndex)?.focus();

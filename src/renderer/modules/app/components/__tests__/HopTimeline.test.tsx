@@ -91,9 +91,14 @@ describe("HopTimeline", () => {
     try {
       fireEvent.click(option(5));
       option(2).focus();
-      fireEvent.keyDown(option(2), { key: "ArrowRight" });
+      // The key is still handled, so the strip does not scroll.
+      for (const key of ["ArrowRight", "ArrowLeft", "Home", "End"]) {
+        expect(fireEvent.keyDown(option(2), { key }), key).toBe(false);
+      }
       expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
       expect(document.activeElement).toBe(option(2));
+      // Other keys keep their default action.
+      expect(fireEvent.keyDown(option(2), { key: "a" })).toBe(true);
     } finally {
       act(() => useTracerouteStore.getState().setCaptureActive(false));
     }
