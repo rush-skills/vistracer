@@ -19,6 +19,7 @@ use commands::persistence::{
     configure_geo_database_defaults, ensure_app_data_dirs, save_persisted_settings, AppStore,
     IntegrationSettings, SharedStore, UiPreferences,
 };
+use commands::satellites::{group_def, satellite_fetcher, SatelliteGroup, SatelliteService};
 use commands::tile_cache::{
     into_response, tile_fetcher, HttpFetcher, TileCacheInfo, TileError, TileService, TileStore,
     DEFAULT_CAP_BYTES, TILE_SCHEME,
@@ -38,6 +39,7 @@ struct AppState {
     enrichment: Arc<EnrichmentService>,
     tiles: Arc<TileService<HttpFetcher>>,
     cables: Arc<CableService<HttpFetcher>>,
+    satellites: Arc<SatelliteService<HttpFetcher>>,
     active_runs: ActiveRuns,
     app_data_dir: PathBuf,
 }
@@ -264,6 +266,31 @@ async fn get_submarine_cables(
         .map_err(|error| error.message())
 }
 
+/// The orbital elements of one satellite group of the opt-in satellites
+/// layer. Downloads from CelesTrak only while the saved settings have the
+/// layer and the group on and its notice accepted, and only as often as
+/// CelesTrak's usage policy allows (commands/satellites.rs).
+#[tauri::command]
+async fn get_satellites(
+    group: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<SatelliteGroup, String> {
+    let def = group_def(&group).ok_or_else(|| {
+        commands::satellites::SatelliteError::UnknownGroup(group.clone()).message()
+    })?;
+    let allowed = state
+        .store()
+        .preferences
+        .ui
+        .satellite_group(def.layer, def.default_on);
+    let satellites = state.satellites.clone();
+    satellites
+        .get(def, allowed)
+        .await
+        .map(|data| (*data).clone())
+        .map_err(|error| error.message())
+}
+
 #[tauri::command]
 fn get_app_info(app: tauri::AppHandle) -> AppInfo {
     AppInfo {
@@ -360,12 +387,18 @@ fn main() {
                 cache_dir.join("submarine-cables.json"),
             ));
 
+            let satellites = Arc::new(SatelliteService::new(
+                satellite_fetcher(),
+                cache_dir.join("satellites"),
+            ));
+
             app.manage(AppState {
                 store,
                 geo_readers: readers,
                 enrichment,
                 tiles,
                 cables,
+                satellites,
                 active_runs: create_active_runs(),
                 app_data_dir,
             });
@@ -388,6 +421,7 @@ fn main() {
             clear_tile_cache,
             get_peeringdb_sites,
             get_submarine_cables,
+            get_satellites,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
