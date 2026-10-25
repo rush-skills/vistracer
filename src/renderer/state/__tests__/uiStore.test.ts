@@ -89,13 +89,17 @@ describe("uiStore", () => {
   });
 
   it("keeps choices made while the saved file loads", async () => {
-    saved = { theme: "light", layers: { rings: false, labels: false }, collapsed: {} };
+    let answer: (value: unknown) => void = () => undefined;
+    api.getSettings.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const loading = useUiStore.getState().load();
+    // The user flips a switch while the read is still in flight.
     useUiStore.getState().setLayerVisible("labels", true);
     // Nothing is written before the saved file is read.
     await flush();
     expect(api.setSettings).not.toHaveBeenCalled();
 
-    await useUiStore.getState().load();
+    answer({ theme: "light", layers: { rings: false, labels: false }, collapsed: {} });
+    await loading;
     await flush();
     expect(useUiStore.getState().layers).toEqual({ rings: false, labels: true });
     expect(api.setSettings).toHaveBeenLastCalledWith("preferences.ui", {
@@ -105,12 +109,21 @@ describe("uiStore", () => {
     });
   });
 
-  it("uses the defaults when the settings cannot be read", async () => {
+  it("uses the defaults but saves nothing when the settings cannot be read", async () => {
     api.getSettings.mockRejectedValue(new Error("no app data folder"));
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await useUiStore.getState().load();
-    expect(useUiStore.getState().loaded).toBe(true);
+    expect(useUiStore.getState().loaded).toBe(false);
     expect(selectTheme(useUiStore.getState())).toBe("dark");
+    expect(useNoticeStore.getState().notice).toEqual({
+      text: "Could not read the saved layout and layer choices (no app data folder); changes in this session are not saved.",
+      tone: "error"
+    });
+    // A write now would replace the saved choices with the defaults.
+    useUiStore.getState().setTheme("light");
+    await flush();
+    expect(selectTheme(useUiStore.getState())).toBe("light");
+    expect(api.setSettings).not.toHaveBeenCalled();
   });
 
   it("says when a choice could not be saved", async () => {

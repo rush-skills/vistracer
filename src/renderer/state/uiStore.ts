@@ -15,6 +15,7 @@ export interface UiStore {
   /** Only the switches the user changed; the rest use the registry defaults. */
   layers: Record<string, boolean>;
   collapsed: Record<string, boolean>;
+  /** Saved choices were read. Until then (or when reading failed) nothing is written. */
   loaded: boolean;
   paletteOpen: boolean;
   load: () => Promise<void>;
@@ -55,11 +56,19 @@ export const useUiStore = create<UiStore>((set, get) => ({
   loaded: false,
   paletteOpen: false,
   load: async () => {
-    let saved = normalizeUiPreferences(undefined);
+    let saved;
     try {
       saved = normalizeUiPreferences(await window.visTracer.getSettings("preferences.ui"));
     } catch (error) {
-      console.warn("Could not read the UI preferences; using the defaults.", error);
+      // Writing now would replace the saved choices with the defaults.
+      console.warn("Could not read the UI preferences; changes are not saved.", error);
+      useNoticeStore
+        .getState()
+        .show(
+          `Could not read the saved layout and layer choices (${errorText(error)}); changes in this session are not saved.`,
+          "error"
+        );
+      return;
     }
     // Choices made while the file loaded win over the saved ones.
     const early = get();
