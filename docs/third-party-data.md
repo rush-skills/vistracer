@@ -59,10 +59,16 @@ over (see [architecture.md](./architecture.md#globe)).
 
 ## Credits shown in the app
 
-The globe shows "Imagery: NASA Blue Marble and Black Marble, served by NASA
-GIBS (ESDIS) · Globe: CesiumJS" in its lower right corner. Cesium's own
-credit box is hidden: its links would open in the app window instead of a
-browser.
+A small "NASA, GIBS, CesiumJS" button in the globe's lower right corner opens
+the full list (`src/renderer/lib/attribution.ts`; keep it in step with this
+file): CesiumJS, NASA Blue Marble and Black Marble, NASA GIBS with the
+acknowledgement GIBS asks for (see the table above), Natural Earth, MaxMind GeoLite2 with
+MaxMind's notice ("This product includes GeoLite2 data created by MaxMind,
+available from https://www.maxmind.com."), PeeringDB, OurAirports, Team
+Cymru, RDAP and RIPEstat. While online imagery is off in the layer panel,
+GIBS is listed as not used and the button reads "NASA, CesiumJS". Cesium's
+own credit box is hidden, and the list has no links: a link would open in
+the app window instead of a browser.
 
 Sources checked on 2026-10-25:
 

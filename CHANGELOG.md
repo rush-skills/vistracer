@@ -22,6 +22,13 @@ All notable changes to VisTracer will be documented in this file.
 - Hovering a hop on the globe highlights its row in the hop table and the other way round; the selected and hovered hop get a label on the globe
 - Anycast hops with a known RTT bound show the area the answering site can be in (a dotted circle around the reference hop), still without a point
 - "Globe imagery" in Integration settings shows the tile cache size and clears it
+- New layout: the globe fills the window and the controls float over it on translucent panels (trace panel, toolbar, hop pane, hop timeline, status bar), each of which can collapse; the layout, theme and layer switches are remembered
+- Light theme next to the dark default; reduced motion and reduced transparency system settings are respected
+- Layer panel with switches for route arcs, hop markers, confidence rings, anycast reach, labels, day/night shading and online imagery; with online imagery off, no NASA GIBS tile is downloaded (the backend refuses them too)
+- Hop timeline with RTT (average, min-max, each probe), loss, location confidence and marked latency jumps; arrow keys move the selection
+- Hover cards for hops on the globe and in the timeline, from data already loaded
+- Command bar (⌘K / Ctrl+K): trace a typed host, run the last trace again, go to a hop, show/hide layers and panels, switch theme, export, clear the tile cache, open settings
+- Credits button on the globe with every data source, including the NASA GIBS and MaxMind GeoLite2 acknowledgements
 
 ### Changed
 
@@ -34,6 +41,8 @@ All notable changes to VisTracer will be documented in this file.
 
 ### Fixed
 
+- Online imagery no longer loads at start-up before you move the camera (very wide windows could refine the start view past the bundled levels)
+- A second export started within 3.5 s of the previous one is no longer shown as finished while it still runs
 - Team Cymru lookups could never connect, PeeringDB sent the API key in the wrong header, and RIPEstat/PeeringDB fields that do not exist were read
 - macOS TCP traces only run root-owned system binaries with administrator rights
 - A partial settings file no longer resets all settings
