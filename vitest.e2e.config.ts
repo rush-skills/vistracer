@@ -14,7 +14,7 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: [path.resolve(__dirname, "vitest.setup.ts")],
-    include: ["tests/e2e/**/*.test.ts"],
+    include: ["tests/e2e/**/*.test.{ts,tsx}"],
   },
   resolve: { alias }
 });

@@ -1,7 +1,9 @@
+/* Top centre, below the trace panel row: clear of the hop pane and the timeline. */
 .update-banner {
   position: fixed;
-  right: 1.25rem;
-  bottom: 4.5rem;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: var(--z-modal);
   display: flex;
   align-items: center;

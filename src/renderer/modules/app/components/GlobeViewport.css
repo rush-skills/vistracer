@@ -30,10 +30,10 @@
   font-weight: 600;
 }
 
-/* Below the trace panel row, centred; the HUD panels sit above the globe. */
+/* Centred below the trace panel row and the update banner. */
 .globe-viewport__notice {
   position: absolute;
-  top: 72px;
+  top: 128px;
   left: 50%;
   z-index: calc(var(--z-hud) + 1);
   transform: translateX(-50%);
