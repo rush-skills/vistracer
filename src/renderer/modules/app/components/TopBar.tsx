@@ -496,7 +496,9 @@ export const TopBar: React.FC = () => {
               <button
                 type="button"
                 className="button"
-                onClick={() => setForm(defaultState)}
+                onClick={() =>
+                  setForm((previous) => ({ ...defaultState, target: previous.target }))
+                }
                 disabled={isRunning}
               >
                 Reset options

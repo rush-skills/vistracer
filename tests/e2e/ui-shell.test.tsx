@@ -199,6 +199,20 @@ describe("UI shell", () => {
     ).toBe("example.org");
   });
 
+  it("resets the trace options but keeps the target", async () => {
+    renderApp();
+    const target = screen.getByRole("textbox", { name: "Traceroute target" }) as HTMLInputElement;
+    fireEvent.change(target, { target: { value: "example.net" } });
+    fireEvent.click(screen.getByRole("button", { name: "Trace options" }));
+    const maxHops = screen.getByRole("spinbutton", { name: "Max hops" }) as HTMLInputElement;
+    fireEvent.change(maxHops, { target: { value: "12" } });
+    expect(maxHops.value).toBe("12");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset options" }));
+    expect((screen.getByRole("spinbutton", { name: "Max hops" }) as HTMLInputElement).value).toBe("30");
+    expect(target.value).toBe("example.net");
+  });
+
   it("keeps collapsed panels collapsed after a restart", async () => {
     const first = renderApp();
     await waitFor(() => expect(useUiStore.getState().loaded).toBe(true));
