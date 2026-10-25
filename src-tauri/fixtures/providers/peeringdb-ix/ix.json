@@ -5,6 +5,7 @@
    "name": "AMS-IX",
    "city": "Amsterdam",
    "country": "NL",
+   "net_count": 856,
    "website": "http://www.ams-ix.net/"
   },
   {
@@ -12,6 +13,7 @@
    "name": "DE-CIX Frankfurt",
    "city": "Frankfurt",
    "country": "DE",
+   "net_count": 1019,
    "website": "https://www.de-cix.net"
   }
  ],

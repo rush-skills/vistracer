@@ -64,3 +64,27 @@
 .layer-panel__item .switch {
   margin-top: 2px;
 }
+
+/* A switch that only has an effect while the layer above it is on. */
+.layer-panel__item--child {
+  padding-left: var(--space-4);
+}
+
+.layer-panel__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The colours are the globe's marker colours (theme-independent). */
+.layer-panel__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-round);
+  border: 2px solid;
+  flex: none;
+}
+
+.layer-panel__text .layer-panel__status {
+  color: var(--color-amber);
+}

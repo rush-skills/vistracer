@@ -88,6 +88,19 @@ describe("buildCommands", () => {
     expect(byId(ctx, "panel.hops").title).toBe("Hide hop details");
   });
 
+  it("names provider switches in full, and shows cloud regions with them", () => {
+    const ctx = context({ layers: layerVisibility({ "cloud-aws": false }) });
+    const aws = byId(ctx, "layer.cloud-aws");
+    expect(aws.title).toBe("Show AWS regions");
+    expect(aws.detail).toBe("Also shows cloud regions");
+    aws.run();
+    expect(ctx.actions.setLayerVisible).toHaveBeenNthCalledWith(1, "cloud-regions", true);
+    expect(ctx.actions.setLayerVisible).toHaveBeenNthCalledWith(2, "cloud-aws", true);
+    expect(byId(ctx, "layer.cloud-cloudflare").title).toBe("Hide Cloudflare data centres");
+    expect(byId(ctx, "layer.submarine-cables").title).toBe("Show submarine cables");
+    expect(byId(ctx, "layer.asn-colors").title).toBe("Show network colours");
+  });
+
   it("goes to a hop, found by its address, host name or network", () => {
     const ctx = context();
     const hop = byId(ctx, "hop.3");

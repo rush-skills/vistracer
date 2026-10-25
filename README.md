@@ -49,6 +49,7 @@ This architecture ensures you get authentic network diagnostics from your actual
 - 3D globe (CesiumJS) with NASA Blue Marble and Black Marble imagery bundled for offline use, raised great-circle arcs coloured by latency bands, per-hop markers and an uncertainty ring true to scale. The globe fills the window; the controls float over it on translucent panels, in a dark or a light theme.
 - Hop timeline with each hop's RTT (average, min-max, every probe), loss and location confidence; latency jumps (such as an ocean cable) are marked. Selection and hover stay in step between the globe, the timeline and the hop table, and hovering a hop shows a compact card.
 - Layer panel: show or hide route arcs, hop markers, confidence rings, anycast reach, labels, day/night shading and online imagery.
+- Infrastructure layers (off by default): internet exchanges and data centres (from the PeeringDB list that exchange matching downloads), cloud regions of AWS, Google Cloud and Azure and Cloudflare data centres (bundled), network colours with a legend (one colour per ASN), and opt-in submarine cables from TeleGeography. Exchanges, data centres and regions on your route stand out, and a hop that is likely inside a cloud region says so, with a confidence.
 - Command bar (⌘K on macOS, Ctrl+K on Windows and Linux) for everything the app does, from the keyboard.
 - Battery-friendly rendering: the globe draws only when something changes, and stops completely when idle, hidden or minimized.
 - Detailed hop table with RTT stats, packet loss, location and ASN metadata (including PeeringDB facility context when available).
@@ -199,14 +200,19 @@ For detailed instructions on downloading, installing, and updating databases, se
 - **Hops.** Click a hop on the globe, in the timeline or in the table to select it everywhere; the globe flies to it. Hover a hop on the globe or in the timeline for a card with its host name, address, network, location (with source and confidence), RTT and loss. The card only shows data the app already has; hovering sends nothing anywhere.
 - **Timeline.** One column per hop: the bar is the average RTT, the line the min-max range, the ticks the single probes. An amber "+81" marks a rise of 20 ms or more over the previous hop that answered: usually a long link such as an ocean cable, sometimes a router that answers slowly. The three small bars show how sure the location is.
 - **Layers.** The layers button in the toolbar opens switches for route arcs, hop markers, confidence rings, anycast reach, labels, day/night shading and **Online imagery**. With online imagery off, VisTracer downloads no NASA GIBS tile at all and uses only the bundled imagery; the backend refuses those downloads too.
+- **Infrastructure.** The same panel has these layers, all off until you turn them on:
+  - **Network colours**: arcs, markers and rings in one colour per network (ASN); an arc that changes colour in the middle crosses from one network to the next. A legend lists the networks of the route.
+  - **Internet exchanges** and **Data centres**: PeeringDB sites, grouped into one marker per area at each zoom (hover a marker for the list). The exchange a hop is on, and the exchange and data centre nearest to each well-placed hop, stand out. They use the exchange list that exchange matching downloads (Integration settings → Internet exchanges); the layers themselves send nothing. Before the first trace with exchange matching on, there is no list yet, and the panel says so.
+  - **Cloud regions**: AWS, Google Cloud and Azure regions and Cloudflare data centres at approximate locations, with a switch per provider. A hop whose network (ASN) belongs to a provider and that is near one of its regions is marked "likely inside", with high, medium or low confidence and the reason, in the hop details and the hover card.
+  - **Submarine cables** (opt-in): TeleGeography's Submarine Cable Map, CC BY-NC-SA 3.0 (non-commercial use, with attribution). The first time you turn it on, a notice explains the licence and that VisTracer will download the map from `www.submarinecablemap.com`; nothing is downloaded before you accept or while the layer is off. Cables with landing points near two consecutive hops far apart are highlighted and labelled as a guess. Exports made while the layer is on carry TeleGeography's credit.
 - **Theme.** The sun/moon button switches between the dark (default) and the light theme. With "reduce motion" or "reduce transparency" set in your system, animations stop and the panels become solid.
-- **Credits.** The small "NASA, GIBS, CesiumJS" button in the lower right corner lists every data source and its license.
+- **Credits.** The small "NASA, GIBS, CesiumJS" button in the lower right corner lists every data source and its license (with TeleGeography added while the cable layer is on).
 
 ### Keyboard shortcuts
 
 | Keys | Does |
 | --- | --- |
-| ⌘K (macOS), Ctrl+K (Windows, Linux) | Open or close the command bar: search any command, go to a hop, show or hide a layer, switch theme, export, clear the tile cache, or type a host name to trace it |
+| ⌘K (macOS), Ctrl+K (Windows, Linux) | Open or close the command bar: search any command, go to a hop, show or hide a layer (such as "show cloud regions" or "show AWS regions"), switch theme, export, clear the tile cache, or type a host name to trace it |
 | ↑ ↓, Enter, Esc | In the command bar: move, run, close |
 | ← → (or ↑ ↓), Home, End | In the hop timeline: select the previous, next, first or last hop |
 | Enter, Space | In the hop table: select the hop |
@@ -248,7 +254,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup, coding standards
 
 - [GEOLITE2_SETUP.md](./GEOLITE2_SETUP.md) - Complete guide to downloading and configuring GeoLite2 databases
 - [docs/architecture.md](./docs/architecture.md) - Hop pipeline, enrichment, globe, tile cache, storage and security
-- [docs/third-party-data.md](./docs/third-party-data.md) - Bundled code and data, imagery sources and licenses
+- [docs/third-party-data.md](./docs/third-party-data.md) - Bundled code and data, imagery, cloud region and cable sources and licenses
 - [docs/releasing.md](./docs/releasing.md) - Update signing key setup and the release workflow
 - [CLAUDE.md](./CLAUDE.md) - Architecture overview and development guide for contributors
 - [CHANGELOG.md](./CHANGELOG.md) - Release history

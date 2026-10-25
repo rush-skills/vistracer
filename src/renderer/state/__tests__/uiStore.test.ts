@@ -38,18 +38,25 @@ describe("normalizeUiPreferences", () => {
     ).toEqual({
       theme: "light",
       layers: { rings: false, "ixp-sites": true },
-      collapsed: { hops: true }
+      collapsed: { hops: true },
+      consents: {}
     });
     expect(normalizeUiPreferences({ theme: "neon", layers: [], collapsed: null })).toEqual({
       theme: undefined,
       layers: {},
-      collapsed: {}
+      collapsed: {},
+      consents: {}
     });
     expect(normalizeUiPreferences(undefined)).toEqual({
       theme: undefined,
       layers: {},
-      collapsed: {}
+      collapsed: {},
+      consents: {}
     });
+    expect(
+      normalizeUiPreferences({ consents: { "submarine-cables": true, "Bad Id": true, x: "yes" } })
+        .consents
+    ).toEqual({ "submarine-cables": true });
   });
 });
 
@@ -75,7 +82,8 @@ describe("uiStore", () => {
     expect(api.setSettings).toHaveBeenLastCalledWith("preferences.ui", {
       theme: "light",
       layers: { rings: false },
-      collapsed: { timeline: true, hops: true }
+      collapsed: { timeline: true, hops: true },
+      consents: {}
     });
 
     useUiStore.getState().setTheme("dark");
@@ -84,7 +92,8 @@ describe("uiStore", () => {
     expect(api.setSettings).toHaveBeenLastCalledWith("preferences.ui", {
       theme: "dark",
       layers: { rings: false, "online-imagery": false },
-      collapsed: { timeline: true, hops: true }
+      collapsed: { timeline: true, hops: true },
+      consents: {}
     });
   });
 
@@ -105,7 +114,8 @@ describe("uiStore", () => {
     expect(api.setSettings).toHaveBeenLastCalledWith("preferences.ui", {
       theme: "light",
       layers: { rings: false, labels: true },
-      collapsed: {}
+      collapsed: {},
+      consents: {}
     });
   });
 

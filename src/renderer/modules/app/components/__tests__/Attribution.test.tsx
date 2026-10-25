@@ -18,9 +18,11 @@ describe("Attribution", () => {
     fireEvent.click(toggle);
     const panel = screen.getByRole("dialog", { name: "Data sources and credits" });
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close credits" }));
-    for (const credit of CREDITS) {
+    for (const credit of CREDITS.filter((entry) => !entry.layer)) {
       expect(within(panel).getByText(credit.name)).toBeTruthy();
     }
+    // Opt-in data is credited while its layer is on (next test).
+    expect(within(panel).queryByText("TeleGeography Submarine Cable Map")).toBeNull();
     const globe = within(panel).getByRole("region", { name: "Globe" });
     expect(globe.textContent).toContain("Apache-2.0");
     expect(globe.textContent).toContain(
@@ -53,5 +55,23 @@ describe("Attribution", () => {
       "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS)"
     );
     expect(screen.getByRole("dialog").textContent).not.toContain("Not used");
+  });
+
+  it("credits TeleGeography, with its licence, only while the cable layer is on", () => {
+    render(<Attribution />);
+    const toggle = screen.getByRole("button", { name: "Data sources and credits" });
+    fireEvent.click(toggle);
+    expect(screen.queryByText("TeleGeography Submarine Cable Map")).toBeNull();
+    expect(screen.getByText("Cloud regions")).toBeTruthy();
+
+    act(() => useUiStore.setState({ layers: { "submarine-cables": true } }));
+    expect(toggle.textContent).toBe("NASA, GIBS, CesiumJS, TeleGeography");
+    const entry = screen.getByText("TeleGeography Submarine Cable Map").closest("li");
+    expect(entry?.textContent).toContain("CC BY-NC-SA 3.0: non-commercial use, with attribution");
+    expect(entry?.textContent).toContain("Submarine cable data © TeleGeography, www.submarinecablemap.com");
+
+    act(() => useUiStore.setState({ layers: { "submarine-cables": false } }));
+    expect(screen.queryByText("TeleGeography Submarine Cable Map")).toBeNull();
+    expect(toggle.textContent).toBe("NASA, GIBS, CesiumJS");
   });
 });

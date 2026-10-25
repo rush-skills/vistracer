@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
 import type { RendererApi } from "@common/bridge";
 import { ROUTE, makeRun } from "@renderer/test/fixtures";
+import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
+import { useUiStore } from "@renderer/state/uiStore";
+import { PEERINGDB } from "@renderer/test/infraFixtures";
 import { HoverCard } from "../HoverCard";
 
 let bridge: Record<string, ReturnType<typeof vi.fn>>;
@@ -90,5 +93,35 @@ describe("HoverCard", () => {
     act(() => useTracerouteStore.getState().setHoveredHop(undefined, { kind: "point", x: 1, y: 1 }));
     expect(useTracerouteStore.getState().hoverAnchor).toBeUndefined();
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows a hovered data centre cluster from the loaded list and makes no request", () => {
+    useUiStore.setState({ layers: { "data-centres": true } });
+    useInfraStore.setState({
+      sources: {
+        ...useInfraStore.getState().sources,
+        "peeringdb-sites": { status: "ready", data: PEERINGDB }
+      }
+    });
+    render(<HoverCard />);
+    act(() =>
+      useInfraStore.getState().setHoveredSite({
+        specKey: "facilities|fac:58",
+        layer: "facilities",
+        keys: ["fac:58", "fac:60"],
+        anchor: { kind: "point", x: 100, y: 100 }
+      })
+    );
+    const card = screen.getByRole("tooltip");
+    expect(card.textContent).toContain("Digital Realty Frankfurt FRA1-27");
+    expect(card.textContent).toContain("Data centre (PeeringDB)");
+    expect(card.textContent).toContain("Also here: Equinix FR5.");
+    // A hop under the pointer wins over the site.
+    act(() => useTracerouteStore.getState().setHoveredHop(3, { kind: "point", x: 100, y: 100 }));
+    expect(screen.getByRole("tooltip").textContent).toContain("Hop 3");
+    for (const call of Object.values(bridge)) {
+      expect(call).not.toHaveBeenCalled();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

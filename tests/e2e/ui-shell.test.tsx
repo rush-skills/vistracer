@@ -46,10 +46,40 @@ vi.mock("../../src/renderer/modules/app/components/globe/cesiumGlobe", () => ({
 
 import "../../src/common/bridge";
 import { App } from "../../src/renderer/modules/app/App";
+import { useInfraStore } from "../../src/renderer/state/infraStore";
 import { useTracerouteStore } from "../../src/renderer/state/tracerouteStore";
 import { useUiStore } from "../../src/renderer/state/uiStore";
+import fs from "node:fs";
+import path from "node:path";
 
 const initialUi = useUiStore.getState();
+const initialInfra = useInfraStore.getState();
+const CLOUD_SNAPSHOT = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "../../src/renderer/public/infra/cloud-regions.json"), "utf8")
+);
+const SITES = {
+  storedAt: 1,
+  complete: true,
+  exchanges: [
+    {
+      id: 31,
+      name: "DE-CIX Frankfurt",
+      city: "Frankfurt",
+      country: "DE",
+      latitude: 50.11,
+      longitude: 8.68,
+      radiusKm: 120,
+      facilityCount: 40,
+      networkCount: 1019
+    }
+  ],
+  facilities: []
+};
+const CABLE_MAP = {
+  fetchedAt: 1,
+  note: null,
+  cables: [{ id: "x", name: "Example Cable", segments: [[[72.8, 18.9], [5.4, 43.3]]] }]
+};
 const initialTrace = useTracerouteStore.getState();
 
 /** A backend that answers the start-up calls and streams ROUTE for a trace. */
@@ -66,6 +96,18 @@ function fakeBackend(command: string, args?: Record<string, unknown>): unknown {
       return [];
     case "get_app_info":
       return { version: "0.0.0-test", updaterConfigured: false };
+    case "get_peeringdb_sites":
+      return SITES;
+    case "get_submarine_cables": {
+      // Like the backend: only with the saved layer switch on and its notice accepted.
+      const ui = backend.settings["preferences.ui"] as
+        | { layers?: Record<string, boolean>; consents?: Record<string, boolean> }
+        | undefined;
+      if (!ui?.layers?.["submarine-cables"] || !ui.consents?.["submarine-cables"]) {
+        throw "Submarine cables are off: turn the layer on in Layers and accept its notice. Nothing was downloaded.";
+      }
+      return CABLE_MAP;
+    }
     case "traceroute_run": {
       const request = args?.request as TracerouteRequest;
       backend.requests.push(request);
@@ -125,11 +167,23 @@ beforeEach(() => {
   Object.values(globe.controller).forEach((mock) => mock.mockClear());
   useUiStore.setState(initialUi, true);
   useTracerouteStore.setState(initialTrace, true);
+  useInfraStore.setState(initialInfra, true);
   delete document.documentElement.dataset.theme;
+  fetchSpy = vi.fn(async (url: string) =>
+    url === "./infra/cloud-regions.json"
+      ? { ok: true, status: 200, json: async () => CLOUD_SNAPSHOT }
+      : { ok: false, status: 404, json: async () => null }
+  );
+  vi.stubGlobal("fetch", fetchSpy);
 });
+
+let fetchSpy: ReturnType<typeof vi.fn>;
+const invoked = (command: string) =>
+  backend.invoke.mock.calls.filter(([name]) => name === command).length;
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("UI shell", () => {
@@ -175,7 +229,8 @@ describe("UI shell", () => {
       expect(settingsWrites().at(-1)?.[1]?.value).toEqual({
         theme: "light",
         layers: { "online-imagery": false },
-        collapsed: { layers: false }
+        collapsed: { layers: false },
+        consents: {}
       })
     );
   });
@@ -226,7 +281,8 @@ describe("UI shell", () => {
       expect(backend.settings["preferences.ui"]).toEqual({
         theme: "dark",
         layers: {},
-        collapsed: { hops: true, timeline: true }
+        collapsed: { hops: true, timeline: true },
+        consents: {}
       })
     );
     first.unmount();
@@ -236,5 +292,72 @@ describe("UI shell", () => {
     expect(await screen.findByRole("button", { name: "Show hop details" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Show hop timeline" })).toBeTruthy();
     expect(screen.queryByRole("complementary", { name: "Hop details" })).toBeNull();
+  });
+
+  it("loads no layer data while the infrastructure layers are off", async () => {
+    renderApp();
+    await waitFor(() => expect(useUiStore.getState().loaded).toBe(true));
+    await trace("example.com");
+    expect(invoked("get_peeringdb_sites")).toBe(0);
+    expect(invoked("get_submarine_cables")).toBe(0);
+    expect(fetchSpy.mock.calls.filter(([url]) => String(url).includes("infra/"))).toEqual([]);
+
+    // Turned on from the command bar: exchanges and cloud regions load once.
+    for (const query of ["show internet exchanges", "show cloud regions"]) {
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      fireEvent.change(commandSearch(), { target: { value: query } });
+      fireEvent.keyDown(commandSearch(), { key: "Enter" });
+    }
+    await waitFor(() => expect(useInfraStore.getState().sources["cloud-regions"].status).toBe("ready"));
+    await waitFor(() => expect(useInfraStore.getState().sources["peeringdb-sites"].status).toBe("ready"));
+    expect(invoked("get_peeringdb_sites")).toBe(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const scene = globe.controller.setScene.mock.calls.at(-1)?.[0];
+    expect(scene.exchanges.length).toBeGreaterThan(0);
+    expect(scene.cloudRegions.length).toBeGreaterThan(0);
+    expect(invoked("get_submarine_cables")).toBe(0);
+  });
+
+  it("asks before the submarine cables, downloads once after consent and never while off", async () => {
+    renderApp();
+    await waitFor(() => expect(useUiStore.getState().loaded).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Layers" }));
+    const cables = () => screen.getByRole("switch", { name: "Submarine cables" }) as HTMLInputElement;
+
+    // The notice first; declined, nothing is sent.
+    fireEvent.click(cables());
+    const notice = screen.getByRole("dialog", { name: "Show submarine cables?" });
+    expect(notice.textContent).toContain("CC BY-NC-SA 3.0");
+    expect(notice.textContent).toContain("www.submarinecablemap.com");
+    fireEvent.click(within(notice).getByRole("button", { name: "Cancel" }));
+    await act(async () => undefined);
+    expect(invoked("get_submarine_cables")).toBe(0);
+    expect(cables().checked).toBe(false);
+
+    // Accepted: the switch and the consent are saved, then the map is asked for once.
+    fireEvent.click(cables());
+    fireEvent.click(screen.getByRole("button", { name: "Show and download" }));
+    await waitFor(() => expect(useInfraStore.getState().sources["submarine-cables"].status).toBe("ready"));
+    expect(invoked("get_submarine_cables")).toBe(1);
+    const order = backend.invoke.mock.calls.map(([name, args]) =>
+      name === "set_settings" ? `set_settings ${String(args?.key)}` : name
+    );
+    expect(order.lastIndexOf("set_settings preferences.ui")).toBeLessThan(order.indexOf("get_submarine_cables"));
+    expect(screen.getByRole("button", { name: "Data sources and credits" }).textContent).toBe(
+      "NASA, GIBS, CesiumJS, TeleGeography"
+    );
+    await waitFor(() => expect(globe.controller.setScene.mock.calls.at(-1)?.[0].cables.length).toBe(1));
+
+    // Off and on again: no notice, no new request (the map stays in memory).
+    fireEvent.click(cables());
+    await waitFor(() => expect(globe.controller.setScene.mock.calls.at(-1)?.[0].cables).toEqual([]));
+    expect(screen.getByRole("button", { name: "Data sources and credits" }).textContent).toBe(
+      "NASA, GIBS, CesiumJS"
+    );
+    fireEvent.click(cables());
+    expect(screen.queryByRole("dialog", { name: "Show submarine cables?" })).toBeNull();
+    await waitFor(() => expect(globe.controller.setScene.mock.calls.at(-1)?.[0].cables.length).toBe(1));
+    expect(invoked("get_submarine_cables")).toBe(1);
   });
 });

@@ -9,6 +9,6 @@
     "types": ["vite/client"],
     "noEmit": true
   },
-  "include": ["src/renderer/**/*", "src/common/**/*"],
+  "include": ["src/renderer/**/*", "src/common/**/*", "scripts/infra-data/**/*.ts"],
   "exclude": ["src/main"]
 }

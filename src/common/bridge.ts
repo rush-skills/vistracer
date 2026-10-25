@@ -34,6 +34,17 @@ export interface RendererApi {
   getAppInfo: () => Promise<AppInfo>;
   getTileCacheInfo: () => Promise<TileCacheInfo>;
   clearTileCache: () => Promise<TileCacheInfo>;
+  /**
+   * Exchanges and data centres from the PeeringDB list that exchange
+   * matching downloaded, or null. Sends nothing. Untyped: parse with
+   * `parsePeeringDbSites` (lib/infra/sources.ts).
+   */
+  getPeeringDbSites: () => Promise<unknown>;
+  /**
+   * The opt-in submarine cable map (downloads only while the layer is on and
+   * its notice is accepted). Untyped: parse with `parseSubmarineCables`.
+   */
+  getSubmarineCables: () => Promise<unknown>;
 }
 
 export interface VisTracerWindow extends Window {
@@ -109,7 +120,11 @@ function createTauriApi(): RendererApi {
 
     getTileCacheInfo: () => invoke<TileCacheInfo>("get_tile_cache_info"),
 
-    clearTileCache: () => invoke<TileCacheInfo>("clear_tile_cache")
+    clearTileCache: () => invoke<TileCacheInfo>("clear_tile_cache"),
+
+    getPeeringDbSites: () => invoke<unknown>("get_peeringdb_sites"),
+
+    getSubmarineCables: () => invoke<unknown>("get_submarine_cables")
   };
 }
 

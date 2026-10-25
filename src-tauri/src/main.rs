@@ -6,8 +6,10 @@ mod commands;
 mod geoloc;
 mod net;
 mod types;
+mod upstream;
 
 use commands::app_info::{updater_pubkey_configured, AppInfo};
+use commands::cables::{cable_fetcher, CableService, SubmarineCables};
 use commands::geo::{
     database_statuses, ensure_readers, reload_geo_databases, GeoReaders, SharedGeoReaders,
 };
@@ -18,7 +20,7 @@ use commands::persistence::{
     IntegrationSettings, SharedStore, UiPreferences,
 };
 use commands::tile_cache::{
-    into_response, HttpFetcher, TileCacheInfo, TileError, TileService, TileStore,
+    into_response, tile_fetcher, HttpFetcher, TileCacheInfo, TileError, TileService, TileStore,
     DEFAULT_CAP_BYTES, TILE_SCHEME,
 };
 use commands::traceroute::{
@@ -35,6 +37,7 @@ struct AppState {
     geo_readers: Arc<SharedGeoReaders>,
     enrichment: Arc<EnrichmentService>,
     tiles: Arc<TileService<HttpFetcher>>,
+    cables: Arc<CableService<HttpFetcher>>,
     active_runs: ActiveRuns,
     app_data_dir: PathBuf,
 }
@@ -237,6 +240,30 @@ async fn clear_tile_cache(state: tauri::State<'_, AppState>) -> Result<TileCache
     state.tiles.clear().await
 }
 
+/// Exchanges and data centres for the globe layers. Reads the IX list that
+/// exchange matching downloaded; `None` when there is none yet. Sends nothing.
+#[tauri::command]
+async fn get_peeringdb_sites(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<PeeringDbSites>, String> {
+    Ok(state.enrichment.peeringdb_sites())
+}
+
+/// The opt-in submarine cable map. Downloads from TeleGeography's host only
+/// while the saved settings have the layer on and its notice accepted.
+#[tauri::command]
+async fn get_submarine_cables(
+    state: tauri::State<'_, AppState>,
+) -> Result<SubmarineCables, String> {
+    let allowed = state.store().preferences.ui.submarine_cables();
+    let cables = state.cables.clone();
+    cables
+        .get(allowed)
+        .await
+        .map(|data| (*data).clone())
+        .map_err(|error| error.message())
+}
+
 #[tauri::command]
 fn get_app_info(app: tauri::AppHandle) -> AppInfo {
     AppInfo {
@@ -316,7 +343,7 @@ fn main() {
 
             let tiles = Arc::new(TileService::new(
                 TileStore::new(cache_dir.join("tiles"), DEFAULT_CAP_BYTES),
-                HttpFetcher::default(),
+                tile_fetcher(),
             ));
             // Before the webview can ask for a tile.
             tiles.set_online_enabled(
@@ -328,11 +355,17 @@ fn main() {
                     .online_imagery(),
             );
 
+            let cables = Arc::new(CableService::new(
+                cable_fetcher(),
+                cache_dir.join("submarine-cables.json"),
+            ));
+
             app.manage(AppState {
                 store,
                 geo_readers: readers,
                 enrichment,
                 tiles,
+                cables,
                 active_runs: create_active_runs(),
                 app_data_dir,
             });
@@ -353,6 +386,8 @@ fn main() {
             get_app_info,
             get_tile_cache_info,
             clear_tile_cache,
+            get_peeringdb_sites,
+            get_submarine_cables,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

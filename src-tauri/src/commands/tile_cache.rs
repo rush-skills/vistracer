@@ -9,9 +9,10 @@
 //! drops the least recently used tiles first.
 
 use crate::atomic_file::{is_temp_file, write_atomic};
+use crate::upstream;
+pub use crate::upstream::{Fetched, Fetcher as TileFetcher, HttpFetcher};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +28,7 @@ const EVICT_TO_PERCENT: u64 = 90;
 /// GIBS tiles are 5 to 50 KB; anything far larger is not a tile.
 const MAX_TILE_BYTES: usize = 2 * 1024 * 1024;
 const ALLOWED_UPSTREAM_HOSTS: &[&str] = &["gibs.earthdata.nasa.gov"];
+const TILE_TIMEOUT: Duration = Duration::from_secs(15);
 /// `clear` moves the cache folder to a sibling with this prefix, then
 /// deletes it.
 const TRASH_PREFIX: &str = "tiles-trash-";
@@ -193,13 +195,7 @@ pub fn parse_tile_uri(uri: &Uri) -> Result<TileAddress, TileError> {
 }
 
 pub fn is_allowed_upstream(url: &reqwest::Url) -> bool {
-    url.scheme() == "https"
-        && url.username().is_empty()
-        && url.password().is_none()
-        && url.port().is_none()
-        && url
-            .host_str()
-            .is_some_and(|host| ALLOWED_UPSTREAM_HOSTS.contains(&host))
+    upstream::is_allowed(url, ALLOWED_UPSTREAM_HOSTS)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -419,78 +415,9 @@ fn scan(root: &Path, dir: &Path, found: &mut Vec<(String, u64, SystemTime)>) {
     }
 }
 
-/// An upstream answer, before it is checked.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fetched {
-    pub status: u16,
-    pub content_type: Option<String>,
-    pub body: Vec<u8>,
-}
-
-pub trait TileFetcher: Send + Sync + 'static {
-    fn fetch(&self, url: reqwest::Url) -> impl Future<Output = Result<Fetched, String>> + Send;
-}
-
-pub struct HttpFetcher {
-    /// A client that could not be built is kept as its error: falling back
-    /// to a default client would follow redirects to any host.
-    client: Result<reqwest::Client, String>,
-}
-
-fn client_builder() -> reqwest::ClientBuilder {
-    // Redirects are followed only to allowlisted hosts.
-    let redirects = reqwest::redirect::Policy::custom(|attempt| {
-        if attempt.previous().len() >= 3 {
-            attempt.error("too many redirects")
-        } else if is_allowed_upstream(attempt.url()) {
-            attempt.follow()
-        } else {
-            attempt.stop()
-        }
-    });
-    reqwest::Client::builder()
-        .user_agent(format!(
-            "VisTracer/{} (+https://github.com/rush-skills/vistracer)",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .redirect(redirects)
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(15))
-}
-
-impl Default for HttpFetcher {
-    fn default() -> Self {
-        Self {
-            client: client_builder()
-                .build()
-                .map_err(|e| format!("cannot create the HTTP client: {e}")),
-        }
-    }
-}
-
-impl TileFetcher for HttpFetcher {
-    async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, String> {
-        let client = self.client.as_ref().map_err(Clone::clone)?;
-        let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
-        let status = response.status().as_u16();
-        let content_type = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string);
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-            if body.len() + chunk.len() > MAX_TILE_BYTES {
-                return Err(format!("response larger than {MAX_TILE_BYTES} bytes"));
-            }
-            body.extend_from_slice(&chunk);
-        }
-        Ok(Fetched {
-            status,
-            content_type,
-            body,
-        })
-    }
+/// Tiles come from `ALLOWED_UPSTREAM_HOSTS` only, redirects included.
+pub fn tile_fetcher() -> HttpFetcher {
+    HttpFetcher::new(ALLOWED_UPSTREAM_HOSTS, MAX_TILE_BYTES, TILE_TIMEOUT)
 }
 
 #[derive(Debug, Default)]
@@ -1359,9 +1286,15 @@ mod tests {
             _ => http_reply("500 Internal Server Error", &[], b""),
         })
         .await;
-        let fetcher = HttpFetcher {
-            client: Ok(client_builder().no_proxy().build().unwrap()),
-        };
+        let fetcher = HttpFetcher::from_client(
+            Ok(
+                upstream::client_builder(ALLOWED_UPSTREAM_HOSTS, TILE_TIMEOUT)
+                    .no_proxy()
+                    .build()
+                    .unwrap(),
+            ),
+            MAX_TILE_BYTES,
+        );
         let url = |path: &str| reqwest::Url::parse(&format!("http://{addr}{path}")).unwrap();
 
         let tile = fetcher.fetch(url("/tile")).await.unwrap();
@@ -1379,9 +1312,7 @@ mod tests {
         );
         assert!(!paths.lock().unwrap().contains(&"/elsewhere".to_string()));
 
-        let broken = HttpFetcher {
-            client: Err("no TLS backend".into()),
-        };
+        let broken = HttpFetcher::from_client(Err("no TLS backend".into()), MAX_TILE_BYTES);
         assert_eq!(
             broken.fetch(url("/tile")).await.err().as_deref(),
             Some("no TLS backend")
@@ -1418,7 +1349,7 @@ mod tests {
         let root = temp_root("tiles-smoke");
         let service = TileService::new(
             TileStore::new(root.clone(), DEFAULT_CAP_BYTES),
-            HttpFetcher::default(),
+            tile_fetcher(),
         );
         // Level 5 tile over western Europe.
         let request = uri("vistiles://localhost/blue-marble/5/10/16.jpg");

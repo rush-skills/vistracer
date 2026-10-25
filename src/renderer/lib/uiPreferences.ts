@@ -41,6 +41,7 @@ export function normalizeUiPreferences(raw: unknown): SavedUiPreferences {
   return {
     theme: value.theme === "dark" || value.theme === "light" ? value.theme : undefined,
     layers: switches(value.layers),
-    collapsed: switches(value.collapsed)
+    collapsed: switches(value.collapsed),
+    consents: switches(value.consents)
   };
 }

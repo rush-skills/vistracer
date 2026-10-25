@@ -12,6 +12,12 @@
 // - a drag during a WebM export does not move the globe
 // - with "Online imagery" off in the layer panel, a user zoom requests no
 //   online tile; switched on again, it does
+// - with the infrastructure layers off (the default), the whole session
+//   makes no layer request: no exchange list or cable map over IPC, no
+//   bundled layer file; switched on, each source loads once, an idle globe
+//   still draws nothing, and nothing loads online tiles
+// - the submarine cables ask first; no cable map request before consent or
+//   after the layer is off again, and never a request to TeleGeography's host
 // - exports write files, no page errors, no request leaves the machine
 //
 //   npm run build
@@ -94,14 +100,44 @@ const compositorFrames = async (action) => {
   }
   await send("IO.close", { handle: complete.params.stream });
   const trace = JSON.parse(data);
-  return (Array.isArray(trace) ? trace : trace.traceEvents).filter((e) => FRAME_EVENTS.has(e.name))
-    .length;
+  const frames = (Array.isArray(trace) ? trace : trace.traceEvents).filter((e) =>
+    FRAME_EVENTS.has(e.name)
+  );
+  return { count: frames.length, names: frames.map((e) => e.name) };
+};
+
+/**
+ * In headless Chrome every online tile fails, and the globe then shows
+ * "Detailed imagery is unavailable" for 30 s (IMAGERY_NOTICE_MS). Its
+ * removal is one repaint, not idle work, so an idle window starts after it.
+ */
+const noticeGone = async () => {
+  for (let waited = 0; waited < 35000; waited += 250) {
+    if (!(await evaluate(`Boolean(document.querySelector('.globe-viewport__notice'))`))) {
+      return;
+    }
+    await sleep(250);
+  }
 };
 
 const idleWindow = async (name) => {
+  await noticeGone();
+  // DOM changes in the window, to say what painted when something did.
+  await evaluate(`(() => {
+    window.__idleMutations = [];
+    window.__idleObserver?.disconnect();
+    window.__idleObserver = new MutationObserver((list) => {
+      for (const m of list) {
+        const nodes = [...m.addedNodes, ...m.removedNodes].map((n) => n.className || n.nodeName);
+        window.__idleMutations.push(m.type + ' ' + (m.target.className || m.target.nodeName) + (nodes.length ? ' [' + nodes.join(' ') + ']' : ''));
+      }
+    });
+    window.__idleObserver.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  })()`);
   const before = await counters();
-  const composited = await compositorFrames(() => sleep(5000));
+  const { count: composited, names } = await compositorFrames(() => sleep(5000));
   const after = await counters();
+  const mutations = await evaluate(`(window.__idleObserver.disconnect(), window.__idleMutations)`);
   const frames = after.raf - before.raf;
   const draws = after.draws - before.draws;
   check(
@@ -112,7 +148,8 @@ const idleWindow = async (name) => {
   check(
     `idle glass panels make no compositor frames (${name})`,
     composited === 0,
-    `${composited} frame and paint events in 5 s`
+    `${composited} frame and paint events in 5 s` +
+      (composited ? ` (${names.join(", ")}; DOM changes: ${mutations.join(", ") || "none"})` : "")
   );
 };
 /** Online tile requests made while `action` runs and the globe settles. */
@@ -372,8 +409,113 @@ try {
   );
   await idleWindow("after a drag");
 
+  // Infrastructure layers. Everything above ran with them off (the default).
+  const ipcCalls = (command) =>
+    evaluate(`window.__globeCheck.ipc[${JSON.stringify(command)}] ?? 0`);
+  const requestsTo = (part) =>
+    events.filter(
+      (event) => event.method === "Network.requestWillBeSent" && event.params.request.url.includes(part)
+    ).length;
+  const layerSwitch = (id) => `document.querySelector('input[aria-labelledby="layer-${id}-label"]')`;
+  const setLayers = async (ids, on) => {
+    await evaluate(`document.querySelector('#layers-toggle').click()`);
+    await sleep(300);
+    for (const id of ids) {
+      await evaluate(`(() => { const box = ${layerSwitch(id)}; if (box.checked !== ${on}) box.click(); })()`);
+      await sleep(150);
+    }
+    await evaluate(`document.querySelector('#layers-toggle').click()`);
+    await sleep(300);
+  };
+  const off = {
+    sites: await ipcCalls("get_peeringdb_sites"),
+    cables: await ipcCalls("get_submarine_cables"),
+    files: requestsTo("/infra/")
+  };
+  check(
+    "with the infrastructure layers off, the session made no layer request",
+    off.sites === 0 && off.cables === 0 && off.files === 0,
+    `${off.sites} exchange list, ${off.cables} cable map, ${off.files} layer file requests`
+  );
+
+  // An app move first: the gate holds the online layer, so any online tile
+  // request below would come from the layers.
+  await runTrace("example.com", 7);
+  await settle();
+  const layerTiles = await tilesDuring(() =>
+    setLayers(["exchanges", "data-centres", "cloud-regions", "asn-colors"], true)
+  );
+  const on = {
+    sites: await ipcCalls("get_peeringdb_sites"),
+    cables: await ipcCalls("get_submarine_cables"),
+    files: requestsTo("/infra/cloud-regions.json"),
+    drawn: await evaluate(
+      `document.querySelector('.asn-legend') !== null && document.querySelectorAll('.layer-panel__status').length === 0`
+    )
+  };
+  check(
+    "switched on, exchanges, data centres and cloud regions each load once",
+    on.sites === 1 && on.files === 1 && on.cables === 0 && on.drawn,
+    `${on.sites} exchange list, ${on.files} cloud region file, ${on.cables} cable map requests; legend shown: ${on.drawn}`
+  );
+  check("the infrastructure layers load no online tile", layerTiles === 0, `${layerTiles} requests`);
+  await screenshot("06-infrastructure-layers");
+  await idleWindow("infrastructure layers on");
+
+  // Submarine cables: the notice first, no request before consent.
+  await evaluate(`document.querySelector('#layers-toggle').click()`);
+  await sleep(300);
+  await evaluate(`${layerSwitch("submarine-cables")}.click()`);
+  await sleep(300);
+  const notice = await evaluate(
+    `document.querySelector('[role=dialog][aria-labelledby="consent-dialog-title"]')?.textContent ?? ""`
+  );
+  await screenshot("07-cables-notice");
+  await evaluate(`[...document.querySelectorAll('.consent-dialog button')].find((b) => b.textContent === 'Cancel').click()`);
+  await sleep(500);
+  const declined = await ipcCalls("get_submarine_cables");
+  check(
+    "the cable notice names the licence and the host, and no request is made before consent",
+    notice.includes("CC BY-NC-SA 3.0") && notice.includes("www.submarinecablemap.com") && declined === 0,
+    `${declined} cable map requests after Cancel`
+  );
+  await evaluate(`${layerSwitch("submarine-cables")}.click()`);
+  await sleep(300);
+  await evaluate(`[...document.querySelectorAll('.consent-dialog button')].find((b) => b.textContent.startsWith('Show')).click()`);
+  await sleep(300);
+  await evaluate(`document.querySelector('#layers-toggle').click()`);
+  await settle();
+  const accepted = await ipcCalls("get_submarine_cables");
+  const chip = await evaluate(`document.querySelector('.attribution__toggle').textContent`);
+  check(
+    "after consent the cable map is asked for once, and TeleGeography is credited",
+    accepted === 1 && chip.includes("TeleGeography"),
+    `${accepted} requests, credits chip "${chip}"`
+  );
+  await screenshot("08-cables-on");
+  await idleWindow("cables on");
+  await setLayers(["submarine-cables"], false);
+  await userDrag(200, 40);
+  await userZoom();
+  await settle();
+  await setLayers(["submarine-cables"], true);
+  await settle();
+  const later = await ipcCalls("get_submarine_cables");
+  check(
+    "off and on again, the cables make no further request",
+    later === 1,
+    `${later} cable map requests in total`
+  );
+  check(
+    "no request to TeleGeography's host",
+    requestsTo("submarinecablemap.com") === 0,
+    `${requestsTo("submarinecablemap.com")} requests`
+  );
+  await setLayers(["exchanges", "data-centres", "cloud-regions", "asn-colors", "submarine-cables"], false);
+  await settle();
+
   // Control: the trace does see frames when something on the page animates.
-  const animated = await compositorFrames(async () => {
+  const { count: animated } = await compositorFrames(async () => {
     await evaluate(`(() => {
       const probe = document.createElement('div');
       probe.id = 'frame-probe';

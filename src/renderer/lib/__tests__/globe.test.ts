@@ -12,6 +12,7 @@ import {
   buildRings,
   circlePositions,
   flyHeight,
+  framedTarget,
   greatCircleKm,
   hopIndexToColor,
   latencyToColor,
@@ -20,6 +21,7 @@ import {
   type CameraPosition
 } from "@renderer/lib/globe";
 import { bundledOnlyHeight } from "@renderer/lib/imagery";
+import { ASN_PALETTE, UNKNOWN_ASN_COLOR } from "@renderer/lib/infra/asnColors";
 import type { AnycastInfo, HopLocation, HopResolution, LocationConfidence } from "@common/ipc";
 
 const noLocation: HopLocation = {
@@ -418,41 +420,152 @@ describe("automatic camera moves use only bundled imagery", () => {
     ]);
   });
 
-  it("follows a whole trace from a zoomed-in view without crossing new ground below the floor", () => {
-    const route: Array<[number, number]> = [
-      [19.08, 72.88],
-      [13.08, 80.27],
-      [43.3, 5.37],
-      [50.11, 8.68],
-      [51.51, -0.13],
-      [40.71, -74.01]
-    ];
-    let position: CameraPosition = { latitude: 19.0, longitude: 72.8, height: 250_000 };
-    let tracker = INITIAL_CAMERA_TRACKER;
-    const hops: HopResolution[] = [];
-    let moves = 0;
-    route.forEach(([latitude, longitude], index) => {
-      const hopIndex = index + 1;
-      hops.push(baseHop({ hopIndex, location: at(latitude, longitude, "high", 30) }));
-      // The store selects each new hop during a run.
-      const next = nextCameraFocus(tracker, "run", [...hops], hopIndex);
-      tracker = next.tracker;
-      if (!next.focus) {
-        return;
-      }
-      for (const step of planFlight(position, next.focus, floor)) {
-        if (step.kind === "move") {
-          moves += 1;
-          // Cesium interpolates the height of a flat flight between both ends.
-          expect(Math.min(position.height, step.height)).toBeGreaterThanOrEqual(floor);
-          expect(levelFourError(step.height)).toBeLessThan(2);
-        } else {
-          expect([step.latitude, step.longitude]).toEqual([position.latitude, position.longitude]);
+  // The app passes a frame for the panels (here 960 × 640 with the hop
+  // pane, the timeline and the trace panel): the floor must hold as well.
+  const PANELS = {
+    insets: { top: 80, right: 348, bottom: 200, left: 0 },
+    widthPx: 960,
+    heightPx: 640,
+    fovRad: FOV
+  };
+
+  it.each([
+    ["without a frame", undefined],
+    ["framed in the free area", PANELS]
+  ] as const)(
+    "follows a whole trace from a zoomed-in view without crossing new ground below the floor (%s)",
+    (_name, frame) => {
+      const route: Array<[number, number]> = [
+        [19.08, 72.88],
+        [13.08, 80.27],
+        [43.3, 5.37],
+        [50.11, 8.68],
+        [51.51, -0.13],
+        [40.71, -74.01]
+      ];
+      let position: CameraPosition = { latitude: 19.0, longitude: 72.8, height: 250_000 };
+      let tracker = INITIAL_CAMERA_TRACKER;
+      const hops: HopResolution[] = [];
+      let moves = 0;
+      route.forEach(([latitude, longitude], index) => {
+        const hopIndex = index + 1;
+        hops.push(baseHop({ hopIndex, location: at(latitude, longitude, "high", 30) }));
+        // The store selects each new hop during a run.
+        const next = nextCameraFocus(tracker, "run", [...hops], hopIndex);
+        tracker = next.tracker;
+        if (!next.focus) {
+          return;
         }
-        position = step;
-      }
+        for (const step of planFlight(position, next.focus, floor, frame)) {
+          if (step.kind === "move") {
+            moves += 1;
+            // Cesium interpolates the height of a flat flight between both ends.
+            expect(Math.min(position.height, step.height)).toBeGreaterThanOrEqual(floor);
+            expect(levelFourError(step.height)).toBeLessThan(2);
+          } else {
+            expect([step.latitude, step.longitude]).toEqual([
+              position.latitude,
+              position.longitude
+            ]);
+          }
+          position = step;
+        }
+      });
+      expect(moves).toBe(route.length);
+    }
+  );
+});
+
+describe("network colours", () => {
+  const hop = (hopIndex: number, latitude: number, longitude: number, asn?: number) =>
+    baseHop({
+      hopIndex,
+      ipAddress: `198.51.100.${hopIndex}`,
+      asn: asn == null ? null : { asn, name: `AS-${asn}` },
+      location: at(latitude, longitude)
     });
-    expect(moves).toBe(route.length);
+  const hops = [
+    hop(1, 19.08, 72.88, 9498),
+    hop(2, 13.08, 80.27, 9498),
+    hop(3, 43.3, 5.37, 6453),
+    hop(4, 50.11, 8.68)
+  ];
+
+  it("colours markers and rings by network, and hops without an ASN in grey", () => {
+    const scene = buildGlobeScene(hops, undefined, undefined, { asnColors: true });
+    const color = (hopIndex: number) => scene.markers.find((m) => m.hopIndex === hopIndex)?.color;
+    expect(color(1)).toBe(color(2));
+    expect(color(3)).not.toBe(color(1));
+    expect(color(4)).toBe(UNKNOWN_ASN_COLOR);
+    expect(ASN_PALETTE).toContain(color(1));
+    expect(scene.rings.find((r) => r.hopIndex === 3)?.color).toBe(color(3));
+  });
+
+  it("splits an arc between two networks where the route hands over", () => {
+    const arcs = buildGlobeScene(hops, undefined, undefined, { asnColors: true }).arcs;
+    // 1→2 stays in one network: one arc; 2→3 and 3→4 change network: two halves each.
+    expect(arcs.map((arc) => [arc.fromHopIndex, arc.toHopIndex])).toEqual([
+      [1, 2],
+      [2, 3],
+      [2, 3],
+      [3, 4],
+      [3, 4]
+    ]);
+    const [first, second] = arcs.filter((arc) => arc.fromHopIndex === 2);
+    expect(first.positions.at(-1)).toEqual(second.positions[0]);
+    expect(first.color).not.toBe(second.color);
+  });
+
+  it("keeps the latency colours and hop colours while the layer is off", () => {
+    const scene = buildGlobeScene(hops);
+    expect(scene.arcs).toHaveLength(3);
+    expect(scene.arcs[0].color).toBe(latencyToColor(11));
+    expect(scene.markers.find((m) => m.hopIndex === 3)?.color).toBe(hopIndexToColor(3));
+  });
+});
+
+describe("flights frame the hop in the area the panels leave free", () => {
+  // 960 × 640 window: hop pane 336 px on the right, timeline and status bar
+  // 200 px at the bottom, trace panel 80 px at the top.
+  const frame = {
+    insets: { top: 80, right: 348, bottom: 200, left: 0 },
+    widthPx: 960,
+    heightPx: 640,
+    fovRad: Math.PI / 3
+  };
+  const kmPerPx = (heightM: number) => (2 * heightM * Math.tan(Math.PI / 6)) / 960 / 1000;
+
+  it("looks east and south of the hop by half the covered width and height", () => {
+    const target = framedTarget(FRANKFURT, 2_000_000, frame);
+    expect(target.longitude).toBeGreaterThan(FRANKFURT.longitude);
+    expect(target.latitude).toBeLessThan(FRANKFURT.latitude);
+    // The hop then sits (348/2, (200-80)/2) px from the canvas centre: the
+    // centre of the free area.
+    const expectedKm = Math.hypot(174, 60) * kmPerPx(2_000_000);
+    expect(greatCircleKm(FRANKFURT, target)).toBeCloseTo(expectedKm, 0);
+  });
+
+  it("keeps the hop centred with no panels, or when the free area is too small", () => {
+    const none = { ...frame, insets: { top: 0, right: 0, bottom: 0, left: 0 } };
+    expect(framedTarget(FRANKFURT, 2_000_000, none)).toEqual(FRANKFURT);
+    const crowded = { ...frame, insets: { top: 0, right: 800, bottom: 0, left: 0 } };
+    expect(framedTarget(FRANKFURT, 2_000_000, crowded)).toEqual(FRANKFURT);
+  });
+
+  it("moves to the framed target, fits the ring in the free area and keeps the floor", () => {
+    const current = { latitude: 0, longitude: 0, height: 3_000_000 };
+    const focus = { ...FRANKFURT, radiusKm: 1000 };
+    const floorM = 2_500_000;
+    const [plain] = planFlight(current, focus, floorM);
+    const [framed] = planFlight(current, focus, floorM, frame);
+    // A 1,000 km ring needs 4,000 km of height; the free area is 612 × 360 px
+    // of 960 × 640, so it needs 640/360 times that.
+    expect(plain.height).toBe(4_000_000);
+    expect(framed.height).toBeCloseTo(4_000_000 * (640 / 360), -3);
+    expect(framed.longitude).toBeGreaterThan(FRANKFURT.longitude);
+    const low = planFlight({ ...current, height: 300_000 }, focus, floorM, frame);
+    expect(low.map((step) => step.kind)).toEqual(["rise", "move"]);
+    expect(low.every((step) => step.height >= floorM)).toBe(true);
   });
 });
 

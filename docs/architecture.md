@@ -288,13 +288,18 @@ exchanges" in the settings), on by default and separate from the PeeringDB
 switch, which only controls the per-ASN lookups that send hop data. Settings
 files saved before the switch existed load with it on. When it is on,
 `commands/ix_list.rs` downloads five lists (`ixpfx`, `ixlan`, `ix`, `ixfac`,
-`fac`, with `fields=` to keep them small) one at a time, with the saved
+`fac`, with `fields=` to keep them small; `ix` and `fac` include the names,
+places and counts that the exchange and data centre layers show) one at a
+time, with the saved
 PeeringDB API key when there is one, the PeeringDB slot, retries, and 2 s
 between requests as PeeringDB asks. The download sends nothing about the
 user's route; matching happens on the user's machine. The joined dataset
-(on 2026-10-24: 1,332 exchanges and 2,658 prefixes, about 340 KB of JSON)
-is kept in the provider cache for 24 h and written to disk as soon as the
-download ends.
+(on 2026-10-24: 1,332 exchanges and 2,658 prefixes, about 340 KB of JSON;
+since phase 5 also 5,279 facilities with a name and coordinates, about
+0.98 MB more, from a `fac` download of 1.17 MB) is kept in the provider
+cache for 24 h and written to disk as soon as the download ends. A dataset
+saved by the previous version (no facilities, `version` below 2) is used
+and refreshed in the background like an expired one.
 
 - The download runs in its own task. A lookup never waits for a refresh: a
   list up to 7 days old is used at once, and the provider status says that
@@ -404,7 +409,7 @@ converts them to Cesium types. Tests cover the mapping without WebGL.
 | Item | Rule |
 | --- | --- |
 | Marker | One per hop with `location.best`. Size and outline by emphasis: normal, hovered, selected (drawn last, on top). |
-| Arc | Great circle between consecutive located hops, raised in the middle (sine profile, peak 12 % of the distance, 2 km to 1,500 km). Colour by the first hop's latency band. Hops less than 1 km apart get no arc. |
+| Arc | Great circle between consecutive located hops, raised in the middle (sine profile, peak 12 % of the distance, 2 km to 1,500 km). Colour by the first hop's latency band; with **Network colours** on, by network (see [Infrastructure layers](#infrastructure-layers)). Hops less than 1 km apart get no arc. |
 | Confidence ring | Circle on the sphere at the estimate's radius in km, segments at most 50 km long. Solid for high confidence, dashed and fainter for medium and low; a `conflict` verdict uses the low style. No ring above 5,000 km. |
 | Anycast reach | An anycast hop has no marker, ring or arc. When its RTT bound and reference hop are known, a dotted circle around the reference hop's estimate shows where the answering site can be ("within 740 km of hop 2"). |
 | Label | The selected and the hovered hop: "6 · DE-CIX Frankfurt". |
@@ -414,6 +419,18 @@ Camera (`nextCameraFocus`): it flies to a newly selected hop, else to the
 newest hop that got a location during the run; enrichment updates of the
 same hops do not move it. Flights keep the user's zoom unless the hop's ring
 would not fit (`flyHeight`). With `prefers-reduced-motion` the camera jumps.
+
+Flights frame the hop in the area the panels leave free. Panels mark the
+edge they cover with `data-globe-inset` (trace panel: top; hop pane:
+right; timeline and status bar: bottom), and `measureInsets` in
+`GlobeViewport.tsx` measures them when a flight starts. `planFlight` then
+moves the camera target by half the covered pixels times the ground size
+of a pixel at the centre (`framedTarget`), so the hop shows at the centre
+of the free area, and the ring must fit the free area. That is exact near
+the ground and an estimate far out, where the Earth curves away. A free
+area under 30 % of the canvas is ignored. The flight floor (below) does
+not change. During a GIF or WebM export, flights centre the hop in the
+whole canvas: the recording has no panels.
 
 During a GIF or WebM export the camera does not take user input
 (`setInputEnabled(false)`), so a drag or zoom cannot get into the video.
@@ -491,10 +508,11 @@ An idle globe therefore runs no animation frames at all.
 
 `scripts/globe-check/check.mjs` checks this on the production build in
 headless Chrome, with the app's CSP and a fake Tauri IPC
-(`scripts/globe-check/mock-ipc.js`, two fixture traces; the browser
-harness is `browser.mjs`). It counts animation frames, WebGL draws,
-compositor frames (from a Chrome trace) and online tile requests, and exits
-1 when a check fails. It needs a local Chrome (`CHROME=...`), so it is not
+(`scripts/globe-check/mock-ipc.js`, two fixture traces and synthetic
+infrastructure data; the browser harness is `browser.mjs`). It counts
+animation frames, WebGL draws, compositor frames (from a Chrome trace),
+online tile requests and the infrastructure layers' IPC calls and file
+requests, and exits 1 when a check fails. It needs a local Chrome (`CHROME=...`), so it is not
 part of CI. `ui-shots.mjs` uses the same harness to take screenshots of
 every UI state (dark, light, 960 x 640) for review; it checks nothing.
 
@@ -504,26 +522,41 @@ node scripts/globe-check/check.mjs [output dir]
 node scripts/globe-check/ui-shots.mjs [output dir]
 ```
 
-Result of one run on 2026-10-25, after the phase 4 UI (25 checks pass).
-The request counts of user zooms differ a little from run to run (the next
-user zoom made between 103 and 130 in four runs); the counts that must be
-0 were 0 in every run.
+Result of one run on 2026-10-25, after the phase 5 infrastructure layers
+(36 checks pass). The request counts of user zooms differ from run to run:
+the first user zoom made between 49 and 89 requests and the next user zoom
+between 103 and 240 in the runs of phases 4 and 5. Every count that must be
+0 was 0 in every run.
 
 - A 7680 x 2160 window at DPR 1 made 0 online tile requests in 12 s with no
   input. Control: with the gate starting open, the same step made 161.
 - 0 animation frames and 0 WebGL draws in each 5 s idle window, and 0
   compositor frames or paints with the glass panels over the idle globe
   (a control with one animated element made 243); a 20-step drag ran
-  about 60 frames, changed the canvas, then stopped.
-- A user zoom made 65 online tile requests. Selecting a hop, following a
+  about 60 frames, changed the canvas, then stopped. An idle window starts
+  after the "Detailed imagery is unavailable" notice is gone: in headless
+  Chrome every online tile fails, and the removal of that notice 30 s
+  later is one repaint.
+- A user zoom made 50 online tile requests. Selecting a hop, following a
   trace and exporting, each from that zoomed-in view, made 0. Growing the
   window from 1280 to 3840 px after those app moves made 0; the next user
-  zoom made 130.
+  zoom made 237.
 - With **Online imagery** off in the layer panel, a user drag to new ground
-  and a zoom made 0 requests; switched on again, the same view made 16.
+  and a zoom made 0 requests; switched on again, the same view made 25.
 - A 20-step drag during a WebM export made 0 WebGL draws and left the
   canvas pixels unchanged (compared with `toDataURL`, because the panels
   float over the canvas).
+- With the infrastructure layers off (the default), the whole session up
+  to this point made 0 exchange list calls, 0 cable map calls and 0
+  requests for a layer file. Switched on (exchanges, data centres, cloud
+  regions, network colours) after an app move: 1 exchange list call, 1
+  request for `infra/cloud-regions.json`, 0 online tiles, and an idle
+  window with 0 frames, draws and paints.
+- Submarine cables: the notice names CC BY-NC-SA 3.0 and
+  www.submarinecablemap.com; 0 cable map calls after Cancel, 1 after
+  consent, still 1 after the layer was off, the camera moved and the layer
+  was on again; an idle window with the cables on drew nothing; 0 requests
+  to TeleGeography's host (the renderer never contacts it).
 
 Control runs, each with one fix removed: without the floor and the hidden
 layer, the three app moves made 166, 99 and 42 requests; with the online
@@ -603,13 +636,16 @@ flowchart LR
         timeline["HopTimeline"]
         footer["FooterBar<br/>legend, export, notices"]
         credits["Attribution"]
-        card["HoverCard"]
+        card["HoverCard<br/>hops, sites, cables"]
         palette["CommandPalette<br/>⌘K / Ctrl+K"]
+        legend["AsnLegend"]
+        consentDialog["LayerConsentDialog"]
     end
     subgraph stores["State (Zustand)"]
         traceStore[("tracerouteStore<br/>runs, selectedHopIndex,<br/>hoveredHopIndex, hoverAnchor")]
         uiStore[("uiStore<br/>theme, layers, collapsed,<br/>paletteOpen")]
         exportStore[("exportStore, noticeStore")]
+        infraStore[("infraStore<br/>layer data, hovered site")]
     end
     subgraph registries["Registries (pure, tested)"]
         layers["lib/layers.ts<br/>LAYERS, LAYER_GROUPS"]
@@ -637,6 +673,11 @@ flowchart LR
     traceStore --> viewport
     viewport --> adapter
     adapter -->|"pick: hover (pointer), click"| traceStore
+    adapter -->|"pick: site hover"| infraStore
+    uiStore -->|pendingConsent| consentDialog
+    infraStore --> viewport
+    infraStore --> card
+    traceStore --> legend
 ```
 
 ### Panels and state
@@ -648,6 +689,7 @@ flowchart LR
 | Layer panel | under the toolbar | yes, closed by default |
 | Hop pane: hop table and the selected hop's details | right | to a "Hops (n)" tab |
 | Hop timeline | lower left | yes |
+| Network legend (while **Network colours** is on) | left, above the timeline | no |
 | Status bar: latency legend, GeoLite2 state, Export route, notices | bottom left | no |
 | Credits | lower right corner | opens on demand |
 
@@ -657,19 +699,19 @@ flowchart LR
   stores an anchor (the pointer, or the hop's rectangle in the timeline); the
   hover card shows only when there is an anchor, so a hover in the hop table
   highlights without a card.
-- **Saved UI state.** `uiStore` keeps the theme, the layer switches and the
-  collapsed panels in `preferences.ui` (`UiPreferences` in
-  `commands/persistence.rs`): ids are checked (1–40 lowercase letters,
-  digits, dashes; at most 64 per map), and ids this version does not know are
-  kept. A saved section is read field by field, like the renderer's
-  `normalizeUiPreferences`: a field that does not parse (for example a theme
-  that a newer version added) falls back to its default and a bad entry is
-  dropped, so the other choices, including "Online imagery: off", stay; the
-  rest of `settings.json` is never dropped. Choices made while the file loads win, and writes are
-  queued so the last one carries the latest state. When the saved choices
-  cannot be read, the app uses the defaults, says so, and writes nothing for
-  the rest of the session, so it never replaces the saved choices with
-  defaults.
+- **Saved UI state.** `uiStore` keeps the theme, the layer switches, the
+  collapsed panels and the layer notices the user accepted (`consents`) in
+  `preferences.ui` (`UiPreferences` in `commands/persistence.rs`): ids are
+  checked (1–40 lowercase letters, digits, dashes; at most 64 per map), and
+  ids this version does not know are kept. A saved section is read field by
+  field, like the renderer's `normalizeUiPreferences`: a field that does not
+  parse (for example a theme that a newer version added) falls back to its
+  default and a bad entry is dropped, so the other choices, including
+  "Online imagery: off", stay; the rest of `settings.json` is never dropped.
+  Choices made while the file loads win, and writes are queued so the last
+  one carries the latest state. When the saved choices cannot be read, the
+  app uses the defaults, says so, and writes nothing for the rest of the
+  session, so it never replaces the saved choices with defaults.
 - **Design tokens** (`styles/tokens.css`): colours, radii, blur, spacing,
   type scale and durations, dark by default and light with
   `data-theme="light"` on `<html>`. `prefers-reduced-motion` sets every
@@ -685,18 +727,37 @@ flowchart LR
 `lib/layers.ts` lists the switches of the layer panel. The panel, the command
 bar and the globe only read it.
 
-| Layer | Group | Changes |
-| --- | --- | --- |
-| Route arcs, hop markers, confidence rings, anycast reach, labels | Route | drops the items from the `GlobeScene` (`sceneForLayers`) |
-| Day and night | Globe | `setImagery({ dayNight })`: no lighting from the clock, no night layer |
-| Online imagery | Globe | `setImagery({ online })`, see below |
+| Layer | Group | Target | Default |
+| --- | --- | --- | --- |
+| Route arcs, hop markers, confidence rings, anycast reach, labels | Route | `scene`: drops the items from the `GlobeScene` (`sceneForLayers`) | on |
+| Network colours | Route | `style`: `buildGlobeScene(..., { asnColors })` | off |
+| Internet exchanges, data centres, submarine cables | Infrastructure | `scene` items `exchanges`, `facilities`, `cables` | off |
+| Cloud regions | Cloud | `scene` item `cloudRegions` | off |
+| AWS, Google Cloud, Azure, Cloudflare | Cloud (under Cloud regions) | `filter`: hides one provider before clustering (`hiddenFilterKeys`) | on |
+| Day and night | Globe | `imagery`: `setImagery({ dayNight })`, no lighting from the clock, no night layer | on |
+| Online imagery | Globe | `imagery`: `setImagery({ online })`, see below | on |
 
-To add a layer (phase 5: exchanges, data centres, cloud regions, cables), add
-an entry with a new id, a group (add the group to `LAYER_GROUPS` if it is
-new) and a target: a new `GlobeScene` item that `buildGlobeScene` fills and
-the adapter draws, or a new imagery option. The panel, the saved switches and
-the command bar pick it up with no change. Unit tests check that the ids pass
-the backend's check and that every scene item has a switch.
+An entry can also have:
+
+- `parent`: a child switch, shown indented, with an effect only while the
+  parent is on. Showing a child from the command bar shows the parent too.
+- `data`: the source the layer loads when it is first shown
+  (`peeringdb-sites`, `cloud-regions`, `submarine-cables`). The panel shows
+  that source's state under the switch (loading, nothing yet and why, a
+  failure, or a note).
+- `consent`: a notice the user must accept before the layer is shown the
+  first time (`LayerConsentDialog`). Until then the switch stays off; the
+  answer is saved in `preferences.ui.consents`.
+- `swatch` (marker colours shown in the panel) and `commandName` (the name
+  in the command bar, such as "Show AWS regions").
+
+To add a layer, add an entry with a new id, a group (add the group to
+`LAYER_GROUPS` if it is new) and a target: a new `GlobeScene` item that a
+scene builder fills and the adapter draws, a filter or style, or an imagery
+option. The panel, the saved switches and the command bar pick it up with
+no change. Unit tests check that the ids pass the backend's check, that
+every scene item has a switch, and that the provider filters match the
+providers of the cloud region snapshot.
 
 **Online imagery off** means no online tile request at all, enforced in
 three places:
@@ -726,8 +787,11 @@ Rust; the trace panel starts it with its current options
 <word>" comes after the matching commands, so "trace again" still offers
 "Run the last trace again" first. A command that cannot run is listed with
 the reason and does nothing. No trace starts during an export (from the bar
-or the trace panel): a new run would end the export's camera lock. The toolbar buttons and the footer's Export route
-button run the same commands by id.
+or the trace panel): a new run would end the export's camera lock. The
+toolbar buttons and the footer's Export route button run the same commands
+by id. Layer commands use the registry's `commandName` ("Show AWS
+regions"); showing a child switch shows its parent too, and showing a layer
+with a notice opens the notice first.
 
 Search: every word of the query must match, and the scores add up. A word
 as one piece of the text scores highest (more at a word start), else its
@@ -752,8 +816,12 @@ it, and the focus returns to where it was.
   keys, Home and End move the selection and the focus.
 - **Hover card** (`lib/hoverCard.ts`, `HoverCard.tsx`): host name, address,
   ASN and holder, the place with source, confidence and radius, RTT, loss,
-  and a note for anycast, private addresses, RTT conflicts and pending
-  lookups. It reads the run in the store only, so hovering sends no request.
+  the cloud match while cloud regions are on, and a note for anycast,
+  private addresses, RTT conflicts and pending lookups. Over a site marker
+  or a cable (when no hop is under the pointer) it shows the site
+  (`lib/infra/siteCard.ts`): name, place, counts, what the route has to do
+  with it, and the other sites of its cluster. It reads the stores only, so
+  hovering sends no request.
   `placeCard` keeps it in the window: next to the pointer and flipped near
   the right and bottom edges, or centred above a timeline hop and below it
   near the top. It ignores the pointer and hides during exports (and is
@@ -767,8 +835,11 @@ sources in `lib/attribution.ts`, consistent with
 [third-party-data.md](./third-party-data.md), including the
 acknowledgements that NASA GIBS and MaxMind GeoLite2 ask for. GIBS served
 the bundled tiles too, so its credit and acknowledgement always show; while
-online imagery is off, its entry adds "Online tiles: off". Sources are plain
-text: a link would open inside the app window.
+online imagery is off, its entry adds "Online tiles: off". A credit with a
+`layer` shows only while that layer is on: TeleGeography's, with its
+licence and notice, while the submarine cables are on, and the chip then
+reads "NASA, GIBS, CesiumJS, TeleGeography". Sources are plain text: a link
+would open inside the app window.
 
 ### Cost of the glass panels
 
@@ -780,14 +851,167 @@ with the panels over an idle globe, while a control with one animated
 element makes over 200. UI animations are CSS transitions on user actions
 only; nothing animates while the app is idle.
 
+## Infrastructure layers
+
+Exchanges (IXPs), data centres, cloud regions, network colours and the
+opt-in submarine cables are entries of the layer registry. Their data loads
+the first time a layer that needs it is shown, never at start-up, and only
+the cables send anything to a new host, after the user accepts a notice.
+
+```mermaid
+flowchart LR
+    subgraph build["Build time (developer)"]
+        curated["scripts/infra-data/cloud-regions.ts<br/>AWS, Google Cloud, Azure regions<br/>(hand-curated, typed)"]
+        cfstatus["cloudflarestatus.com<br/>components (data centres)"]
+        ourairports["OurAirports airports.csv"]
+        script["build-cloud-regions.mjs<br/>validate, metadata"]
+        snapshot[("public/infra/cloud-regions.json<br/>474 sites, 77 KB, bundled")]
+        curated --> script
+        cfstatus --> script
+        ourairports --> script
+        script --> snapshot
+    end
+    subgraph renderer["Renderer"]
+        registry["lib/layers.ts<br/>registry: data, consent,<br/>parent, filter, style"]
+        panel["LayerPanel, command bar"]
+        consent["LayerConsentDialog<br/>CC BY-NC-SA 3.0, host"]
+        ui[("uiStore<br/>layers, consents")]
+        loading["useInfraLoading<br/>sources of shown layers"]
+        store[("infraStore<br/>idle, loading, ready,<br/>unavailable, error")]
+        parse["lib/infra/sources.ts<br/>parse at the edge"]
+        scene["lib/infra/scene.ts<br/>clusters, route links,<br/>cloud match, cable guess"]
+        adapter["globe/cesiumGlobe.ts<br/>sites, cables, labels;<br/>cluster level from drawn frames"]
+    end
+    subgraph rust["Rust backend"]
+        ixstore["IxStore (exchange matching)<br/>PeeringDB IX list, 24 h"]
+        sites["get_peeringdb_sites<br/>never downloads"]
+        cables["get_submarine_cables<br/>checks saved switch + consent"]
+        cablecache[("$APPCACHE/submarine-cables.json<br/>7 days")]
+    end
+    peeringdb["www.peeringdb.com"]
+    telegeo["www.submarinecablemap.com"]
+
+    registry --> panel
+    panel -->|setLayerVisible| ui
+    ui -->|notice not accepted yet| consent
+    consent -->|accept| ui
+    ui --> loading --> store
+    store -->|cloud-regions| snapshot
+    store -->|peeringdb-sites| sites
+    store -->|"submarine-cables, after the save"| cables
+    sites --> ixstore
+    ixstore -->|"lookups during a trace,<br/>switch: Internet exchanges"| peeringdb
+    cables --> cablecache
+    cables -->|"cache miss or older than 7 days"| telegeo
+    store --> parse --> scene --> adapter
+```
+
+### Data
+
+| Layer | Source | When it loads | Sends |
+| --- | --- | --- | --- |
+| Internet exchanges, data centres | The PeeringDB IX list in the provider cache (`get_peeringdb_sites`, from `IxStore`) | First shown; again after a trace when there was no list or an old one | Nothing: the command never downloads. Exchange matching downloads the list during traces, as in phase 2 |
+| Cloud regions | `./infra/cloud-regions.json`, bundled | First shown | Nothing |
+| Submarine cables | `get_submarine_cables` | First shown after the notice is accepted | One request to `www.submarinecablemap.com` when the saved copy is missing or older than 7 days |
+
+- **Why the PeeringDB data is not bundled.** PeeringDB's Acceptable Use
+  Policy says its data may not be passed on in bulk without its approval.
+  The layers therefore show the list that each installation downloads for
+  exchange matching (on by default), with more fields. With exchange
+  matching off and no saved list, the layers say so and send nothing.
+- **Parsing at the edge** (`lib/infra/sources.ts`): each source is
+  `unknown` until parsed. A record with a wrong field is dropped and
+  counted; a wrong outer shape (or another snapshot layout) is an error
+  shown under the switch.
+- **Retry.** `useInfraLoading` runs when the set of needed sources changes,
+  so a failed load is tried again only when the user turns the layer on
+  again. Hiding a layer keeps its data: showing it again makes no request.
+- **Cable opt-in, enforced twice.** The renderer opens the notice instead of
+  turning the layer on, and asks the backend only after the switch and the
+  consent are written (`uiStore.whenSaved`). The backend reads
+  `preferences.ui` at each call (`UiPreferences::submarine_cables`): without
+  the layer on and the notice accepted, it reads and sends nothing. It
+  downloads one file (single flight), parses the GeoJSON at the edge
+  (features without id, name or a valid line dropped; coordinates rounded
+  to 0.01°), saves the compact result with `write_atomic`, and uses an
+  older copy (with a note) for 10 minutes after a failed download.
+
+### Drawing
+
+- **Clustering** (`lib/infra/cluster.ts`): greedy by importance (networks
+  at the site; for cloud regions, a region before a CDN data centre), with
+  a spatial hash. A site joins the nearest seed within one cell, so each
+  marker stands for an area and sits at a real site. The cell is 2^n km
+  (1 km to 4,096 km), the smallest power of two at least 36 px wide at the
+  centre of the view. The search for a seed covers every column of
+  longitude that can be within a cell (from the haversine formula; all
+  columns near a pole). The adapter computes the level in `postRender`, so
+  only frames that are drawn anyway can change it; a new level re-clusters
+  once and asks for one frame.
+- **Sites on the route** never join another site: the exchange of a
+  phase 2 IX match (labelled "DE-CIX Frankfurt · hop 5"), the nearest
+  exchange and data centre within each well placed hop's radius (25 to
+  100 km; medium or high confidence, no RTT conflict), and the regions of
+  high or medium cloud matches (labelled with the hop and confidence).
+  They draw larger, with a white outline.
+- **Markers**: exchanges are filled cyan dots, data centres lilac rings,
+  cloud regions dots in the provider's colour; a cluster grows with the
+  number of sites. Colours are theme-independent, like the globe, and keep
+  3:1 against the dark globe (tested).
+- **Cloud match** (`lib/infra/cloudMatch.ts`), per hop, against the
+  providers whose switch is on: high when the hop's ASN is the provider's
+  and one of its regions is within 100 km (or the estimate's radius) of an
+  estimate with a radius up to 200 km, of medium or high confidence and
+  not disputed by the RTT check; medium when such a region is within
+  500 km (also a close region with a weak or disputed estimate); low when
+  the provider's network has no region near (an edge site) or the hop has
+  no location, and when the hop has no ASN at all but a trusted, precise
+  estimate lies within 50 km of a region. Another network's router never
+  matches. The ASNs are the operators' networks (Amazon, Google,
+  Microsoft, Cloudflare), which also carry their other services and edge
+  sites, so the reason names the operator ("AS15169 is Google's network")
+  and says that an edge site in the same city looks the same. The reason
+  is shown in the hop details, the site card, and as the confidence in the
+  hover card.
+- **Network colours** (`lib/infra/asnColors.ts`): Paul Tol's "light"
+  scheme, 7 colours; tests check 3:1 against the dark globe and a CIELAB
+  ΔE of at least 12 between every pair under simulated protanopia,
+  deuteranopia and tritanopia. Each ASN prefers colour `asn mod 7`, so it
+  usually keeps its colour from trace to trace; a later network on the
+  same route that wants a taken colour takes the next free one. Hops
+  without an ASN are grey. An arc between two networks is split in the
+  middle into the two colours. The legend (`AsnLegend`) lists the networks
+  in route order with their hops, and the hop table's dots follow the
+  colours.
+- **Cables**: each line is drawn along great circles at 1.5 km height, so
+  long segments do not cut through the globe. The guess
+  (`lib/infra/cableGuess.ts`): for consecutive located hops at least
+  1,500 km apart (no low-confidence estimate), the cables with an end
+  within 400 km of each hop, at most two, are drawn in amber and labelled
+  with the cable name, a question mark and "(a guess)".
+- **Adapter**: route items, site markers and cables are separate
+  collections, each rebuilt only when its lists change by identity; a hop
+  hover does not rebuild the cables. A pick prefers a hop to a site.
+- **No rebuild per hop event.** A trace emits an event per line and per
+  finished lookup, each with a new hop list. `keepUnchanged`
+  (`lib/infra/scene.ts`) keeps the previous links, matches and guesses
+  when their content is the same, so clustering, site markers and cable
+  lines are built again only when the route really changes them.
+- **Exports**: an exported image or video carries the notice of opt-in
+  data whose layer is on (`exportCredits`): with the cables on,
+  "Submarine cable data © TeleGeography, …, licensed CC BY-NC-SA 3.0." in
+  the lower right corner.
+
 ## Settings and storage
 
 | What | Where |
 | --- | --- |
 | Settings (GeoIP paths, preferences, integrations, PeeringDB key; theme, layer switches and collapsed panels in `preferences.ui`) | `$APPDATA/settings.json` |
 | GeoLite2 downloads | `$APPDATA/databases/` |
-| Provider cache, including the PeeringDB IX list | `$APPCACHE/enrichment-cache.json` |
+| Provider cache, including the PeeringDB IX list (exchanges, prefixes and facilities) | `$APPCACHE/enrichment-cache.json` |
 | Globe tiles downloaded from NASA GIBS (500 MB, least recently used first out) | `$APPCACHE/tiles/` |
+| Submarine cable map from TeleGeography (only after the user opted in; about 0.3 MB, used for 7 days) | `$APPCACHE/submarine-cables.json` |
+| Cloud regions | bundled (`src/renderer/public/infra/cloud-regions.json`) |
 | Airport table for host name hints | compiled in (`src-tauri/data/airports.csv`, see `src-tauri/data/README.md`) |
 | Reverse DNS cache, recent runs | memory only |
 
@@ -801,7 +1025,14 @@ UI preferences are validated too (`UiPreferences::validated`), see
 - **CSP** (`tauri.conf.json` → `app.security.csp`): scripts, styles, images and
   fonts from the app only, `connect-src` for the Tauri IPC, `blob:` workers for
   the GIF encoder (Cesium's workers load from the app). The renderer does not
-  call any remote host; providers and map tiles are fetched in Rust.
+  call any remote host; providers, map tiles and the cable map are fetched
+  in Rust. Phase 5 adds no CSP entry: the cloud region file loads from the
+  app, and the exchange list and cable map come over IPC.
+- **Upstream hosts** (`src-tauri/src/upstream.rs`): a download goes over
+  HTTPS to a fixed host list, follows redirects only within that list, and
+  has a size cap: `gibs.earthdata.nasa.gov` (tiles, 2 MB) and
+  `www.submarinecablemap.com` (cable map, 8 MB). The URLs are built in Rust
+  from constants.
   `devCsp` adds `'unsafe-inline'` and the Vite dev server for HMR. Additions
   for the globe:
   - `img-src` and `connect-src`: `vistiles:` and `http://vistiles.localhost`,

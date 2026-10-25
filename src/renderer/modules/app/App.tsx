@@ -13,6 +13,9 @@ import { HopTimeline } from "./components/HopTimeline";
 import { HoverCard } from "./components/HoverCard";
 import { CommandPalette } from "./components/CommandPalette";
 import { Attribution } from "./components/Attribution";
+import { AsnLegend } from "./components/AsnLegend";
+import { LayerConsentDialog } from "./components/LayerConsentDialog";
+import { useInfraLoading } from "@renderer/hooks/useInfra";
 import { useUpdateStore } from "@renderer/state/updateStore";
 import { selectTheme, useUiStore } from "@renderer/state/uiStore";
 import { UI_EVENTS } from "./lib/uiEvents";
@@ -28,6 +31,7 @@ const UPDATE_CHECK_DELAY_MS = 5000;
 
 export const App: React.FC = () => {
   useTracerouteSubscription();
+  useInfraLoading();
 
   const currentRun = useTracerouteStore(selectCurrentRun);
   const selectedHopIndex = useTracerouteStore((state) => state.selectedHopIndex);
@@ -151,6 +155,9 @@ export const App: React.FC = () => {
           <Toolbar />
           <LayerPanel />
         </div>
+        <div className="hud__legend">
+          <AsnLegend />
+        </div>
         <div className="hud__hops">
           <HopDetailsPane run={currentRun} selectedHopIndex={selectedHopIndex} status={status} />
         </div>
@@ -166,6 +173,7 @@ export const App: React.FC = () => {
       </div>
       <HoverCard />
       <CommandPalette />
+      <LayerConsentDialog />
       <UpdateBanner />
       <OnboardingModal
         isOpen={isOnboardingOpen}

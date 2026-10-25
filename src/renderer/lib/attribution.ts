@@ -1,9 +1,11 @@
+import { SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
+
 /**
  * Credits for the code and data the app shows. Keep in step with
  * docs/third-party-data.md and src-tauri/data/README.md.
  */
 
-export type CreditGroup = "Globe" | "Hop data";
+export type CreditGroup = "Globe" | "Hop data" | "Infrastructure";
 
 export interface Credit {
   name: string;
@@ -20,6 +22,19 @@ export interface Credit {
    * off. The credit stays either way; only a note says the online tiles are off.
    */
   servesOnlineTiles?: true;
+  /** Listed only while this layer is on (data the user opted in to). */
+  layer?: string;
+}
+
+/**
+ * The notices that exported images and videos must carry: those of opt-in
+ * data whose layer is on (CC BY asks for attribution in the medium, and an
+ * export leaves the app). Empty while no such layer is on.
+ */
+export function exportCredits(visibility: Readonly<Record<string, boolean>>): string[] {
+  return CREDITS.flatMap((credit) =>
+    credit.layer && credit.notice && visibility[credit.layer] ? [credit.notice] : []
+  );
 }
 
 export const CREDITS: readonly Credit[] = [
@@ -74,7 +89,7 @@ export const CREDITS: readonly Credit[] = [
   {
     name: "PeeringDB",
     group: "Hop data",
-    use: "Internet exchange LANs and facilities, network records",
+    use: "Internet exchange LANs and facilities, network records; the exchange and data centre layers",
     licence: "PeeringDB Acceptable Use Policy",
     source: "peeringdb.com"
   },
@@ -91,5 +106,21 @@ export const CREDITS: readonly Credit[] = [
     use: "Origin ASN, prefix and registry of each public address",
     licence: "Public services of Team Cymru, the regional internet registries and the RIPE NCC",
     source: "team-cymru.com, rdap.org, stat.ripe.net"
+  },
+  {
+    name: "Cloud regions",
+    group: "Infrastructure",
+    use: "AWS, Google Cloud and Microsoft Azure regions from their documentation, Cloudflare data centres from its status page (bundled, approximate locations)",
+    licence: "Facts from the providers' public documentation; names are trademarks of their owners",
+    source: "docs.aws.amazon.com, cloud.google.com, learn.microsoft.com, cloudflarestatus.com"
+  },
+  {
+    name: "TeleGeography Submarine Cable Map",
+    group: "Infrastructure",
+    use: "Submarine cable routes (opt-in layer)",
+    licence: "CC BY-NC-SA 3.0: non-commercial use, with attribution, adaptations under the same licence",
+    source: "submarinecablemap.com",
+    notice: "Submarine cable data © TeleGeography, www.submarinecablemap.com, licensed CC BY-NC-SA 3.0.",
+    layer: SUBMARINE_CABLES_LAYER_ID
   }
 ];

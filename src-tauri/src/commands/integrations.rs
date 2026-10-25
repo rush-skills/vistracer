@@ -561,6 +561,11 @@ impl EnrichmentService {
         self.cache.persist();
     }
 
+    /// Exchanges and data centres from the IX list, without a download.
+    pub fn peeringdb_sites(&self) -> Option<crate::types::PeeringDbSites> {
+        self.ix.sites()
+    }
+
     fn breaker_open_message(&self, provider: ProviderId) -> Option<String> {
         let breakers = self.breakers.lock().unwrap_or_else(|e| e.into_inner());
         let open_until = breakers.get(&provider)?.open_until?;
@@ -1746,6 +1751,96 @@ mod tests {
             after_failure.contains("Using the IX list from 25 h ago; refresh failed: fac list"),
             "{after_failure}"
         );
+    }
+
+    #[tokio::test]
+    async fn peeringdb_sites_come_from_the_ix_list_and_never_download() {
+        let (http, hits) = mock_http(ix_routes(fac_fixture())).await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let dir = std::env::temp_dir().join(format!("vistracer-sites-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("enrichment-cache.json");
+        let service = service(http, whois, Some(path.clone()));
+
+        assert_eq!(service.peeringdb_sites(), None, "no list yet");
+        assert_eq!(ix_hits(&hits), [0, 0, 0, 0, 0], "the layers never download");
+
+        service
+            .enrich(ip("80.81.194.152"), no_geolite(), &ix_only(http), false)
+            .await;
+        assert_eq!(ix_hits(&hits), [1, 1, 1, 1, 1]);
+        let request = &hits.requests("/api/fac")[0];
+        assert!(
+            request.contains(
+                "fields=id,name,org_name,city,country,latitude,longitude,net_count,ix_count"
+            ),
+            "{request}"
+        );
+        let sites = service.peeringdb_sites().unwrap();
+        assert!(sites.complete);
+        let decix = sites.exchanges.iter().find(|ix| ix.id == 31).unwrap();
+        assert_eq!(decix.name, "DE-CIX Frankfurt");
+        assert_eq!(decix.network_count, 1019);
+        assert!(
+            decix.facility_count > 10 && decix.radius_km > 100.0,
+            "{decix:?}"
+        );
+        let nikhef = sites.facilities.iter().find(|fac| fac.id == 18).unwrap();
+        assert_eq!(nikhef.name, "NIKHEF Amsterdam");
+        assert_eq!(nikhef.org.as_deref(), Some("Nikhef"));
+        assert_eq!(nikhef.country.as_deref(), Some("NL"));
+        assert_eq!((nikhef.network_count, nikhef.exchange_count), (504, 30));
+        assert_eq!(sites.facilities.len(), 41);
+
+        service.persist();
+        let restarted = self::service(http, whois, Some(path));
+        assert_eq!(
+            restarted.peeringdb_sites(),
+            Some(sites),
+            "from the disk cache"
+        );
+        assert_eq!(ix_hits(&hits), [1, 1, 1, 1, 1]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_list_saved_without_facilities_is_used_while_it_is_replaced() {
+        let (http, hits) = mock_http(ix_routes(fac_fixture())).await;
+        let (whois, _) = mock_whois(CYMRU).await;
+        let service = service(http, whois, None);
+        // As the previous version saved it: no version, no facilities.
+        let mut saved = build_dataset(&crate::geoloc::ixp::tests::real_responses()).unwrap();
+        saved.version = 0;
+        saved.facilities.clear();
+        service
+            .cache
+            .insert_at(IX_CACHE_KEY, Some(saved), now_ms() - 3_600_000);
+
+        let old = service.peeringdb_sites().unwrap();
+        assert!(!old.complete && old.facilities.is_empty());
+        assert_eq!(ix_hits(&hits), [0, 0, 0, 0, 0]);
+
+        let result = service
+            .enrich(ip("80.81.194.152"), no_geolite(), &ix_only(http), false)
+            .await;
+        assert_eq!(result.ixp.as_ref().unwrap().info.name, "DE-CIX Frankfurt");
+        let message = status(&result, ProviderId::PeeringDbIx).message.clone();
+        assert!(
+            message
+                .as_deref()
+                .unwrap_or("")
+                .contains("while a newer one downloads"),
+            "{message:?}"
+        );
+        let mut refreshed = None;
+        for _ in 0..100 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            refreshed = service.peeringdb_sites().filter(|sites| sites.complete);
+            if refreshed.is_some() {
+                break;
+            }
+        }
+        assert_eq!(refreshed.map(|sites| sites.facilities.len()), Some(41));
+        assert_eq!(ix_hits(&hits), [1, 1, 1, 1, 1]);
     }
 
     fn fac_fixture() -> Response {

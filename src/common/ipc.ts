@@ -295,6 +295,8 @@ export interface UiPreferences {
   layers: Record<string, boolean>;
   /** Panel id → collapsed. A missing id uses the panel's default. */
   collapsed: Record<string, boolean>;
+  /** Layer id → the user accepted the layer's notice (licence, host). */
+  consents: Record<string, boolean>;
 }
 
 /**
@@ -302,6 +304,14 @@ export interface UiPreferences {
  * persistence.rs: while it is off, the tile cache downloads nothing.
  */
 export const ONLINE_IMAGERY_LAYER_ID = "online-imagery";
+
+/**
+ * The opt-in submarine cable layer; also the id of its notice in
+ * `UiPreferences.consents`. Mirrors `SUBMARINE_CABLES_LAYER` in
+ * persistence.rs: the backend downloads the cable map only while this layer
+ * is on and its notice is accepted.
+ */
+export const SUBMARINE_CABLES_LAYER_ID = "submarine-cables";
 
 export interface AppInfo {
   version: string;

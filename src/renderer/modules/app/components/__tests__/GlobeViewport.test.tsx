@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { HopLocation, HopResolution, TracerouteRun } from "@common/ipc";
 import type { GlobeScene } from "@renderer/lib/globe";
+import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
+import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
 import type { GlobeCallbacks, GlobeController } from "../globe/controller";
-import { GlobeViewport } from "../GlobeViewport";
+import { GlobeViewport, measureInsets } from "../GlobeViewport";
 
 // WebGL does not exist in jsdom: the Cesium adapter is replaced at the seam.
 const fake = vi.hoisted(() => ({
@@ -93,6 +95,14 @@ describe("GlobeViewport", () => {
       captureActive: false
     });
     useUiStore.setState({ layers: {} });
+    useInfraStore.setState({
+      sources: {
+        "peeringdb-sites": { status: "ready", data: PEERINGDB },
+        "cloud-regions": { status: "ready", data: CLOUD },
+        "submarine-cables": { status: "idle" }
+      },
+      hoveredSite: undefined
+    });
   });
 
   afterEach(() => {
@@ -109,18 +119,16 @@ describe("GlobeViewport", () => {
       [1, "selected"]
     ]);
     expect(lastScene()?.arcs).toHaveLength(1);
-    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({
-      latitude: 50.1,
-      longitude: 8.7,
-      radiusKm: 50
-    });
+    expect(fake.controller.flyTo).toHaveBeenLastCalledWith(
+      { latitude: 50.1, longitude: 8.7, radiusKm: 50 },
+      { top: 0, right: 0, bottom: 0, left: 0 }
+    );
 
     rerender(<GlobeViewport run={run} selectedHopIndex={2} />);
-    expect(fake.controller.flyTo).toHaveBeenLastCalledWith({
-      latitude: 52.4,
-      longitude: 4.9,
-      radiusKm: 50
-    });
+    expect(fake.controller.flyTo).toHaveBeenLastCalledWith(
+      { latitude: 52.4, longitude: 4.9, radiusKm: 50 },
+      { top: 0, right: 0, bottom: 0, left: 0 }
+    );
     const flights = fake.controller.flyTo.mock.calls.length;
     // An enrichment update with the same hops does not move the camera.
     rerender(<GlobeViewport run={runWith([...run.hops])} selectedHopIndex={2} />);
@@ -198,5 +206,135 @@ describe("GlobeViewport", () => {
     expect(screen.queryByRole("status")).toBeNull();
     act(() => fake.callbacks?.onImageryError("HTTP 503"));
     expect(screen.getByRole("status").textContent).toContain("Detailed imagery is unavailable");
+  });
+
+  it("draws the infrastructure layers that are on, and none that are off", async () => {
+    render(<GlobeViewport run={runWith([located(1, 50.1, 8.7)])} selectedHopIndex={1} />);
+    await waitFor(() => expect(fake.controller.setScene).toHaveBeenCalled());
+    const empty = lastScene();
+    expect([empty?.exchanges, empty?.facilities, empty?.cloudRegions, empty?.cables]).toEqual([[], [], [], []]);
+
+    act(() => useUiStore.setState({ layers: { exchanges: true, "cloud-regions": true, "cloud-gcp": false } }));
+    const scene = lastScene();
+    expect(scene?.exchanges.length).toBeGreaterThan(0);
+    expect(scene?.facilities).toEqual([]);
+    expect(scene?.cloudRegions.some((site) => site.filterKey === "gcp")).toBe(false);
+    expect(scene?.cloudRegions.some((site) => site.filterKey === "aws")).toBe(true);
+  });
+
+  it("clusters again when the adapter reports a new zoom level, and not on a hop hover", async () => {
+    useUiStore.setState({ layers: { "data-centres": true } });
+    render(<GlobeViewport run={runWith([located(1, 50.1, 8.7)])} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => fake.callbacks?.onClusterLevel(10));
+    const far = lastScene()?.facilities;
+    act(() => useTracerouteStore.getState().setHoveredHop(1));
+    // The route changed; the site markers are the same list, so the adapter keeps them.
+    expect(lastScene()?.facilities).toBe(far);
+    act(() => fake.callbacks?.onClusterLevel(0));
+    expect(lastScene()?.facilities.length).toBeGreaterThan(far?.length ?? 0);
+  });
+
+  it("puts the hovered site in the store with its cluster, for the hover card", async () => {
+    useUiStore.setState({ layers: { "data-centres": true } });
+    render(<GlobeViewport run={runWith([])} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => fake.callbacks?.onClusterLevel(10));
+    const frankfurt = lastScene()?.facilities.find((site) => site.members.length > 1);
+    act(() => fake.callbacks?.onHoverSite(frankfurt?.key, { x: 5, y: 6 }));
+    expect(useInfraStore.getState().hoveredSite).toEqual({
+      specKey: frankfurt?.key,
+      layer: "facilities",
+      keys: frankfurt?.members,
+      anchor: { kind: "point", x: 5, y: 6 }
+    });
+    // The hovered marker is drawn larger.
+    expect(lastScene()?.facilities.find((site) => site.key === frankfurt?.key)?.pixelSize).toBe(
+      (frankfurt?.pixelSize ?? 0) + 2
+    );
+    act(() => fake.callbacks?.onHoverSite(undefined));
+    expect(useInfraStore.getState().hoveredSite).toBeUndefined();
+  });
+
+  it("frames flights in the whole canvas during an export, which records no panels", async () => {
+    const run = runWith([located(1, 50.1, 8.7), located(2, 52.4, 4.9)]);
+    const { rerender } = render(<GlobeViewport run={run} selectedHopIndex={1} />);
+    await waitFor(() => expect(fake.controller.flyTo).toHaveBeenCalled());
+    expect(fake.controller.flyTo.mock.calls.at(-1)?.[1]).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    act(() => useTracerouteStore.getState().setCaptureActive(true));
+    rerender(<GlobeViewport run={run} selectedHopIndex={2} />);
+    expect(fake.controller.flyTo.mock.calls.at(-1)).toEqual([
+      { latitude: 52.4, longitude: 4.9, radiusKm: 50 },
+      undefined
+    ]);
+    act(() => useTracerouteStore.getState().setCaptureActive(false));
+  });
+
+  it("does not rebuild site markers or cables for a hop update that changes nothing", async () => {
+    const cableMap = {
+      fetchedAt: 1,
+      note: null,
+      cables: [
+        {
+          key: "cable:x",
+          id: "x",
+          name: "Example",
+          segments: [
+            [
+              [8.7, 50.1],
+              [4.9, 52.4]
+            ] as Array<[number, number]>
+          ]
+        }
+      ],
+      rejected: 0
+    };
+    useInfraStore.setState({
+      sources: {
+        ...useInfraStore.getState().sources,
+        "submarine-cables": { status: "ready", data: cableMap }
+      }
+    });
+    useUiStore.setState({ layers: { "data-centres": true, "submarine-cables": true } });
+    // The route infra reads the run from the store, as in the app.
+    const run = runWith([located(1, 50.1, 8.7), located(2, 52.4, 4.9)]);
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    const { rerender } = render(<GlobeViewport run={run} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => fake.callbacks?.onClusterLevel(6));
+    const before = lastScene();
+    expect(before?.cables.length).toBe(1);
+    // An enrichment update: new hop objects, same places.
+    const updated = runWith(run.hops.map((hop) => ({ ...hop, hostName: "router.example.net" })));
+    act(() => useTracerouteStore.setState({ runs: { r: updated } }));
+    rerender(<GlobeViewport run={updated} />);
+    expect(lastScene()?.facilities).toBe(before?.facilities);
+    expect(lastScene()?.cables).toBe(before?.cables);
+  });
+});
+
+describe("measureInsets", () => {
+  it("measures how far the marked panels reach into the canvas from each edge", () => {
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, width, height, right: left + width, bottom: top + height }) as DOMRect;
+    const canvas = document.createElement("div");
+    canvas.getBoundingClientRect = () => rect(0, 0, 960, 640);
+    const panel = (edge: string, box: DOMRect) => {
+      const element = document.createElement("div");
+      element.setAttribute("data-globe-inset", edge);
+      element.getBoundingClientRect = () => box;
+      document.body.append(element);
+      return element;
+    };
+    const panels = [
+      panel("right", rect(612, 12, 336, 500)),
+      panel("bottom", rect(12, 440, 500, 120)),
+      panel("bottom", rect(12, 572, 600, 56)),
+      panel("top", rect(12, 12, 420, 68)),
+      // A hidden panel has no size and covers nothing.
+      panel("right", rect(0, 0, 0, 0))
+    ];
+    expect(measureInsets(canvas)).toEqual({ top: 80, right: 348, bottom: 200, left: 0 });
+    panels.forEach((element) => element.remove());
   });
 });

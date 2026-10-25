@@ -1,0 +1,42 @@
+.consent-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: var(--color-scrim);
+}
+
+.consent-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(480px, 92vw);
+  max-height: 90vh;
+  overflow: auto;
+  padding: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-panel);
+  background: var(--glass-bg-solid);
+  box-shadow: var(--shadow-panel);
+  color: var(--color-text);
+}
+
+.consent-dialog h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+
+.consent-dialog__body p {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+}
+
+.consent-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

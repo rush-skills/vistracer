@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { RendererApi } from "@common/bridge";
 import { LAYERS } from "@renderer/lib/layers";
+import { useInfraStore } from "@renderer/state/infraStore";
 import { useUiStore } from "@renderer/state/uiStore";
+import { LayerConsentDialog } from "../LayerConsentDialog";
 import { LayerPanel } from "../LayerPanel";
 import { Toolbar } from "../Toolbar";
 
 const initial = useUiStore.getState();
+const initialInfra = useInfraStore.getState();
 let setSettings: ReturnType<typeof vi.fn>;
 
 const flush = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
@@ -18,6 +21,7 @@ beforeEach(async () => {
     setSettings
   } as unknown as RendererApi;
   useUiStore.setState(initial, true);
+  useInfraStore.setState(initialInfra, true);
   await useUiStore.getState().load();
 });
 
@@ -26,6 +30,7 @@ const renderPanel = () =>
     <div>
       <Toolbar />
       <LayerPanel />
+      <LayerConsentDialog />
     </div>
   );
 
@@ -61,7 +66,8 @@ describe("LayerPanel", () => {
     expect(setSettings).toHaveBeenLastCalledWith("preferences.ui", {
       theme: "dark",
       layers: { "online-imagery": false },
-      collapsed: { layers: false }
+      collapsed: { layers: false },
+      consents: {}
     });
   });
 
@@ -74,5 +80,71 @@ describe("LayerPanel", () => {
     fireEvent.keyDown(rings, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Layers" })).toBeNull();
     expect(document.activeElement).toBe(toggle);
+  });
+
+  it("groups the infrastructure and cloud switches, with provider switches under cloud regions", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Layers" }));
+    const infra = screen.getByRole("group", { name: "Infrastructure" });
+    for (const name of ["Internet exchanges", "Data centres", "Submarine cables"]) {
+      expect((within(infra).getByRole("switch", { name }) as HTMLInputElement).checked).toBe(false);
+    }
+    const cloud = screen.getByRole("group", { name: "Cloud" });
+    const aws = within(cloud).getByRole("switch", { name: "AWS" }) as HTMLInputElement;
+    expect(aws.checked).toBe(true);
+    expect(aws.closest(".layer-panel__item--child")).toBeTruthy();
+    expect(screen.getByText(/Amazon Web Services regions\. Turn on Cloud regions to see it\./)).toBeTruthy();
+    fireEvent.click(within(cloud).getByRole("switch", { name: "Cloud regions" }));
+    expect(screen.queryByText(/Turn on Cloud regions to see it/)).toBeNull();
+  });
+
+  it("says why a layer shows nothing yet", () => {
+    useUiStore.setState({ layers: { exchanges: true } });
+    act(() =>
+      useInfraStore.setState({
+        sources: {
+          ...useInfraStore.getState().sources,
+          "peeringdb-sites": { status: "unavailable", message: "No exchange list yet." }
+        }
+      })
+    );
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Layers" }));
+    // Both layers use the list; each says so under its switch.
+    expect(screen.getAllByText("No exchange list yet.")).toHaveLength(1);
+    act(() => useUiStore.getState().setLayerVisible("data-centres", true));
+    expect(screen.getAllByText("No exchange list yet.")).toHaveLength(2);
+  });
+
+  it("asks before it shows the submarine cables, once", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Layers" }));
+    const cables = () => screen.getByRole("switch", { name: "Submarine cables" }) as HTMLInputElement;
+    fireEvent.click(cables());
+    const notice = screen.getByRole("dialog", { name: "Show submarine cables?" });
+    expect(notice.textContent).toContain("CC BY-NC-SA 3.0");
+    expect(notice.textContent).toContain("www.submarinecablemap.com");
+    expect(cables().checked).toBe(false);
+
+    fireEvent.click(within(notice).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(cables().checked).toBe(false);
+
+    fireEvent.click(cables());
+    fireEvent.click(screen.getByRole("button", { name: "Show and download" }));
+    await flush();
+    expect(cables().checked).toBe(true);
+    expect(setSettings).toHaveBeenLastCalledWith(
+      "preferences.ui",
+      expect.objectContaining({
+        layers: { "submarine-cables": true },
+        consents: { "submarine-cables": true }
+      })
+    );
+
+    fireEvent.click(cables());
+    fireEvent.click(cables());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(cables().checked).toBe(true);
   });
 });
