@@ -503,7 +503,13 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     },
 
     setInputEnabled(enabled) {
-      controls.enableInputs = enabled;
+      // Not enableInputs: every Cesium flight sets it to true when it ends
+      // (CameraFlightPath), which would unlock the camera during an export.
+      // Flights leave these switches alone; enableLook stays off.
+      controls.enableRotate = enabled;
+      controls.enableZoom = enabled;
+      controls.enableTilt = enabled;
+      controls.enableTranslate = enabled;
     },
 
     destroy() {

@@ -5,6 +5,7 @@
 // - an idle globe runs no animation frames and no WebGL draws
 // - camera moves the app makes (start view, following a trace, selecting a
 //   hop, exports) request no online tile; a zoom the user makes does
+// - a drag during a WebM export does not move the globe
 // - exports write files, no page errors, no request leaves the machine
 //
 //   npm run build
@@ -272,19 +273,83 @@ try {
   fs.mkdirSync(downloads, { recursive: true });
   await send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
   await tilesDuring(userZoom);
-  const exportTiles = await tilesDuring(async () => {
-    for (const format of ["png", "webm"]) {
-      await evaluate(
-        `[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Download export')).click()`
-      );
-      await sleep(500);
+  const exportButton = () =>
+    evaluate(
+      `[...document.querySelectorAll('button')].find((b) => /Download export|Exporting/.test(b.textContent))?.textContent ?? ""`
+    );
+  const startExport = async (format, dwellSeconds) => {
+    await evaluate(
+      `[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Download export')).click()`
+    );
+    await sleep(500);
+    await evaluate(`document.querySelector('input[type=radio][value="${format}"]').click()`);
+    await sleep(300);
+    if (dwellSeconds) {
       await evaluate(`(() => {
-        document.querySelector('input[type=radio][value="${format}"]').click();
-        [...document.querySelectorAll('.export-modal button')].at(-1).click();
+        const dwell = document.querySelector('#export-modal__dwell');
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(dwell, '${dwellSeconds}');
+        dwell.dispatchEvent(new Event('input', { bubbles: true }));
       })()`);
-      await sleep(format === "png" ? 2000 : 15000);
+      await sleep(200);
     }
+    await evaluate(`[...document.querySelectorAll('.export-modal button')].at(-1).click()`);
+  };
+  // Waits for the footer's "Saved <file>" message. The button is not a
+  // reliable signal: a previous export's 3.5 s reset timer can set it back
+  // to "Download export" while the next export still runs.
+  const exportSaved = async (extension, timeoutMs) => {
+    for (let waited = 0; waited < timeoutMs; waited += 250) {
+      const message = await evaluate(
+        `document.querySelector('.footer-bar__message')?.textContent ?? ""`
+      );
+      if (message.startsWith("Saved") && message.endsWith(`.${extension}`)) {
+        return true;
+      }
+      await sleep(250);
+    }
+    return false;
+  };
+  const canvasShot = async () => {
+    const rect = await evaluate(`(() => {
+      const r = document.querySelector('.globe-viewport canvas').getBoundingClientRect();
+      return { x: r.left, y: r.top, width: r.width, height: r.height };
+    })()`);
+    return (await send("Page.captureScreenshot", { format: "png", clip: { ...rect, scale: 1 } }))
+      .data;
+  };
+  let dragDuringExport;
+  const exportTiles = await tilesDuring(async () => {
+    await startExport("png");
+    await exportSaved("png", 10000);
+    // Let the PNG export's reset timer run out before the next export.
+    await sleep(4000);
+    // 8.8.8.8 trace: hop 1 is private, so after the first flight (to hop 2)
+    // the export dwells 5 s on hop 1 with no camera move: a quiet window.
+    await startExport("webm", 5);
+    await sleep(2800);
+    const { x, y } = await centre();
+    const shotBefore = await canvasShot();
+    const before = await counters();
+    await mouse("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1 });
+    for (let i = 1; i <= 20; i += 1) {
+      await mouse("mouseMoved", x + i * 8, y + i * 3, { button: "left", buttons: 1 });
+      await sleep(16);
+    }
+    await mouse("mouseReleased", x + 160, y + 60, { button: "left", buttons: 0, clickCount: 1 });
+    await sleep(800);
+    const after = await counters();
+    dragDuringExport = {
+      exporting: (await exportButton()).includes("Exporting"),
+      draws: after.draws - before.draws,
+      unchanged: shotBefore === (await canvasShot())
+    };
+    await exportSaved("webm", 60000);
   });
+  check(
+    "a drag during a WebM export does not move the globe",
+    dragDuringExport.exporting && dragDuringExport.draws === 0 && dragDuringExport.unchanged,
+    `still exporting: ${dragDuringExport.exporting}, ${dragDuringExport.draws} WebGL draws, canvas ${dragDuringExport.unchanged ? "unchanged" : "changed"}`
+  );
   check(
     "exports from a zoomed-in view request no online tile",
     exportTiles === 0,
