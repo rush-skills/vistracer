@@ -2,11 +2,14 @@
 // Checks the production globe in headless Chrome, with the app's CSP and a
 // fake Tauri IPC (mock-ipc.js):
 //
-// - an idle globe runs no animation frames and no WebGL draws
+// - an idle globe runs no animation frames and no WebGL draws, and the
+//   glass panels over it (backdrop-filter blur) make no compositor frames
 // - camera moves the app makes (start view, following a trace, selecting a
 //   hop, exports) request no online tile, also when the window grows later;
 //   a zoom the user makes does
 // - a drag during a WebM export does not move the globe
+// - with "Online imagery" off in the layer panel, a user zoom requests no
+//   online tile; switched on again, it does
 // - exports write files, no page errors, no request leaves the machine
 //
 //   npm run build
@@ -41,9 +44,41 @@ const check = (name, ok, detail) => {
 
 /** Waits for flights and tile loads to end and the render loop to sleep. */
 const settle = () => sleep(4000);
+
+// Compositor work while `action` runs, from a Chrome trace: frames the
+// compositor drew (DrawFrame, BeginFrame) and main-thread paints.
+const FRAME_EVENTS = new Set(["DrawFrame", "BeginFrame", "Paint"]);
+const compositorFrames = async (action) => {
+  const from = events.length;
+  await send("Tracing.start", {
+    traceConfig: {
+      includedCategories: ["devtools.timeline", "disabled-by-default-devtools.timeline.frame"]
+    },
+    transferMode: "ReturnAsStream"
+  });
+  await action();
+  await send("Tracing.end");
+  let complete;
+  while (!(complete = events.slice(from).find((e) => e.method === "Tracing.tracingComplete"))) {
+    await sleep(50);
+  }
+  let data = "";
+  for (;;) {
+    const chunk = await send("IO.read", { handle: complete.params.stream });
+    data += chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString() : chunk.data;
+    if (chunk.eof) {
+      break;
+    }
+  }
+  await send("IO.close", { handle: complete.params.stream });
+  const trace = JSON.parse(data);
+  return (Array.isArray(trace) ? trace : trace.traceEvents).filter((e) => FRAME_EVENTS.has(e.name))
+    .length;
+};
+
 const idleWindow = async (name) => {
   const before = await counters();
-  await sleep(5000);
+  const composited = await compositorFrames(() => sleep(5000));
   const after = await counters();
   const frames = after.raf - before.raf;
   const draws = after.draws - before.draws;
@@ -51,6 +86,11 @@ const idleWindow = async (name) => {
     `idle globe draws nothing (${name})`,
     frames === 0 && draws === 0,
     `${frames} animation frames, ${draws} WebGL draws in 5 s`
+  );
+  check(
+    `idle glass panels make no compositor frames (${name})`,
+    composited === 0,
+    `${composited} frame and paint events in 5 s`
   );
 };
 /** Online tile requests made while `action` runs and the globe settles. */
@@ -73,6 +113,15 @@ const clickRow = (text) =>
   evaluate(
     `[...document.querySelectorAll('.hop-details__row')].find((row) => row.textContent.includes(${JSON.stringify(text)})).click()`
   );
+const userDrag = async (dx, dy) => {
+  const { x, y } = await centre();
+  await mouse("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1 });
+  for (let i = 1; i <= 20; i += 1) {
+    await mouse("mouseMoved", x + (dx * i) / 20, y + (dy * i) / 20, { button: "left", buttons: 1 });
+    await sleep(16);
+  }
+  await mouse("mouseReleased", x + dx, y + dy, { button: "left", buttons: 0, clickCount: 1 });
+};
 const userZoom = async () => {
   const { x, y } = await centre();
   for (let i = 0; i < 3; i += 1) {
@@ -248,6 +297,37 @@ try {
   });
   await settle();
 
+  // The layer panel's switch, as a user flips it.
+  const setOnlineImagery = async (on) => {
+    await evaluate(`document.querySelector('#layers-toggle').click()`);
+    await sleep(300);
+    await evaluate(`(() => {
+      const box = document.querySelector('input[aria-labelledby="layer-online-imagery-label"]');
+      if (box.checked !== ${on}) box.click();
+      document.querySelector('#layers-toggle').click();
+    })()`);
+    await sleep(300);
+  };
+  // Off, the user moves to new ground and zooms in: nothing is requested.
+  // On again, that view's online tiles load (they were never loaded, so
+  // Cesium's imagery cache cannot serve them).
+  await setOnlineImagery(false);
+  const offTiles = await tilesDuring(async () => {
+    await userDrag(-420, 60);
+    await userZoom();
+  });
+  check(
+    "with online imagery off, a user drag and zoom request no online tile",
+    offTiles === 0,
+    `${offTiles} requests`
+  );
+  const onTiles = await tilesDuring(() => setOnlineImagery(true));
+  check(
+    "switched on again, online imagery loads the user's view",
+    onTiles > 0,
+    `${onTiles} requests`
+  );
+
   const { x, y } = await centre();
   const beforeDrag = await counters();
   await mouse("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1 });
@@ -264,6 +344,20 @@ try {
     `${afterDrag.raf - beforeDrag.raf} animation frames`
   );
   await idleWindow("after a drag");
+
+  // Control: the trace does see frames when something on the page animates.
+  const animated = await compositorFrames(async () => {
+    await evaluate(`(() => {
+      const probe = document.createElement('div');
+      probe.id = 'frame-probe';
+      Object.assign(probe.style, { position: 'fixed', left: '0', top: '0', width: '8px', height: '8px' });
+      document.body.append(probe);
+      probe.animate([{ backgroundColor: 'red' }, { backgroundColor: 'blue' }], { duration: 500, iterations: Infinity });
+    })()`);
+    await sleep(2000);
+    await evaluate(`document.querySelector('#frame-probe').remove()`);
+  });
+  check("control: an animated element makes compositor frames", animated > 0, `${animated} events`);
 
   const final = await evaluate("window.__globeCheck");
   check("no page errors", final.errors.length === 0, final.errors.join("; "));

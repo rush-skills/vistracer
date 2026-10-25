@@ -188,20 +188,33 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     scene.imageryLayers.add(onlineLayer);
   }
   const onlineGate = new OnlineImageryGate();
+  let onlineEnabled = true;
+  let dayNight = true;
+  // Switched off, the online layer is not in the collection at all, so
+  // Cesium cannot ask it for a tile. Switched on, the gate decides.
   const syncOnlineLayer = () => {
-    if (onlineLayer) {
-      onlineLayer.show = onlineGate.visible;
+    if (!onlineLayer) {
+      return;
     }
+    const inScene = scene.imageryLayers.contains(onlineLayer);
+    if (!onlineEnabled && inScene) {
+      scene.imageryLayers.remove(onlineLayer, false);
+    } else if (onlineEnabled && !inScene) {
+      scene.imageryLayers.add(onlineLayer);
+    }
+    onlineLayer.show = onlineGate.visible;
   };
   // Hidden from the start, until the user moves the camera.
   syncOnlineLayer();
   // Runs only for frames that are drawn anyway, so it adds no frames.
   const removePreRender = scene.preRender.addEventListener(() => {
-    const share = nightImageryShare(
-      Cartesian3.magnitude(camera.positionWC),
-      globe.lightingFadeOutDistance,
-      globe.lightingFadeInDistance
-    );
+    const share = dayNight
+      ? nightImageryShare(
+          Cartesian3.magnitude(camera.positionWC),
+          globe.lightingFadeOutDistance,
+          globe.lightingFadeInDistance
+        )
+      : 0;
     nightLayer.nightAlpha = share;
     for (const layer of dayLayers) {
       layer.nightAlpha = 1 - share;
@@ -527,6 +540,15 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       onlineGate.setInputLocked(!enabled);
     },
 
+    setImagery(options) {
+      dayNight = options.dayNight;
+      globe.enableLighting = dayNight;
+      nightLayer.show = dayNight;
+      onlineEnabled = options.online;
+      syncOnlineLayer();
+      scene.requestRender();
+    },
+
     destroy() {
       destroyed = true;
       governor.dispose();
@@ -545,6 +567,11 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       clickHandler.destroy();
+      // A switched-off online layer is outside the collection that the
+      // widget destroys.
+      if (onlineLayer && !scene.imageryLayers.contains(onlineLayer)) {
+        onlineLayer.destroy();
+      }
       widget.destroy();
     }
   };

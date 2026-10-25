@@ -1,4 +1,5 @@
 import type { CameraFocus, GlobeScene } from "@renderer/lib/globe";
+import type { ImageryOptions } from "@renderer/lib/layers";
 
 /**
  * The seam between React and Cesium. GlobeViewport only talks to this
@@ -9,6 +10,8 @@ export interface GlobeController {
   setScene(scene: GlobeScene): void;
   flyTo(focus: CameraFocus): void;
   setInputEnabled(enabled: boolean): void;
+  /** Day/night shading and online imagery (layer panel switches). */
+  setImagery(options: ImageryOptions): void;
   destroy(): void;
 }
 
