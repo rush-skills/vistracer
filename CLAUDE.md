@@ -28,7 +28,7 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (192 tests across 24 files)
+npm run test           # Run unit + component tests (198 tests across 24 files)
 npm run test:e2e       # Run e2e tests (78 tests across 7 files)
 npm run test:watch     # Run tests in watch mode
 node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): idle frames and compositor frames, online tile requests (incl. the online imagery switch), export input lock in headless Chrome
@@ -203,27 +203,27 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 192 tests across 24 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 198 tests across 24 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 10 tests: store behavior, hovered hop
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
   - `src/renderer/lib/__tests__/globe.test.ts` — 26 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders, flight floor (a whole trace follow from a zoomed-in view never moves sideways below it)
   - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 8 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible (resumes a running flight), dispose, render quality
-  - `src/renderer/lib/__tests__/imagery.test.ts` — 11 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade, bundled-only height, online layer held at start and after app moves until user input
+  - `src/renderer/lib/__tests__/imagery.test.ts` — 13 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade, bundled-only height, online layer held at start and after app moves until user input, only drags that start on the globe count
   - `src/renderer/lib/__tests__/layers.test.ts` — 6 tests: registry ids and groups, every scene item has a switch, online imagery entry, visibility defaults, scene and imagery mapping
   - `src/renderer/lib/__tests__/timeline.test.ts` — 5 tests: RTT stats, samples, loss, latency jumps, location kinds, screen reader text
   - `src/renderer/lib/__tests__/hoverCard.test.ts` — 7 tests: card content (anycast, private, no reply, conflict), placement next to the pointer or a timeline hop, always inside the window
-  - `src/renderer/lib/__tests__/commands.test.ts` — 9 tests: registry contents, toggle titles, hop search, disabled reasons, typed host, fuzzy ranking, ⌘K vs Ctrl+K
+  - `src/renderer/lib/__tests__/commands.test.ts` — 10 tests: registry contents, toggle titles, hop search, disabled reasons (incl. no trace during an export), typed host and its place in the results, word-by-word fuzzy ranking, ⌘K vs Ctrl+K
   - `src/renderer/styles/__tests__/tokens.test.ts` — 17 tests: WCAG AA for text tokens in both themes (glass and solid), text on the globe, reduced motion and transparency rules
-  - `src/renderer/state/__tests__/uiStore.test.ts` — 6 tests: parsing saved UI preferences, defaults, saving, choices made while loading, read and write failures
+  - `src/renderer/state/__tests__/uiStore.test.ts` — 6 tests: parsing saved UI preferences, defaults, saving, choices made while the read is in flight, no writes after a failed read, write failures
   - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 6 tests: scene and fly-to through a mocked `GlobeController`, hover/select sync, input lock during export, hidden layers and imagery switches, WebGL failure message, imagery notice
   - `src/renderer/modules/app/components/__tests__/LayerPanel.test.tsx` — 3 tests: switches from the registry by group, online imagery off saved, Escape returns focus
-  - `src/renderer/modules/app/components/__tests__/HopTimeline.test.tsx` — 6 tests: RTT/loss/confidence/jumps, selection sync both ways, arrow keys/Home/End, hover sync, scroll into view, collapse saved
+  - `src/renderer/modules/app/components/__tests__/HopTimeline.test.tsx` — 7 tests: RTT/loss/confidence/jumps, selection sync both ways, arrow keys/Home/End, hover sync, scroll into view, aria-controls only to an existing list, collapse saved
   - `src/renderer/modules/app/components/__tests__/HoverCard.test.tsx` — 2 tests: content from the store with no bridge call or fetch, no card for table hover or during export
-  - `src/renderer/modules/app/components/__tests__/CommandPalette.test.tsx` — 10 tests: open/close per platform, focus return, combobox/listbox roles, fuzzy match, execute, disabled commands, typed host, focus trap, empty result, not over another dialog
+  - `src/renderer/modules/app/components/__tests__/CommandPalette.test.tsx` — 11 tests: open/close per platform, focus return, combobox/listbox roles, fuzzy match, execute, disabled commands, typed host, focus trap (Tab and presses inside the bar), empty result, not over another dialog
   - `src/renderer/modules/app/components/__tests__/Attribution.test.tsx` — 2 tests: full credit list with required notices, GIBS not used while online imagery is off
   - `src/renderer/modules/app/components/__tests__/FooterBar.test.tsx` — 1 test: a finished export's reset timer does not end the next export
-  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 14 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, hover sync, scroll to selection
+  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 15 tests: multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, hover sync, scroll to selection, focus kept when the pane collapses
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 11 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing, online tile disclosure
   - `src/renderer/modules/app/lib/__tests__/tileCache.test.ts` — 2 tests: cache size text
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on

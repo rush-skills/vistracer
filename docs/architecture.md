@@ -443,7 +443,8 @@ user zoomed into, then moves to the hop at the floor or higher.
 The online layer is also hidden from the start of such a flight
 (`OnlineImageryGate`), so the wider view during the rise loads nothing. It
 stays hidden after the flight until the user zooms, drags or tilts the globe
-(wheel, or pointer move with a button pressed; not during a flight, not
+(wheel, or a pointer move with a button held after a press on the globe;
+a press that started in a panel does not count; not during a flight, not
 while input is locked). So a view the app chose never loads online tiles,
 even when the window is moved to a larger monitor later and the floor no
 longer holds. The layer is hidden at start-up too: Cesium refines the
@@ -653,7 +654,10 @@ flowchart LR
   digits, dashes; at most 64 per map), and ids this version does not know are
   kept. A damaged section loads as the defaults without dropping the rest of
   `settings.json`. Choices made while the file loads win, and writes are
-  queued so the last one carries the latest state.
+  queued so the last one carries the latest state. When the saved choices
+  cannot be read, the app uses the defaults, says so, and writes nothing for
+  the rest of the session, so it never replaces the saved choices with
+  defaults.
 - **Design tokens** (`styles/tokens.css`): colours, radii, blur, spacing,
   type scale and durations, dark by default and light with
   `data-theme="light"` on `<html>`. `prefers-reduced-motion` sets every
@@ -706,18 +710,24 @@ theme, export PNG/WebM/GIF or open the export dialog, open settings, clear
 the tile cache, show the guide. A query that names a host ("trace x", or
 text with a dot or colon) adds "Trace x", checked like `validate_target` in
 Rust; the trace panel starts it with its current options
-(`UI_EVENTS.START_TRACE`). A command that cannot run is listed with the
-reason and does nothing. The toolbar buttons and the footer's Export route
+(`UI_EVENTS.START_TRACE`). A host with a dot or colon comes first; "trace
+<word>" comes after the matching commands, so "trace again" still offers
+"Run the last trace again" first. A command that cannot run is listed with
+the reason and does nothing. No trace starts during an export (from the bar
+or the trace panel): a new run would end the export's camera lock. The toolbar buttons and the footer's Export route
 button run the same commands by id.
 
-Search: the query as one piece of a title scores highest (more at a word
-start), then its letters in order, with runs of letters and word starts
-preferred; titles count double over group, detail and keywords.
+Search: every word of the query must match, and the scores add up. A word
+as one piece of the text scores highest (more at a word start), else its
+letters in order, with runs of letters and word starts preferred. A match
+in the title counts double over one that also uses the group, detail and
+keywords.
 
 Keyboard: ⌘K (macOS) or Ctrl+K opens and closes the bar (not over another
 modal dialog). It is a modal dialog with a combobox over a listbox: arrow
 keys move (wrapping), Enter runs, Escape closes, Tab keeps the focus in the
-search field, and the focus returns to where it was.
+search field, a press elsewhere in the bar does not take the focus from
+it, and the focus returns to where it was.
 
 ### Hop timeline and hover cards
 
