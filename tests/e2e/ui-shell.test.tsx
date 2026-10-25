@@ -201,6 +201,10 @@ describe("UI shell", () => {
 
   it("resets the trace options but keeps the target", async () => {
     renderApp();
+    // Let the start-up settle: saved choices, the skipped guide, the globe.
+    await waitFor(() => expect(useUiStore.getState().loaded).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(globe.controller.setScene).toHaveBeenCalled());
     const target = screen.getByRole("textbox", { name: "Traceroute target" }) as HTMLInputElement;
     fireEvent.change(target, { target: { value: "example.net" } });
     fireEvent.click(screen.getByRole("button", { name: "Trace options" }));

@@ -504,8 +504,13 @@ node scripts/globe-check/check.mjs [output dir]
 node scripts/globe-check/ui-shots.mjs [output dir]
 ```
 
-Result on 2026-10-25, after the phase 4 UI (24 checks pass):
+Result of one run on 2026-10-25, after the phase 4 UI (25 checks pass).
+The request counts of user zooms differ a little from run to run (the next
+user zoom made between 103 and 130 in four runs); the counts that must be
+0 were 0 in every run.
 
+- A 7680 x 2160 window at DPR 1 made 0 online tile requests in 12 s with no
+  input. Control: with the gate starting open, the same step made 161.
 - 0 animation frames and 0 WebGL draws in each 5 s idle window, and 0
   compositor frames or paints with the glass panels over the idle globe
   (a control with one animated element made 243); a 20-step drag ran
@@ -513,7 +518,7 @@ Result on 2026-10-25, after the phase 4 UI (24 checks pass):
 - A user zoom made 65 online tile requests. Selecting a hop, following a
   trace and exporting, each from that zoomed-in view, made 0. Growing the
   window from 1280 to 3840 px after those app moves made 0; the next user
-  zoom made 103.
+  zoom made 130.
 - With **Online imagery** off in the layer panel, a user drag to new ground
   and a zoom made 0 requests; switched on again, the same view made 16.
 - A 20-step drag during a WebM export made 0 WebGL draws and left the
