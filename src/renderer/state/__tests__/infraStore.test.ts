@@ -52,7 +52,10 @@ describe("infraStore", () => {
   it("loads nothing until a layer asks, then loads once", async () => {
     expect(useInfraStore.getState().sources["peeringdb-sites"].status).toBe("idle");
     expect(api.getPeeringDbSites).not.toHaveBeenCalled();
+    // The layer code (parsers, clustering, matching) comes with the first data.
+    expect(useInfraStore.getState().code).toBeUndefined();
     await useInfraStore.getState().ensure("peeringdb-sites");
+    expect(useInfraStore.getState().code?.parsePeeringDbSites).toBeTypeOf("function");
     await useInfraStore.getState().ensure("peeringdb-sites");
     expect(api.getPeeringDbSites).toHaveBeenCalledTimes(1);
     expect(readySource(useInfraStore.getState().sources, "peeringdb-sites")?.facilities).toHaveLength(1);

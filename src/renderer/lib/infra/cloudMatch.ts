@@ -1,5 +1,6 @@
 import type { HopResolution, LocationConfidence, LocationEstimate } from "@common/ipc";
 import { greatCircleKm, hopPosition } from "../globe";
+import { formatKm, regionTitle } from "./format";
 import type { CloudProvider, CloudRegion } from "./sources";
 
 /**
@@ -32,9 +33,6 @@ export interface CloudMatch {
   reason: string;
 }
 
-/** "12 km", "1,200 km"; a distance that rounds to 0 is "under 1 km". */
-export const formatKm = (value: number) =>
-  value < 0.5 ? "under 1 km" : `${Math.round(value).toLocaleString("en-US")} km`;
 const km = formatKm;
 
 /** Why an estimate cannot support a high match, or null when it can. */
@@ -44,9 +42,6 @@ function estimateDoubt(position: LocationEstimate): string | null {
   }
   return position.confidence === "low" ? "low confidence" : null;
 }
-
-export const regionTitle = (provider: CloudProvider, region: CloudRegion) =>
-  `${provider.shortName} ${region.code}${region.city !== region.name ? ` (${region.city})` : ""}`;
 
 function nearest(
   regions: readonly CloudRegion[],

@@ -1,6 +1,5 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { hoverCardContent, placeCard } from "@renderer/lib/hoverCard";
-import { siteCardContent } from "@renderer/lib/infra/siteCard";
 import { useRouteInfra } from "@renderer/hooks/useInfra";
 import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
@@ -19,12 +18,13 @@ export const HoverCard: React.FC = () => {
   const run = useTracerouteStore(selectCurrentRun);
   const hoveredSite = useInfraStore((state) => state.hoveredSite);
   const sources = useInfraStore((state) => state.sources);
+  const code = useInfraStore((state) => state.code);
   const route = useRouteInfra();
   const hop = run?.hops.find((candidate) => candidate.hopIndex === hopIndex);
   const cloud = hop ? route.cloudMatches.get(hop.hopIndex) : undefined;
   const content = useMemo(() => (hop ? hoverCardContent(hop) : null), [hop]);
   const site = useMemo(() => {
-    if (content || !hoveredSite) {
+    if (content || !hoveredSite || !code) {
       return null;
     }
     const input = {
@@ -32,8 +32,8 @@ export const HoverCard: React.FC = () => {
       cloud: readySource(sources, "cloud-regions"),
       cables: readySource(sources, "submarine-cables")
     };
-    return siteCardContent(hoveredSite, input, route);
-  }, [content, hoveredSite, sources, route]);
+    return code.siteCardContent(hoveredSite, input, route);
+  }, [content, hoveredSite, code, sources, route]);
   const anchor = content ? hopAnchor : site ? hoveredSite?.anchor : undefined;
   const cardRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ left: number; top: number }>();

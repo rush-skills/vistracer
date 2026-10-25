@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HopResolution, LocationEstimate } from "@common/ipc";
-import { formatKm, matchCloudRegion, matchCloudRegions } from "@renderer/lib/infra/cloudMatch";
+import { matchCloudRegion, matchCloudRegions } from "@renderer/lib/infra/cloudMatch";
+import { formatKm } from "@renderer/lib/infra/format";
 import { shownCloud } from "@renderer/lib/infra/scene";
 import { layerVisibility } from "@renderer/lib/layers";
 import { estimate, makeHop } from "@renderer/test/fixtures";

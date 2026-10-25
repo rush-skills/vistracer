@@ -1,7 +1,7 @@
 import React from "react";
 import type { HopResolution, LocationEstimate, PeeringDbDetails } from "@common/ipc";
 import { useRouteInfra } from "@renderer/hooks/useInfra";
-import { formatKm, regionTitle } from "@renderer/lib/infra/cloudMatch";
+import { formatKm, regionTitle } from "@renderer/lib/infra/format";
 import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { PROVIDER_LABELS, findProvider } from "../lib/providers";
 import { HINT_RULE_LABELS, SOURCE_LABELS, describeRtt, formatRadius } from "../lib/location";

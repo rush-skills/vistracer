@@ -4,7 +4,7 @@ import type { HopLocation, HopResolution, LocationEstimate, TracerouteRun } from
 import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
-import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
+import { CLOUD, INFRA_CODE, PEERINGDB } from "@renderer/test/infraFixtures";
 import { HopDetailsPane } from "../HopDetailsPane";
 
 const latency = { minRttMs: 11.9, maxRttMs: 12.2, avgRttMs: 12.05, jitterMs: 0.3 };
@@ -560,6 +560,7 @@ describe("HopDetailsPane", () => {
     };
     const run: TracerouteRun = { ...baseRun, hops: [awsHop] };
     useInfraStore.setState({
+      code: INFRA_CODE,
       sources: {
         "peeringdb-sites": { status: "ready", data: PEERINGDB },
         "cloud-regions": { status: "ready", data: CLOUD },

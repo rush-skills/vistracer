@@ -1,5 +1,5 @@
 import type { SiteLayer } from "../globe";
-import { formatKm as km, regionTitle } from "./cloudMatch";
+import { formatKm as km, regionTitle } from "./format";
 import type { InfraInput, RouteInfra } from "./scene";
 import type { SiteLink } from "./routeLinks";
 

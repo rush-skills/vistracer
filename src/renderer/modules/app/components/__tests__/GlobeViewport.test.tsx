@@ -5,7 +5,7 @@ import type { GlobeScene } from "@renderer/lib/globe";
 import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
-import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
+import { CLOUD, INFRA_CODE, PEERINGDB } from "@renderer/test/infraFixtures";
 import type { GlobeCallbacks, GlobeController } from "../globe/controller";
 import { GlobeViewport, measureInsets } from "../GlobeViewport";
 
@@ -97,6 +97,7 @@ describe("GlobeViewport", () => {
     });
     useUiStore.setState({ layers: {} });
     useInfraStore.setState({
+      code: INFRA_CODE,
       sources: {
         "peeringdb-sites": { status: "ready", data: PEERINGDB },
         "cloud-regions": { status: "ready", data: CLOUD },
@@ -298,6 +299,7 @@ describe("GlobeViewport", () => {
       rejected: 0
     };
     useInfraStore.setState({
+      code: INFRA_CODE,
       sources: {
         ...useInfraStore.getState().sources,
         "submarine-cables": { status: "ready", data: cableMap }

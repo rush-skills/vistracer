@@ -7,7 +7,8 @@ import {
   type LayerVisibility
 } from "../layers";
 import { cablePositions, guessCables, type CableGuess } from "./cableGuess";
-import { matchCloudRegions, regionTitle, type CloudMatch } from "./cloudMatch";
+import { matchCloudRegions, type CloudMatch } from "./cloudMatch";
+import { regionTitle } from "./format";
 import { cellKmForLevel, clusterSites, type Cluster } from "./cluster";
 import { linkExchanges, linkFacilities, type SiteLinks } from "./routeLinks";
 import type {

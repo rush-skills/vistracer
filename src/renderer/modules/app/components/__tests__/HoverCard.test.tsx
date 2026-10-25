@@ -5,7 +5,7 @@ import { ROUTE, makeRun } from "@renderer/test/fixtures";
 import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
-import { PEERINGDB } from "@renderer/test/infraFixtures";
+import { INFRA_CODE, PEERINGDB } from "@renderer/test/infraFixtures";
 import { HoverCard } from "../HoverCard";
 
 let bridge: Record<string, ReturnType<typeof vi.fn>>;
@@ -98,6 +98,7 @@ describe("HoverCard", () => {
   it("shows a hovered data centre cluster from the loaded list and makes no request", () => {
     useUiStore.setState({ layers: { "data-centres": true } });
     useInfraStore.setState({
+      code: INFRA_CODE,
       sources: {
         ...useInfraStore.getState().sources,
         "peeringdb-sites": { status: "ready", data: PEERINGDB }

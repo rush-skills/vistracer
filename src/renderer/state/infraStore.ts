@@ -1,12 +1,10 @@
 import { create } from "zustand";
-import {
-  parseCloudRegions,
-  parsePeeringDbSites,
-  parseSubmarineCables,
-  type CableData,
-  type CloudRegionData,
-  type InfraSourceId,
-  type PeeringDbSiteData
+import type { InfraCode } from "@renderer/lib/infra/code";
+import type {
+  CableData,
+  CloudRegionData,
+  InfraSourceId,
+  PeeringDbSiteData
 } from "@renderer/lib/infra/sources";
 import type { SiteLayer } from "@renderer/lib/globe";
 import type { HoverAnchor } from "./tracerouteStore";
@@ -46,6 +44,8 @@ export interface SiteHover {
 
 export interface InfraStore {
   sources: InfraSources;
+  /** Parsers, clustering and matching; loaded with the first layer data. */
+  code?: InfraCode;
   hoveredSite?: SiteHover;
   /**
    * Loads a source unless it is loaded or loading. A failed load, or one
@@ -67,22 +67,24 @@ export const OLD_EXCHANGE_LIST =
 
 type Loaded<T> = { data: T; note?: string } | { unavailable: string };
 
-const LOADERS: { [K in InfraSourceId]: () => Promise<Loaded<InfraData[K]>> } = {
-  "peeringdb-sites": async () => {
+type Loader<K extends InfraSourceId> = (code: InfraCode) => Promise<Loaded<InfraData[K]>>;
+
+const LOADERS: { [K in InfraSourceId]: Loader<K> } = {
+  "peeringdb-sites": async ({ parsePeeringDbSites }) => {
     const data = parsePeeringDbSites(await window.visTracer.getPeeringDbSites());
     if (!data) {
       return { unavailable: NO_EXCHANGE_LIST };
     }
     return { data, note: data.complete ? undefined : OLD_EXCHANGE_LIST };
   },
-  "cloud-regions": async () => {
+  "cloud-regions": async ({ parseCloudRegions }) => {
     const response = await fetch("./infra/cloud-regions.json");
     if (!response.ok) {
       throw new Error(`The bundled cloud region file did not load (HTTP ${response.status}).`);
     }
     return { data: parseCloudRegions(await response.json()) };
   },
-  "submarine-cables": async () => {
+  "submarine-cables": async ({ parseSubmarineCables }) => {
     // The backend downloads only when the saved settings have the layer on
     // and its notice accepted, so the switch must be written first.
     await useUiStore.getState().whenSaved();
@@ -97,13 +99,25 @@ const INITIAL: InfraSources = {
   "submarine-cables": { status: "idle" }
 };
 
+// One import for every source; a failed import (a missing chunk) is tried again.
+let codeImport: Promise<InfraCode> | undefined;
+const importCode = () =>
+  (codeImport ??= import("@renderer/lib/infra/code").catch((error: unknown) => {
+    codeImport = undefined;
+    throw error;
+  }));
+
 export const useInfraStore = create<InfraStore>((set, get) => {
   const load = async (id: InfraSourceId) => {
     const update = (state: SourceState<InfraData[typeof id]>) =>
       set((store) => ({ sources: { ...store.sources, [id]: state } }));
     update({ status: "loading" });
     try {
-      const loaded = await LOADERS[id]();
+      const code = get().code ?? (await importCode());
+      if (!get().code) {
+        set({ code });
+      }
+      const loaded = await LOADERS[id](code);
       if ("data" in loaded && loaded.data.rejected > 0) {
         // One bad record never hides the others; the count says the source changed shape.
         console.warn(

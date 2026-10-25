@@ -1,3 +1,5 @@
+import * as infraCode from "@renderer/lib/infra/code";
+import type { InfraCode } from "@renderer/lib/infra/code";
 import type {
   CableData,
   CloudProvider,
@@ -9,6 +11,9 @@ import type {
 } from "@renderer/lib/infra/sources";
 
 /** Small, parsed infrastructure data for renderer tests. */
+
+/** The lazily loaded layer code, for tests that put data in the infra store directly. */
+export const INFRA_CODE: InfraCode = infraCode;
 
 export const exchange = (
   id: number,
