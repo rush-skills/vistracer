@@ -271,7 +271,7 @@ impl<F: Fetcher> CableService<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::upstream::Fetched;
+    use crate::upstream::{FetchError, Fetched};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
@@ -295,16 +295,20 @@ mod tests {
     }
 
     impl Fetcher for FakeFetcher {
-        async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, String> {
+        async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, FetchError> {
             assert_eq!(url.as_str(), CABLE_URL);
             self.calls.fetch_add(1, Ordering::SeqCst);
             tokio::time::sleep(Duration::from_millis(5)).await;
             let mut replies = self.replies.lock().unwrap();
-            if replies.len() > 1 {
+            let reply = if replies.len() > 1 {
                 replies.remove(0)
             } else {
                 replies[0].clone()
-            }
+            };
+            reply.map_err(|message| FetchError {
+                message,
+                sent: true,
+            })
         }
     }
 

@@ -577,9 +577,9 @@ impl<F: TileFetcher> TileService<F> {
         }
         let fetched = match self.fetcher.fetch(url).await {
             Ok(fetched) => fetched,
-            Err(message) => {
+            Err(error) => {
                 self.breaker().record(false, Instant::now());
-                return Err(TileError::Upstream(message));
+                return Err(TileError::Upstream(error.message));
             }
         };
         let server_failed = fetched.status == 429 || fetched.status >= 500;
@@ -663,6 +663,7 @@ pub fn into_response(result: Result<Tile, TileError>) -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::upstream::FetchError;
     use std::sync::atomic::AtomicUsize;
 
     const JPEG: &[u8] = &[0xff, 0xd8, 0xff, 0xe0, 0, 0x10, b'J', b'F', b'I', b'F'];
@@ -721,14 +722,17 @@ mod tests {
     }
 
     impl TileFetcher for FakeFetcher {
-        async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, String> {
+        async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, FetchError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.urls.lock().unwrap().push(url.to_string());
             tokio::time::sleep(self.delay).await;
             let reply = self.reply.lock().unwrap().clone();
             match reply {
                 Reply::Ok(fetched) => Ok(fetched),
-                Reply::Fail(message) => Err(message.to_string()),
+                Reply::Fail(message) => Err(FetchError {
+                    message: message.to_string(),
+                    sent: true,
+                }),
             }
         }
     }
@@ -1302,8 +1306,9 @@ mod tests {
         assert_eq!(tile.content_type.as_deref(), Some("image/jpeg"));
         assert_eq!(tile.body, JPEG);
 
-        let huge = fetcher.fetch(url("/huge")).await;
-        assert!(huge.unwrap_err().contains("larger than"));
+        let huge = fetcher.fetch(url("/huge")).await.unwrap_err();
+        assert!(huge.message.contains("larger than"));
+        assert!(huge.sent, "the host answered: it counts as a request");
 
         let redirect = fetcher.fetch(url("/redirect")).await.unwrap();
         assert_eq!(
@@ -1314,9 +1319,18 @@ mod tests {
 
         let broken = HttpFetcher::from_client(Err("no TLS backend".into()), MAX_TILE_BYTES);
         assert_eq!(
-            broken.fetch(url("/tile")).await.err().as_deref(),
-            Some("no TLS backend")
+            broken.fetch(url("/tile")).await.unwrap_err(),
+            FetchError {
+                message: "no TLS backend".into(),
+                sent: false
+            }
         );
+        // Nothing listens on port 9 of localhost: the connection fails, no request was sent.
+        let refused = fetcher
+            .fetch(reqwest::Url::parse("http://127.0.0.1:9/tile").unwrap())
+            .await
+            .unwrap_err();
+        assert!(!refused.sent, "{}", refused.message);
     }
 
     #[tokio::test]

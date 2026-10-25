@@ -7,20 +7,24 @@
 //! (every 2 hours; a second download gets HTTP 403), only when it is
 //! needed, and to stop querying after any answer other than HTTP 200. So:
 //!
-//! - The caller passes whether the group may be downloaded
-//!   (`UiPreferences::satellite_group`, read from the saved settings at each
-//!   call). While it may not, nothing is read or sent.
+//! - The caller passes a check of whether the group may be downloaded
+//!   (`UiPreferences::satellite_group` on the saved settings). It runs when
+//!   the call starts, again after the call waited for another request, and
+//!   right before the request goes out; while it says no, nothing is read
+//!   or sent.
 //! - A saved group is used for `SATELLITE_TTL_MS`. A group is requested at
 //!   most once in `MIN_REQUEST_INTERVAL_MS`; the time of each request is
 //!   saved before the request goes out, so a restart does not ask again.
 //! - After an HTTP error (or a 200 that is not GP data), no group is
-//!   requested for `HTTP_ERROR_PAUSE_MS`, also across restarts. A network
-//!   error (no answer at all) retries that group after
-//!   `NETWORK_ERROR_PAUSE_MS`.
+//!   requested for `HTTP_ERROR_PAUSE_MS`, also across restarts. A failure
+//!   that may have reached CelesTrak (a timeout, a broken answer) counts as
+//!   a download of that group; only a connection that failed (no request
+//!   sent) retries the group after `NETWORK_ERROR_PAUSE_MS`.
+//! - When the request log cannot be saved, no request goes out.
 //! - One request runs at a time, for all groups.
 
 use crate::atomic_file::write_atomic;
-use crate::upstream::{self, Fetcher, HttpFetcher};
+use crate::upstream::{self, FetchError, Fetcher, HttpFetcher};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -151,11 +155,11 @@ impl SatelliteError {
             Self::NotAllowed => "Satellites are off: turn the layer and the group on in Layers and accept the notice. Nothing was downloaded.".to_string(),
             Self::UnknownGroup(group) => format!("\"{group}\" is not a satellite group of this app. Nothing was downloaded."),
             Self::Waiting { until, reason } => format!(
-                "{reason} VisTracer asks CelesTrak again after {}.",
+                "{reason} VisTracer does not ask CelesTrak again before {}.",
                 clock_time(*until)
             ),
             Self::Download { message, retry_at } => format!(
-                "Could not download the orbital elements from {}: {message}. VisTracer tries again after {}.",
+                "Could not download the orbital elements from {}: {message}. VisTracer does not ask again before {}.",
                 SATELLITE_HOSTS[0],
                 clock_time(*retry_at)
             ),
@@ -353,16 +357,19 @@ async fn read_json<T: serde::de::DeserializeOwned>(path: PathBuf) -> Option<T> {
         .ok()
 }
 
-async fn write_json<T: Serialize>(path: PathBuf, value: &T) {
-    let bytes = match serde_json::to_vec(value) {
-        Ok(bytes) => bytes,
-        Err(err) => return log::warn!("Could not encode a satellite file: {err}"),
+/// Saves `value` as JSON; the error says what failed (also logged).
+async fn write_json<T: Serialize>(path: PathBuf, value: &T) -> Result<(), String> {
+    let bytes =
+        serde_json::to_vec(value).map_err(|e| format!("could not encode a satellite file: {e}"))?;
+    let result = match tokio::task::spawn_blocking(move || write_atomic(&path, &bytes)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(format!("could not save a satellite file: {err}")),
+        Err(err) => Err(format!("the satellite file write task failed: {err}")),
     };
-    match tokio::task::spawn_blocking(move || write_atomic(&path, &bytes)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => log::warn!("Could not save a satellite file: {err}"),
-        Err(err) => log::warn!("Satellite file write task failed: {err}"),
+    if let Err(message) = &result {
+        log::warn!("{message}");
     }
+    result
 }
 
 impl<F: Fetcher> SatelliteService<F> {
@@ -406,16 +413,23 @@ impl<F: Fetcher> SatelliteService<F> {
     }
 
     /// The group's elements, from memory, the disk or a download. `allowed`
-    /// comes from the saved settings; while it is false nothing is read or sent.
+    /// reads the saved settings: it is asked when the call starts, after the
+    /// call waited for another request, and right before the request goes
+    /// out. While it says no, nothing is read or sent.
     pub async fn get(
         &self,
         def: &'static SatelliteGroupDef,
-        allowed: bool,
+        allowed: impl Fn() -> bool,
     ) -> Result<Arc<SatelliteGroup>, SatelliteError> {
-        if !allowed {
+        if !allowed() {
             return Err(SatelliteError::NotAllowed);
         }
         let mut guard = self.state.lock().await;
+        // Another request may have run meanwhile, and the user may have
+        // turned the layer off during it.
+        if !allowed() {
+            return Err(SatelliteError::NotAllowed);
+        }
         // Fields are borrowed apart below (the request log and the groups).
         let state = &mut *guard;
         let now = (self.now)();
@@ -435,62 +449,31 @@ impl<F: Fetcher> SatelliteService<F> {
             state.log = Some(read_json(self.log_path()).await.unwrap_or_default());
         }
         let log = state.log.get_or_insert_with(RequestLog::default);
-        let wait = Self::next_request(log, def).filter(|(until, _)| now < *until);
-        let failure = match wait {
+        let failure = match Self::next_request(log, def).filter(|(until, _)| now < *until) {
             Some((until, reason)) => SatelliteError::Waiting { until, reason },
             None => {
-                let url = group_url(def);
-                debug_assert!(upstream::is_allowed(&url, SATELLITE_HOSTS));
                 // Saved before the request goes out: a crash or restart
-                // during the request must not lead to a second one.
+                // during the request must not lead to a second one, so no
+                // request goes out when the log cannot be saved.
                 let previous = log.requested_at.insert(def.group.to_string(), now);
-                write_json(self.log_path(), log).await;
-                match self.fetcher.fetch(url.clone()).await {
-                    Err(message) => {
-                        // No answer: this does not count as a download.
-                        match previous {
-                            Some(at) => log.requested_at.insert(def.group.to_string(), at),
-                            None => log.requested_at.remove(def.group),
-                        };
-                        let retry_at = now + NETWORK_ERROR_PAUSE_MS;
-                        log.retry_at
-                            .insert(def.group.to_string(), (retry_at, message.clone()));
-                        write_json(self.log_path(), log).await;
-                        log::warn!("CelesTrak request for {} failed: {message}", def.group);
-                        SatelliteError::Download { message, retry_at }
+                let logged = write_json(self.log_path(), log).await;
+                if let Err(message) = logged {
+                    restore(&mut log.requested_at, def.group, previous);
+                    SatelliteError::Download {
+                        message: format!("VisTracer {message}, so it sent no request"),
+                        retry_at: now + NETWORK_ERROR_PAUSE_MS,
                     }
-                    Ok(fetched) => {
-                        let parsed = if fetched.status == 200 {
-                            parse_gp_csv(&fetched.body).map_err(|e| format!("not usable ({e})"))
-                        } else {
-                            Err(format!("HTTP {}", fetched.status))
-                        };
-                        log.retry_at.remove(def.group);
-                        match parsed {
-                            Ok(satellites) => {
-                                write_json(self.log_path(), log).await;
-                                let group = Arc::new(SatelliteGroup {
-                                    group: def.group.to_string(),
-                                    fetched_at: now,
-                                    source: url.to_string(),
-                                    note: None,
-                                    satellites,
-                                });
-                                write_json(self.group_path(def), &*group).await;
-                                state.loaded.insert(def.group, group.clone());
-                                return Ok(group);
-                            }
-                            Err(problem) => {
-                                // The usage policy: stop after an answer that is not
-                                // HTTP 200 with data; asking again changes nothing.
-                                let until = now + HTTP_ERROR_PAUSE_MS;
-                                let reason = format!("CelesTrak's answer to the {} request was {problem}; its usage policy asks apps to stop after an error.", def.group);
-                                log.paused_until = Some((until, reason.clone()));
-                                write_json(self.log_path(), log).await;
-                                log::warn!("{reason}");
-                                SatelliteError::Waiting { until, reason }
-                            }
+                } else if !allowed() {
+                    restore(&mut log.requested_at, def.group, previous);
+                    let _ = write_json(self.log_path(), log).await;
+                    return Err(SatelliteError::NotAllowed);
+                } else {
+                    match self.download(def, log, now, previous).await {
+                        Ok(group) => {
+                            state.loaded.insert(def.group, group.clone());
+                            return Ok(group);
                         }
+                        Err(failure) => failure,
                     }
                 }
             }
@@ -507,13 +490,91 @@ impl<F: Fetcher> SatelliteService<F> {
             None => Err(failure),
         }
     }
+
+    /// One request for `def`, its answer and the request log after it.
+    async fn download(
+        &self,
+        def: &'static SatelliteGroupDef,
+        log: &mut RequestLog,
+        now: i64,
+        previous: Option<i64>,
+    ) -> Result<Arc<SatelliteGroup>, SatelliteError> {
+        let url = group_url(def);
+        debug_assert!(upstream::is_allowed(&url, SATELLITE_HOSTS));
+        let answer = self.fetcher.fetch(url.clone()).await;
+        log.retry_at.remove(def.group);
+        let parsed = match answer {
+            Err(FetchError {
+                message,
+                sent: false,
+            }) => {
+                // No request reached CelesTrak: not a download.
+                restore(&mut log.requested_at, def.group, previous);
+                let retry_at = now + NETWORK_ERROR_PAUSE_MS;
+                log.retry_at
+                    .insert(def.group.to_string(), (retry_at, message.clone()));
+                let _ = write_json(self.log_path(), log).await;
+                log::warn!("CelesTrak request for {} failed: {message}", def.group);
+                return Err(SatelliteError::Download { message, retry_at });
+            }
+            Err(FetchError {
+                message,
+                sent: true,
+            }) => {
+                // It may have reached CelesTrak: it counts as this group's
+                // download, so the group waits the full interval.
+                let _ = write_json(self.log_path(), log).await;
+                log::warn!("CelesTrak request for {} failed: {message}", def.group);
+                return Err(SatelliteError::Download {
+                    message,
+                    retry_at: now + MIN_REQUEST_INTERVAL_MS,
+                });
+            }
+            Ok(fetched) if fetched.status == 200 => {
+                parse_gp_csv(&fetched.body).map_err(|e| format!("not usable ({e})"))
+            }
+            Ok(fetched) => Err(format!("HTTP {}", fetched.status)),
+        };
+        match parsed {
+            Ok(satellites) => {
+                let _ = write_json(self.log_path(), log).await;
+                let group = Arc::new(SatelliteGroup {
+                    group: def.group.to_string(),
+                    fetched_at: now,
+                    source: url.to_string(),
+                    note: None,
+                    satellites,
+                });
+                let _ = write_json(self.group_path(def), &*group).await;
+                Ok(group)
+            }
+            Err(problem) => {
+                // The usage policy: stop after an answer that is not HTTP 200
+                // with data; asking again changes nothing.
+                let until = now + HTTP_ERROR_PAUSE_MS;
+                let reason = format!("CelesTrak's answer to the {} request was {problem}; its usage policy asks apps to stop after an error.", def.group);
+                log.paused_until = Some((until, reason.clone()));
+                let _ = write_json(self.log_path(), log).await;
+                log::warn!("{reason}");
+                Err(SatelliteError::Waiting { until, reason })
+            }
+        }
+    }
+}
+
+/// Puts back the request time a request that did not go out had replaced.
+fn restore(requested_at: &mut BTreeMap<String, i64>, group: &str, previous: Option<i64>) {
+    match previous {
+        Some(at) => requested_at.insert(group.to_string(), at),
+        None => requested_at.remove(group),
+    };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::upstream::Fetched;
-    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
     use std::sync::Mutex;
 
     const FIXTURE: &str = include_str!("../../fixtures/satellites/gp-sample.csv");
@@ -521,17 +582,20 @@ mod tests {
     const HOUR: i64 = 3_600_000;
 
     struct FakeFetcher {
-        replies: Mutex<Vec<Result<Fetched, String>>>,
+        replies: Mutex<Vec<Result<Fetched, FetchError>>>,
         urls: Mutex<Vec<String>>,
         calls: AtomicUsize,
+        /// Cleared during a request: the user turns the layer off meanwhile.
+        switch: Option<Arc<AtomicBool>>,
     }
 
     impl FakeFetcher {
-        fn new(replies: Vec<Result<Fetched, String>>) -> Self {
+        fn new(replies: Vec<Result<Fetched, FetchError>>) -> Self {
             Self {
                 replies: Mutex::new(replies),
                 urls: Mutex::new(Vec::new()),
                 calls: AtomicUsize::new(0),
+                switch: None,
             }
         }
         fn calls(&self) -> usize {
@@ -540,10 +604,13 @@ mod tests {
     }
 
     impl Fetcher for FakeFetcher {
-        async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, String> {
+        async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, FetchError> {
             assert!(upstream::is_allowed(&url, SATELLITE_HOSTS), "{url}");
             self.urls.lock().unwrap().push(url.to_string());
             self.calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(switch) = &self.switch {
+                switch.store(false, Ordering::SeqCst);
+            }
             tokio::time::sleep(Duration::from_millis(5)).await;
             let mut replies = self.replies.lock().unwrap();
             if replies.len() > 1 {
@@ -554,7 +621,26 @@ mod tests {
         }
     }
 
-    fn reply(status: u16, body: &str) -> Result<Fetched, String> {
+    /// No request reached the host (a refused connection).
+    fn not_sent(message: &str) -> Result<Fetched, FetchError> {
+        Err(FetchError {
+            message: message.into(),
+            sent: false,
+        })
+    }
+
+    /// The host may have served it (a timeout, a broken answer).
+    fn broke_off(message: &str) -> Result<Fetched, FetchError> {
+        Err(FetchError {
+            message: message.into(),
+            sent: true,
+        })
+    }
+
+    const ON: fn() -> bool = || true;
+    const OFF: fn() -> bool = || false;
+
+    fn reply(status: u16, body: &str) -> Result<Fetched, FetchError> {
         Ok(Fetched {
             status,
             content_type: Some("text/plain; charset=UTF-8".into()),
@@ -578,7 +664,7 @@ mod tests {
     }
 
     fn service(
-        replies: Vec<Result<Fetched, String>>,
+        replies: Vec<Result<Fetched, FetchError>>,
         dir: &std::path::Path,
         clock: &Clock,
     ) -> SatelliteService<FakeFetcher> {
@@ -669,7 +755,7 @@ mod tests {
         let clock = Clock::new();
         let service = service(vec![reply(200, FIXTURE)], &dir, &clock);
         assert_eq!(
-            service.get(starlink(), false).await.unwrap_err(),
+            service.get(starlink(), OFF).await.unwrap_err(),
             SatelliteError::NotAllowed
         );
         assert_eq!(service.fetcher.calls(), 0);
@@ -684,7 +770,7 @@ mod tests {
         let dir = temp_dir();
         let clock = Clock::new();
         let first = service(vec![reply(200, FIXTURE)], &dir, &clock);
-        let (a, b) = tokio::join!(first.get(starlink(), true), first.get(starlink(), true));
+        let (a, b) = tokio::join!(first.get(starlink(), ON), first.get(starlink(), ON));
         assert_eq!(
             first.fetcher.calls(),
             1,
@@ -696,21 +782,18 @@ mod tests {
             "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=csv"
         );
         // Another group is its own request.
-        first
-            .get(group_def("gps-ops").unwrap(), true)
-            .await
-            .unwrap();
+        first.get(group_def("gps-ops").unwrap(), ON).await.unwrap();
         assert_eq!(first.fetcher.calls(), 2);
 
         // After a restart, the saved copy is used until it is 12 hours old.
         clock.advance(11 * HOUR);
         let restarted = service(vec![reply(200, FIXTURE)], &dir, &clock);
-        let saved = restarted.get(starlink(), true).await.unwrap();
+        let saved = restarted.get(starlink(), ON).await.unwrap();
         assert_eq!(restarted.fetcher.calls(), 0);
         assert_eq!(saved.satellites.len(), 4);
         assert_eq!(saved.fetched_at, T0);
         clock.advance(HOUR);
-        let refreshed = restarted.get(starlink(), true).await.unwrap();
+        let refreshed = restarted.get(starlink(), ON).await.unwrap();
         assert_eq!(restarted.fetcher.calls(), 1);
         assert_eq!(refreshed.fetched_at, T0 + 12 * HOUR);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -721,17 +804,17 @@ mod tests {
         let dir = temp_dir();
         let clock = Clock::new();
         let first = service(vec![reply(200, FIXTURE)], &dir, &clock);
-        first.get(starlink(), true).await.unwrap();
+        first.get(starlink(), ON).await.unwrap();
         // The saved copy is lost (cache cleared); the request log is not.
         std::fs::remove_file(dir.join("starlink.json")).unwrap();
         clock.advance(HOUR);
         let restarted = service(vec![reply(200, FIXTURE)], &dir, &clock);
-        let error = restarted.get(starlink(), true).await.unwrap_err();
+        let error = restarted.get(starlink(), ON).await.unwrap_err();
         assert!(matches!(error, SatelliteError::Waiting { until, .. } if until == T0 + 2 * HOUR));
         assert!(error.message().contains("one download per update"));
         assert_eq!(restarted.fetcher.calls(), 0);
         clock.advance(HOUR);
-        restarted.get(starlink(), true).await.unwrap();
+        restarted.get(starlink(), ON).await.unwrap();
         assert_eq!(restarted.fetcher.calls(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -745,28 +828,23 @@ mod tests {
             &dir,
             &clock,
         );
-        let error = first.get(starlink(), true).await.unwrap_err();
+        let error = first.get(starlink(), ON).await.unwrap_err();
         assert!(error.message().contains("HTTP 403"));
         assert!(error.message().contains("usage policy"));
         // No other group either, and not after a restart.
         let stations = group_def("stations").unwrap();
         assert!(matches!(
-            first.get(stations, true).await.unwrap_err(),
+            first.get(stations, ON).await.unwrap_err(),
             SatelliteError::Waiting { .. }
         ));
         assert_eq!(first.fetcher.calls(), 1);
         clock.advance(HOUR + 59 * 60_000);
         let restarted = service(vec![reply(200, FIXTURE)], &dir, &clock);
-        assert!(restarted.get(stations, true).await.is_err());
+        assert!(restarted.get(stations, ON).await.is_err());
         assert_eq!(restarted.fetcher.calls(), 0);
         clock.advance(60_000);
         assert_eq!(
-            restarted
-                .get(stations, true)
-                .await
-                .unwrap()
-                .satellites
-                .len(),
+            restarted.get(stations, ON).await.unwrap().satellites.len(),
             4
         );
         assert_eq!(restarted.fetcher.calls(), 1);
@@ -774,9 +852,9 @@ mod tests {
         // A 200 that is not GP data stops requests the same way.
         let html = temp_dir();
         let odd = service(vec![reply(200, "<html>maintenance</html>")], &html, &clock);
-        let error = odd.get(starlink(), true).await.unwrap_err();
+        let error = odd.get(starlink(), ON).await.unwrap_err();
         assert!(error.message().contains("not GP data"));
-        assert!(odd.get(stations, true).await.is_err());
+        assert!(odd.get(stations, ON).await.is_err());
         assert_eq!(odd.fetcher.calls(), 1);
         for path in [dir, html] {
             std::fs::remove_dir_all(path).unwrap();
@@ -788,11 +866,11 @@ mod tests {
         let dir = temp_dir();
         let clock = Clock::new();
         let service = service(
-            vec![Err("connection refused".into()), reply(200, FIXTURE)],
+            vec![not_sent("connection refused"), reply(200, FIXTURE)],
             &dir,
             &clock,
         );
-        let error = service.get(starlink(), true).await.unwrap_err();
+        let error = service.get(starlink(), ON).await.unwrap_err();
         assert_eq!(
             error,
             SatelliteError::Download {
@@ -801,16 +879,16 @@ mod tests {
             }
         );
         assert!(error.message().contains("celestrak.org"));
-        assert!(service.get(starlink(), true).await.is_err());
+        assert!(service.get(starlink(), ON).await.is_err());
         assert_eq!(service.fetcher.calls(), 1, "no retry yet");
         // Other groups are not held back by it.
         service
-            .get(group_def("gps-ops").unwrap(), true)
+            .get(group_def("gps-ops").unwrap(), ON)
             .await
             .unwrap();
         assert_eq!(service.fetcher.calls(), 2);
         clock.advance(15 * 60_000);
-        service.get(starlink(), true).await.unwrap();
+        service.get(starlink(), ON).await.unwrap();
         assert_eq!(service.fetcher.calls(), 3);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -820,10 +898,10 @@ mod tests {
         let dir = temp_dir();
         let clock = Clock::new();
         let first = service(vec![reply(200, FIXTURE)], &dir, &clock);
-        first.get(starlink(), true).await.unwrap();
+        first.get(starlink(), ON).await.unwrap();
         clock.advance(13 * HOUR);
         let later = service(vec![reply(503, "")], &dir, &clock);
-        let shown = later.get(starlink(), true).await.unwrap();
+        let shown = later.get(starlink(), ON).await.unwrap();
         assert_eq!(later.fetcher.calls(), 1);
         assert_eq!(shown.satellites.len(), 4);
         let note = shown.note.as_deref().unwrap();
@@ -840,12 +918,7 @@ mod tests {
         write_atomic(&dir.join("requests.json"), b"[1, 2").unwrap();
         let service = service(vec![reply(200, FIXTURE)], &dir, &clock);
         assert_eq!(
-            service
-                .get(starlink(), true)
-                .await
-                .unwrap()
-                .satellites
-                .len(),
+            service.get(starlink(), ON).await.unwrap().satellites.len(),
             4
         );
         assert_eq!(service.fetcher.calls(), 1);
@@ -858,6 +931,98 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[tokio::test]
+    async fn a_group_waiting_for_another_request_is_not_sent_once_the_layer_is_off() {
+        let dir = temp_dir();
+        let clock = Clock::new();
+        let on = Arc::new(AtomicBool::new(true));
+        let mut fetcher = FakeFetcher::new(vec![reply(200, FIXTURE)]);
+        // The user turns the layer off while Starlink downloads.
+        fetcher.switch = Some(on.clone());
+        let time = clock.0.clone();
+        let service =
+            SatelliteService::with_clock(fetcher, dir.clone(), move || time.load(Ordering::SeqCst));
+        let allowed = || on.load(Ordering::SeqCst);
+        let (starlink_result, gps) = tokio::join!(
+            service.get(starlink(), allowed),
+            service.get(group_def("gps-ops").unwrap(), allowed)
+        );
+        assert!(starlink_result.is_ok());
+        assert_eq!(gps.unwrap_err(), SatelliteError::NotAllowed);
+        assert_eq!(
+            service.fetcher.calls(),
+            1,
+            "only the request already under way"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_switch_is_read_again_right_before_the_request() {
+        let dir = temp_dir();
+        let clock = Clock::new();
+        let service = service(vec![reply(200, FIXTURE)], &dir, &clock);
+        // On when the call starts and after the lock, off just before the request.
+        let reads = AtomicUsize::new(0);
+        let allowed = || reads.fetch_add(1, Ordering::SeqCst) < 2;
+        assert_eq!(
+            service.get(starlink(), allowed).await.unwrap_err(),
+            SatelliteError::NotAllowed
+        );
+        assert_eq!(service.fetcher.calls(), 0);
+        // The request that did not go out is not in the log.
+        let log: RequestLog =
+            serde_json::from_slice(&std::fs::read(dir.join("requests.json")).unwrap()).unwrap();
+        assert!(log.requested_at.is_empty());
+        service.get(starlink(), ON).await.unwrap();
+        assert_eq!(service.fetcher.calls(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_broke_off_counts_as_the_groups_download() {
+        let dir = temp_dir();
+        let clock = Clock::new();
+        let service = service(
+            vec![broke_off("operation timed out"), reply(200, FIXTURE)],
+            &dir,
+            &clock,
+        );
+        let error = service.get(starlink(), ON).await.unwrap_err();
+        // CelesTrak may have served it: a retry inside 2 hours would get HTTP 403.
+        assert_eq!(
+            error,
+            SatelliteError::Download {
+                message: "operation timed out".into(),
+                retry_at: T0 + 2 * HOUR
+            }
+        );
+        clock.advance(HOUR);
+        assert!(service.get(starlink(), ON).await.is_err());
+        assert_eq!(service.fetcher.calls(), 1);
+        clock.advance(HOUR);
+        service.get(starlink(), ON).await.unwrap();
+        assert_eq!(service.fetcher.calls(), 2);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn no_request_goes_out_when_the_request_log_cannot_be_saved() {
+        // A file where the cache folder should be: nothing can be written.
+        let dir = temp_dir();
+        std::fs::write(&dir, b"not a folder").unwrap();
+        let clock = Clock::new();
+        let service = service(vec![reply(200, FIXTURE)], &dir, &clock);
+        let error = service.get(starlink(), ON).await.unwrap_err();
+        assert!(
+            error.message().contains("so it sent no request"),
+            "{}",
+            error.message()
+        );
+        assert_eq!(service.fetcher.calls(), 0);
+        std::fs::remove_file(&dir).unwrap();
+    }
+
     /// Downloads one small group from CelesTrak once:
     /// `cargo test smoke_real_celestrak -- --ignored --nocapture`.
     #[tokio::test]
@@ -866,7 +1031,7 @@ mod tests {
         let dir = temp_dir();
         let service = SatelliteService::new(satellite_fetcher(), dir.clone());
         let gps = service
-            .get(group_def("gps-ops").unwrap(), true)
+            .get(group_def("gps-ops").unwrap(), ON)
             .await
             .map_err(|e| e.message())
             .unwrap();

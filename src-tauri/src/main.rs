@@ -278,11 +278,17 @@ async fn get_satellites(
     let def = group_def(&group).ok_or_else(|| {
         commands::satellites::SatelliteError::UnknownGroup(group.clone()).message()
     })?;
-    let allowed = state
-        .store()
-        .preferences
-        .ui
-        .satellite_group(def.layer, def.default_on);
+    // Read again while the call runs: the user can turn the layer off
+    // while another group downloads.
+    let store = state.store.clone();
+    let allowed = move || {
+        store
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .preferences
+            .ui
+            .satellite_group(def.layer, def.default_on)
+    };
     let satellites = state.satellites.clone();
     satellites
         .get(def, allowed)
