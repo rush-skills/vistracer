@@ -7,7 +7,14 @@ import { HopDetailsPane } from "./components/HopDetailsPane";
 import { FooterBar } from "./components/FooterBar";
 import { OnboardingModal } from "./components/OnboardingModal";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { Toolbar } from "./components/Toolbar";
+import { LayerPanel } from "./components/LayerPanel";
+import { HopTimeline } from "./components/HopTimeline";
+import { HoverCard } from "./components/HoverCard";
+import { CommandPalette } from "./components/CommandPalette";
+import { Attribution } from "./components/Attribution";
 import { useUpdateStore } from "@renderer/state/updateStore";
+import { selectTheme, useUiStore } from "@renderer/state/uiStore";
 import { UI_EVENTS } from "./lib/uiEvents";
 import "./app.css";
 
@@ -28,6 +35,15 @@ export const App: React.FC = () => {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(true);
   const [showOnLaunch, setShowOnLaunch] = useState(true);
   const onboardingPrefsRef = useRef<OnboardingPreferences>({});
+  const theme = useUiStore(selectTheme);
+
+  useEffect(() => {
+    void useUiStore.getState().load();
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   // Check for updates in the background after start-up settles.
   useEffect(() => {
@@ -126,12 +142,30 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-shell">
-      <TopBar />
-      <div className="app-content">
-        <GlobeViewport run={currentRun} selectedHopIndex={selectedHopIndex} />
-        <HopDetailsPane run={currentRun} selectedHopIndex={selectedHopIndex} status={status} />
+      <GlobeViewport run={currentRun} selectedHopIndex={selectedHopIndex} />
+      <div className="hud">
+        <div className="hud__trace">
+          <TopBar />
+        </div>
+        <div className="hud__tools">
+          <Toolbar />
+          <LayerPanel />
+        </div>
+        <div className="hud__hops">
+          <HopDetailsPane run={currentRun} selectedHopIndex={selectedHopIndex} status={status} />
+        </div>
+        <div className="hud__timeline">
+          <HopTimeline run={currentRun} selectedHopIndex={selectedHopIndex} />
+        </div>
+        <div className="hud__status">
+          <FooterBar />
+        </div>
+        <div className="hud__credits">
+          <Attribution />
+        </div>
       </div>
-      <FooterBar />
+      <HoverCard />
+      <CommandPalette />
       <UpdateBanner />
       <OnboardingModal
         isOpen={isOnboardingOpen}

@@ -481,6 +481,19 @@ describe("HopDetailsPane", () => {
     expect(row).toBeTruthy();
     fireEvent.click(row as HTMLElement);
     expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
+
+    // Not while an animated export records: its flight would be recorded.
+    const other = screen
+      .getAllByRole("button")
+      .find((el) => el.textContent?.includes("80.81.192.96")) as HTMLElement;
+    act(() => useTracerouteStore.getState().setCaptureActive(true));
+    try {
+      fireEvent.click(other);
+      fireEvent.keyDown(other, { key: "Enter" });
+      expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
+    } finally {
+      act(() => useTracerouteStore.getState().setCaptureActive(false));
+    }
   });
 
   it("shares the hovered hop with the globe in both directions", () => {
@@ -501,6 +514,18 @@ describe("HopDetailsPane", () => {
     rerender(<HopDetailsPane run={run} status="success" />);
     expect(rowOf("72.14.204.170").className).toContain("hop-details__row--hovered");
     expect(rowOf("8.8.8.8").className).not.toContain("hop-details__row--hovered");
+  });
+
+  it("keeps the focus on the toggle when the pane collapses and expands", () => {
+    render(<HopDetailsPane run={run} status="success" />);
+    const hide = screen.getByRole("button", { name: "Hide hop details" });
+    hide.focus();
+    fireEvent.click(hide);
+    const show = screen.getByRole("button", { name: "Show hop details" });
+    expect(show.textContent).toContain("Hops (8)");
+    expect(document.activeElement).toBe(show);
+    fireEvent.click(show);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Hide hop details" }));
   });
 
   it("scrolls a hop selected on the globe into view", () => {

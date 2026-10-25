@@ -15,7 +15,7 @@ use commands::geodb_downloader::download_geo_databases;
 use commands::integrations::{EnrichmentConfig, EnrichmentService};
 use commands::persistence::{
     configure_geo_database_defaults, ensure_app_data_dirs, save_persisted_settings, AppStore,
-    IntegrationSettings, SharedStore,
+    IntegrationSettings, SharedStore, UiPreferences,
 };
 use commands::tile_cache::{
     into_response, HttpFetcher, TileCacheInfo, TileError, TileService, TileStore,
@@ -180,6 +180,7 @@ async fn get_settings(
         "geo" => serde_json::to_value(&guard.geo),
         "preferences" => serde_json::to_value(&guard.preferences),
         "preferences.onboarding" => serde_json::to_value(&guard.preferences.onboarding),
+        "preferences.ui" => serde_json::to_value(&guard.preferences.ui),
         "integrations" => serde_json::to_value(&guard.integrations),
         "cache" => serde_json::to_value(&guard.cache_settings),
         _ => Ok(serde_json::Value::Null),
@@ -205,6 +206,11 @@ async fn set_settings(
             guard.preferences.onboarding =
                 serde_json::from_value(value).map_err(|e| e.to_string())?;
         }
+        "preferences.ui" => {
+            let parsed: UiPreferences = serde_json::from_value(value)
+                .map_err(|e| format!("Invalid UI preferences: {e}"))?;
+            guard.preferences.ui = parsed.validated()?;
+        }
         "preferences" => {
             guard.preferences = serde_json::from_value(value).map_err(|e| e.to_string())?;
         }
@@ -214,6 +220,9 @@ async fn set_settings(
         _ => return Err(format!("Unknown settings key: {key}")),
     }
 
+    state
+        .tiles
+        .set_online_enabled(guard.preferences.ui.online_imagery());
     save_persisted_settings(&state.app_data_dir, &guard);
     Ok(())
 }
@@ -309,6 +318,15 @@ fn main() {
                 TileStore::new(cache_dir.join("tiles"), DEFAULT_CAP_BYTES),
                 HttpFetcher::default(),
             ));
+            // Before the webview can ask for a tile.
+            tiles.set_online_enabled(
+                store
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .preferences
+                    .ui
+                    .online_imagery(),
+            );
 
             app.manage(AppState {
                 store,

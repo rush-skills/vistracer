@@ -1,14 +1,14 @@
 .geo-warning-banner {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  background: rgba(255, 165, 0, 0.12);
-  border: 1px solid rgba(255, 165, 0, 0.3);
-  border-radius: 6px;
-  color: #ffb84d;
-  font-size: 0.85rem;
-  animation: slideIn 0.3s ease-out;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-amber-soft);
+  border: 1px solid var(--color-amber);
+  border-radius: var(--radius-control);
+  color: var(--color-amber);
+  font-size: var(--text-md);
+  animation: slideIn var(--motion-panel) var(--ease-out);
 }
 
 @keyframes slideIn {
@@ -25,7 +25,7 @@
 .geo-warning-banner__icon {
   display: flex;
   align-items: center;
-  font-size: 1.25rem;
+  font-size: var(--text-xl);
   flex-shrink: 0;
 }
 
@@ -36,17 +36,16 @@
 
 .geo-warning-banner__title {
   font-weight: 600;
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--space-1);
 }
 
 .geo-warning-banner__message {
-  opacity: 0.9;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
 }
 
 .geo-warning-banner__actions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
   align-items: center;
   flex-shrink: 0;
 }
@@ -56,31 +55,30 @@
   align-items: center;
   gap: 0.35rem;
   padding: 0.4rem 0.8rem;
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 0.85rem;
-  transition: all 0.15s ease;
+  font-size: var(--text-md);
+  transition:
+    background var(--motion-quick) ease,
+    border-color var(--motion-quick) ease;
 }
 
 .geo-warning-banner__button--primary {
-  background: rgba(255, 165, 0, 0.2);
-  border-color: rgba(255, 165, 0, 0.3);
+  background: var(--surface-2);
+  border-color: var(--color-amber);
 }
 
 .geo-warning-banner__button--primary:hover {
-  background: rgba(255, 165, 0, 0.3);
-  border-color: rgba(255, 165, 0, 0.5);
+  background: var(--surface-3);
 }
 
 .geo-warning-banner__button--dismiss {
   padding: 0.4rem;
-  opacity: 0.7;
 }
 
 .geo-warning-banner__button--dismiss:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-2);
 }

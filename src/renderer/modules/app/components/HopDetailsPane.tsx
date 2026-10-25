@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef } from "react";
+import { FiChevronsLeft, FiChevronsRight } from "react-icons/fi";
 import type { TracerouteRun } from "@common/ipc";
+import { usePanel } from "@renderer/hooks/usePanel";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { hopIndexToColor } from "@renderer/lib/globe";
 import { describeFailures, failedProviders } from "../lib/providers";
@@ -21,17 +23,33 @@ const statusLabelMap: Record<HopDetailsPaneProps["status"], string> = {
 };
 
 export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, selectedHopIndex, status }) => {
-  const setSelectedHop = useTracerouteStore((state) => state.setSelectedHop);
+  const selectHopByUser = useTracerouteStore((state) => state.selectHopByUser);
   const hoveredHopIndex = useTracerouteStore((state) => state.hoveredHopIndex);
   const setHoveredHop = useTracerouteStore((state) => state.setHoveredHop);
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
+  const [collapsed, setCollapsed] = usePanel("hops");
+  // Collapsing swaps the pane for a tab, so the focused toggle unmounts;
+  // the focus moves to the toggle that replaces it.
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const focusToggle = useRef(false);
+  const toggle = (value: boolean) => {
+    focusToggle.current = true;
+    setCollapsed(value);
+  };
+
+  useEffect(() => {
+    if (focusToggle.current) {
+      focusToggle.current = false;
+      toggleRef.current?.focus();
+    }
+  }, [collapsed]);
 
   // A hop picked on the globe (or reached during a run) scrolls into view.
   useEffect(() => {
     if (selectedHopIndex != null) {
       rowRefs.current.get(selectedHopIndex)?.scrollIntoView?.({ block: "nearest" });
     }
-  }, [selectedHopIndex]);
+  }, [selectedHopIndex, collapsed]);
 
   const hopRows = useMemo(() => {
     if (!run) return [];
@@ -51,16 +69,43 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
   const selectedHop = run?.hops.find((hop) => hop.hopIndex === selectedHopIndex);
   const notices = run?.summary.notices ?? [];
 
+  if (collapsed) {
+    return (
+      <button
+        ref={toggleRef}
+        type="button"
+        className="hop-details__expand glass"
+        aria-label="Show hop details"
+        aria-expanded={false}
+        onClick={() => toggle(false)}
+      >
+        <FiChevronsLeft aria-hidden />
+        Hops{run ? ` (${run.hops.length})` : ""}
+      </button>
+    );
+  }
+
   return (
-    <aside className="hop-details">
+    <aside className="hop-details glass" aria-label="Hop details">
       <header className="hop-details__header">
-        <div>
-          <h2>Hop timeline</h2>
+        <div className="hop-details__heading">
+          <h2>Hops</h2>
           {run?.summary.target && <p className="hop-details__target">{run.summary.target}</p>}
         </div>
         <span className={`hop-details__badge hop-details__badge--${status}`}>
           {statusLabelMap[status]}
         </span>
+        <button
+          ref={toggleRef}
+          type="button"
+          className="icon-button"
+          aria-label="Hide hop details"
+          aria-expanded={true}
+          title="Hide hop details"
+          onClick={() => toggle(true)}
+        >
+          <FiChevronsRight aria-hidden />
+        </button>
       </header>
 
       {notices.length > 0 && (
@@ -73,28 +118,24 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
 
       {!run ? (
         <div className="hop-details__empty">
-          <p>
-            Run a traceroute to inspect hop-by-hop latency, geolocation, and ASN details.
-          </p>
+          <p>Trace a host to see the latency, location and network of each hop here.</p>
         </div>
       ) : (
         <div className="hop-details__table-wrapper">
           <table className="hop-details__table">
             <thead>
               <tr>
-                <th aria-label="Color indicator"></th>
+                <th aria-label="Colour on the globe"></th>
                 <th>#</th>
                 <th>Endpoint</th>
-                <th>Latency (ms)</th>
-                <th>Loss</th>
+                <th>RTT (ms)</th>
                 <th>Location</th>
-                <th>ASN</th>
               </tr>
             </thead>
             <tbody>
               {hopRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="hop-details__row-empty">
+                  <td colSpan={5} className="hop-details__row-empty">
                     Awaiting hop responses…
                   </td>
                 </tr>
@@ -120,7 +161,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                         }
                       }}
                       className={rowClass}
-                      onClick={() => setSelectedHop(hop.hopIndex)}
+                      onClick={() => selectHopByUser(hop.hopIndex)}
                       onMouseEnter={() => setHoveredHop(hop.hopIndex)}
                       onMouseLeave={() => setHoveredHop(undefined)}
                       onFocus={() => setHoveredHop(hop.hopIndex)}
@@ -128,7 +169,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          setSelectedHop(hop.hopIndex);
+                          selectHopByUser(hop.hopIndex);
                         }
                       }}
                       tabIndex={0}
@@ -136,15 +177,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                       aria-pressed={isSelected}
                     >
                       <td>
-                        <div
-                          style={{
-                            width: "12px",
-                            height: "12px",
-                            borderRadius: "50%",
-                            backgroundColor: hopColor,
-                            margin: "0 auto"
-                          }}
-                        />
+                        <span className="hop-details__dot" style={{ backgroundColor: hopColor }} />
                       </td>
                       <td>{hop.hopIndex}</td>
                       <td>
@@ -161,17 +194,33 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                             )}
                           </span>
                           {hop.hostName && <small>{hop.hostName}</small>}
+                          {hop.asn?.asn != null && (
+                            <small>
+                              AS{hop.asn.asn}
+                              {hop.asn.name && ` ${hop.asn.name}`}
+                            </small>
+                          )}
+                          {hop.asn?.network && <small>{hop.asn.network}</small>}
+                          {failures.length > 0 && (
+                            <small className="hop-details__provider-error" title={failureSummary}>
+                              {failures.length === 1
+                                ? "1 source failed"
+                                : `${failures.length} sources failed`}
+                            </small>
+                          )}
                         </div>
                       </td>
                       <td>
                         <div className="hop-details__latency">
                           <span>{hop.latency.avgRttMs ?? "–"}</span>
-                          <small>
-                            {hop.latency.minRttMs ?? "–"}/{hop.latency.maxRttMs ?? "–"}
+                          <small title="Minimum and maximum">
+                            {hop.latency.minRttMs ?? "–"}–{hop.latency.maxRttMs ?? "–"}
                           </small>
+                          {hop.lossPercent != null && hop.lossPercent > 0 && (
+                            <small className="hop-details__loss">{hop.lossPercent}% loss</small>
+                          )}
                         </div>
                       </td>
-                      <td>{hop.lossPercent == null ? "–" : `${hop.lossPercent}%`}</td>
                       <td>
                         <div className="hop-details__location">
                           <span>
@@ -201,20 +250,6 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                                 {hop.location.best.confidence}
                               </span>{" "}
                               {formatRadius(hop.location.best.radiusKm)}
-                            </small>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="hop-details__asn-cell">
-                          <div>{hop.asn?.asn ? `AS${hop.asn.asn}` : "–"}</div>
-                          {hop.asn?.name && <small>{hop.asn.name}</small>}
-                          {hop.asn?.network && <small>{hop.asn.network}</small>}
-                          {failures.length > 0 && (
-                            <small className="hop-details__provider-error" title={failureSummary}>
-                              {failures.length === 1
-                                ? "1 source failed"
-                                : `${failures.length} sources failed`}
                             </small>
                           )}
                         </div>

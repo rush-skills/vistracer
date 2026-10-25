@@ -1,24 +1,70 @@
 .app-shell {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: 100vh;
+  position: relative;
   height: 100vh;
   width: 100%;
-  background: radial-gradient(circle at 20% 20%, rgba(95, 168, 151, 0.12), transparent 60%),
-    radial-gradient(circle at 80% 30%, rgba(201, 168, 87, 0.12), transparent 55%),
-    var(--color-background);
-  color: var(--color-text);
   overflow: hidden;
+  background: var(--color-space);
+  color: var(--color-text);
 }
 
-.app-content {
+/*
+ * Panels float over the full-bleed globe. The grid itself lets pointer
+ * events through to the globe; only the panels (.glass and the controls in
+ * them) take input. The globe never resizes when a panel opens or closes,
+ * so panel changes wake no globe frames.
+ */
+.hud {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-hud);
   display: grid;
-  grid-template-columns:
-    minmax(clamp(320px, 52vw, 960px), 1fr)
-    minmax(clamp(280px, 48vw, 720px), 1fr);
-  gap: clamp(1px, 0.4vw, 16px);
-  background-color: var(--color-border);
-  min-height: 0; /* Allow grid items to shrink below content size */
-  height: 100%;
-  overflow: hidden; /* Contain children */
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "trace tools"
+    ". hops"
+    "timeline hops"
+    "status credits";
+  gap: var(--space-3);
+  padding: var(--space-3);
+  pointer-events: none;
+}
+
+.hud__trace {
+  grid-area: trace;
+  min-width: 0;
+}
+
+.hud__tools {
+  grid-area: tools;
+  position: relative;
+  justify-self: end;
+}
+
+.hud__hops {
+  grid-area: hops;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-height: 0;
+}
+
+.hud__timeline {
+  grid-area: timeline;
+  align-self: end;
+  justify-self: start;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hud__status {
+  grid-area: status;
+  align-self: end;
+  min-width: 0;
+}
+
+.hud__credits {
+  grid-area: credits;
+  align-self: end;
+  justify-self: end;
 }

@@ -36,6 +36,7 @@ import {
 } from "@renderer/lib/globe";
 import {
   BUNDLED_IMAGERY,
+  CanvasDrag,
   NIGHT_BRIGHTNESS,
   ONLINE_IMAGERY,
   OnlineImageryGate,
@@ -43,6 +44,7 @@ import {
   nightImageryShare,
   onlineTileTemplate
 } from "@renderer/lib/imagery";
+import { prefersReducedMotion } from "@renderer/lib/motion";
 import { GOVERNOR_RULES, RenderGovernor, renderQuality } from "@renderer/lib/renderGovernor";
 import type { CreateGlobe } from "./controller";
 
@@ -188,18 +190,33 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     scene.imageryLayers.add(onlineLayer);
   }
   const onlineGate = new OnlineImageryGate();
+  let onlineEnabled = true;
+  let dayNight = true;
+  // Switched off, the online layer is not in the collection at all, so
+  // Cesium cannot ask it for a tile. Switched on, the gate decides.
   const syncOnlineLayer = () => {
-    if (onlineLayer) {
-      onlineLayer.show = onlineGate.visible;
+    if (!onlineLayer) {
+      return;
     }
+    const inScene = scene.imageryLayers.contains(onlineLayer);
+    if (!onlineEnabled && inScene) {
+      scene.imageryLayers.remove(onlineLayer, false);
+    } else if (onlineEnabled && !inScene) {
+      scene.imageryLayers.add(onlineLayer);
+    }
+    onlineLayer.show = onlineGate.visible;
   };
+  // Hidden from the start, until the user moves the camera.
+  syncOnlineLayer();
   // Runs only for frames that are drawn anyway, so it adds no frames.
   const removePreRender = scene.preRender.addEventListener(() => {
-    const share = nightImageryShare(
-      Cartesian3.magnitude(camera.positionWC),
-      globe.lightingFadeOutDistance,
-      globe.lightingFadeInDistance
-    );
+    const share = dayNight
+      ? nightImageryShare(
+          Cartesian3.magnitude(camera.positionWC),
+          globe.lightingFadeOutDistance,
+          globe.lightingFadeInDistance
+        )
+      : 0;
     nightLayer.nightAlpha = share;
     for (const layer of dayLayers) {
       layer.nightAlpha = 1 - share;
@@ -295,14 +312,17 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
 
   let hovered: number | undefined;
   let hoverPosition: Cartesian2 | undefined;
+  let hoverClient: { x: number; y: number } | undefined;
   let hoverTimer: number | undefined;
+  // While a hop stays under the pointer, each pick (at most every
+  // HOVER_PICK_MS) passes the new pointer position for the hover card.
   const setHovered = (hopIndex: number | undefined) => {
-    if (hopIndex === hovered) {
+    if (hopIndex === hovered && hopIndex == null) {
       return;
     }
     hovered = hopIndex;
     canvas.style.cursor = hopIndex == null ? "" : "pointer";
-    callbacks.onHoverHop(hopIndex);
+    callbacks.onHoverHop(hopIndex, hopIndex == null ? undefined : hoverClient);
   };
   const pickHover = () => {
     hoverTimer = undefined;
@@ -315,24 +335,39 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     }
     governor.wake();
   };
+  const drag = new CanvasDrag();
+  const onPointerDown = () => {
+    drag.pressOnCanvas();
+    governor.wake();
+  };
+  const onPointerRelease = () => drag.release();
   const onPointerMove = (event: PointerEvent) => {
     if (event.buttons !== 0) {
-      // A drag rotates, zooms or tilts the camera; picking would only slow it down.
-      userMovedCamera();
+      // A drag rotates, zooms or tilts the camera; picking would only slow
+      // it down. A press that started outside the globe moves nothing.
+      if (drag.isDragging(event.buttons)) {
+        userMovedCamera();
+      }
       return;
     }
+    drag.release();
     const rect = canvas.getBoundingClientRect();
     hoverPosition = new Cartesian2(event.clientX - rect.left, event.clientY - rect.top);
+    hoverClient = { x: event.clientX, y: event.clientY };
     hoverTimer ??= window.setTimeout(pickHover, HOVER_PICK_MS);
   };
   const onPointerLeave = () => {
     hoverPosition = undefined;
+    hoverClient = undefined;
     window.clearTimeout(hoverTimer);
     hoverTimer = undefined;
     setHovered(undefined);
   };
-  canvas.addEventListener("pointerdown", wake);
+  canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", wake);
+  // The release can happen over a panel or outside the window.
+  window.addEventListener("pointerup", onPointerRelease);
+  window.addEventListener("pointercancel", onPointerRelease);
   canvas.addEventListener("wheel", userMovedCamera, { passive: true });
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerleave", onPointerLeave);
@@ -393,7 +428,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     .catch(() => undefined);
 
   const sunTimer = window.setInterval(() => scene.requestRender(), GOVERNOR_RULES.sunRefreshMs);
-  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const reducedMotion = prefersReducedMotion();
 
   scene.requestRender();
 
@@ -460,8 +495,9 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     },
 
     flyTo(focus) {
-      // Cancelling a running app flight shows the online layer again; this
-      // flight hides it until it ends.
+      // A new app flight cancels the running one. The cancelled flight only
+      // ends the gate's flight state; OnlineImageryGate keeps the online
+      // layer hidden until the user moves the camera.
       camera.cancelFlight();
       const position = camera.positionCartographic;
       const floor = bundledOnlyHeight({
@@ -524,6 +560,15 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       onlineGate.setInputLocked(!enabled);
     },
 
+    setImagery(options) {
+      dayNight = options.dayNight;
+      globe.enableLighting = dayNight;
+      nightLayer.show = dayNight;
+      onlineEnabled = options.online;
+      syncOnlineLayer();
+      scene.requestRender();
+    },
+
     destroy() {
       destroyed = true;
       governor.dispose();
@@ -536,8 +581,10 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       removePreRender();
       resizeObserver.disconnect();
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      canvas.removeEventListener("pointerdown", wake);
+      canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointerup", wake);
+      window.removeEventListener("pointerup", onPointerRelease);
+      window.removeEventListener("pointercancel", onPointerRelease);
       canvas.removeEventListener("wheel", userMovedCamera);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);

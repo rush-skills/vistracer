@@ -51,18 +51,28 @@ The layer ids and the maximum level in the script must match
 The tile requests show NASA the approximate areas of the globe you zoom
 into; they carry no addresses. Automatic camera moves (following a trace,
 selecting a hop, exports) stay at or above the height where the globe uses
-only bundled imagery, and online tiles stay off after them until you zoom,
-drag or tilt the globe yourself. So they download nothing and do not trace
-your route for NASA. Night imagery has no online layer: it fades out as the camera
-comes close, where the day imagery takes over (see
-[architecture.md](./architecture.md#globe)).
+only bundled imagery. Online tiles stay off at start-up and after such moves
+until you zoom, drag or tilt the globe yourself. So automatic moves download
+nothing and do not trace your route for NASA. Night imagery has no online
+layer: it fades out as the camera comes close, where the day imagery takes
+over (see [architecture.md](./architecture.md#globe)).
 
 ## Credits shown in the app
 
-The globe shows "Imagery: NASA Blue Marble and Black Marble, served by NASA
-GIBS (ESDIS) · Globe: CesiumJS" in its lower right corner. Cesium's own
-credit box is hidden: its links would open in the app window instead of a
-browser.
+A small "NASA, GIBS, CesiumJS" button in the globe's lower right corner opens
+the full list (`src/renderer/lib/attribution.ts`; keep it in step with this
+file): CesiumJS, NASA Blue Marble and Black Marble, NASA GIBS with the
+acknowledgement GIBS asks for (see the table above), Natural Earth, MaxMind
+GeoLite2 with MaxMind's notice ("This product includes GeoLite2 data created
+by MaxMind, available from https://www.maxmind.com."), PeeringDB,
+OurAirports, Team Cymru, RDAP and RIPEstat.
+
+GIBS served the bundled day and night tiles (the build script asks the GIBS
+WMS for them, see above) as well as the online tiles. So the GIBS credit and
+its acknowledgement show at all times, and the button text does not change.
+While online imagery is off in the layer panel, the GIBS entry only adds
+"Online tiles: off". Cesium's own credit box is hidden, and the list has no
+links: a link would open in the app window instead of a browser.
 
 Sources checked on 2026-10-25:
 

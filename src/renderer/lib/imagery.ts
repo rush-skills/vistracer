@@ -63,17 +63,23 @@ export function bundledOnlyHeight(inputs: RefinementInputs): number {
 }
 
 /**
- * Whether the online imagery layer may load tiles. A camera move the app
- * makes hides it, and it stays hidden after the move until the user zooms,
- * drags or tilts the globe; from then on only the user's own view loads
- * online tiles. So a view the app chose never loads them, whatever the
- * window size does later. Input during a flight or while input is locked
- * (exports) does not count: Cesium ignores it.
+ * Whether the online imagery layer may load tiles. The layer is hidden at
+ * start, and every camera move the app makes hides it again; it stays hidden
+ * until the user zooms, drags or tilts the globe. So only the user's own view
+ * loads online tiles: not the start view (which a very wide window could
+ * otherwise refine past the bundled levels), and not a view the app chose,
+ * whatever the window size does later.
+ *
+ * Input while input is locked (exports) does not count: the camera ignores
+ * it. Input during an app flight does not count either. Cesium can apply it
+ * during the move step of a two-step flight (the rise step's completion turns
+ * `enableInputs` back on after the move step starts), but the flight sets the
+ * camera again on every frame, and the layer stays hidden.
  */
 export class OnlineImageryGate {
   private flying = false;
   private locked = false;
-  private heldByApp = false;
+  private heldByApp = true;
 
   get visible(): boolean {
     return !this.heldByApp;
@@ -103,6 +109,32 @@ export class OnlineImageryGate {
 }
 
 /**
+ * Whether a pointer move with a button held is the user dragging the globe.
+ * Only a press that started on the globe canvas moves the camera: a press
+ * in a panel (selecting text in the hop table) that crosses the globe does
+ * not, so it must not release OnlineImageryGate either.
+ */
+export class CanvasDrag {
+  private pressed = false;
+
+  pressOnCanvas(): void {
+    this.pressed = true;
+  }
+
+  release(): void {
+    this.pressed = false;
+  }
+
+  /** `buttons` of the pointer move; 0 also ends a press whose release was missed. */
+  isDragging(buttons: number): boolean {
+    if (buttons === 0) {
+      this.pressed = false;
+    }
+    return this.pressed;
+  }
+}
+
+/**
  * Cesium darkens the night side to 30 % of the imagery colour; the city
  * lights are brightened to make up for it.
  */
@@ -126,9 +158,6 @@ export function nightImageryShare(
   }
   return Math.min(1, Math.max(0, (cameraDistanceM - fadeOutM) / (fadeInM - fadeOutM)));
 }
-
-export const IMAGERY_CREDIT =
-  "Imagery: NASA Blue Marble and Black Marble, served by NASA GIBS (ESDIS)";
 
 /**
  * URL template for online tiles, or null outside the desktop app (a plain

@@ -1,0 +1,77 @@
+.attribution {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Small and quiet: on the globe, but never over the route. */
+.attribution__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: var(--globe-chip-bg);
+  color: var(--color-on-globe);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.attribution__toggle:hover,
+.attribution__toggle[aria-expanded="true"] {
+  background: var(--glass-bg-solid);
+  color: var(--color-text);
+}
+
+.attribution__panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  z-index: var(--z-popover);
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-xs);
+}
+
+.attribution__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.attribution__header h2 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.attribution__group h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.attribution__group ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attribution__group small {
+  display: block;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.attribution__notice {
+  margin-top: 2px;
+  font-style: italic;
+}

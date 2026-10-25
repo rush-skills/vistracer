@@ -7,8 +7,9 @@ import {
   nextCameraFocus,
   type CameraTracker
 } from "@renderer/lib/globe";
-import { IMAGERY_CREDIT } from "@renderer/lib/imagery";
+import { imageryForLayers, layerVisibility, sceneForLayers } from "@renderer/lib/layers";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
+import { useUiStore } from "@renderer/state/uiStore";
 import type { GlobeController } from "./globe/controller";
 import "./GlobeViewport.css";
 
@@ -23,6 +24,8 @@ const IMAGERY_NOTICE_MS = 30_000;
 export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIndex }) => {
   const hoveredHopIndex = useTracerouteStore((state) => state.hoveredHopIndex);
   const captureActive = useTracerouteStore((state) => state.captureActive);
+  const savedLayers = useUiStore((state) => state.layers);
+  const visibility = useMemo(() => layerVisibility(savedLayers), [savedLayers]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [controller, setController] = useState<GlobeController | null>(null);
   const [loadError, setLoadError] = useState<string>();
@@ -38,15 +41,16 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
     let created: GlobeController | null = null;
     let disposed = false;
     let noticeTimer: number | undefined;
-    const { setSelectedHop, setHoveredHop } = useTracerouteStore.getState();
+    const { selectHopByUser, setHoveredHop } = useTracerouteStore.getState();
     import("./globe/cesiumGlobe")
       .then(({ createCesiumGlobe }) => {
         if (disposed) {
           return;
         }
         created = createCesiumGlobe(container, {
-          onSelectHop: setSelectedHop,
-          onHoverHop: setHoveredHop,
+          onSelectHop: selectHopByUser,
+          onHoverHop: (hopIndex, at) =>
+            setHoveredHop(hopIndex, at && { kind: "point", x: at.x, y: at.y }),
           onImageryError: () => {
             setImageryNotice(true);
             window.clearTimeout(noticeTimer);
@@ -71,13 +75,18 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
 
   const hops = useMemo(() => run?.hops ?? [], [run]);
   const scene = useMemo(
-    () => buildGlobeScene(hops, selectedHopIndex, hoveredHopIndex),
-    [hops, selectedHopIndex, hoveredHopIndex]
+    () => sceneForLayers(buildGlobeScene(hops, selectedHopIndex, hoveredHopIndex), visibility),
+    [hops, selectedHopIndex, hoveredHopIndex, visibility]
   );
+  const imagery = useMemo(() => imageryForLayers(visibility), [visibility]);
 
   useEffect(() => {
     controller?.setScene(scene);
   }, [controller, scene]);
+
+  useEffect(() => {
+    controller?.setImagery(imagery);
+  }, [controller, imagery]);
 
   useEffect(() => {
     if (!controller) {
@@ -107,14 +116,11 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
       {!loadError && run && !hasRenderableHops && (
         <p className="globe-viewport__overlay">Waiting for geolocation data…</p>
       )}
-      <footer className="globe-viewport__credits">
-        {imageryNotice && (
-          <span className="globe-viewport__notice" role="status">
-            Detailed imagery is unavailable (offline?); showing the bundled imagery.
-          </span>
-        )}
-        <span>{IMAGERY_CREDIT} · Globe: CesiumJS</span>
-      </footer>
+      {imageryNotice && (
+        <p className="globe-viewport__notice" role="status">
+          Detailed imagery is unavailable (offline?); showing the bundled imagery.
+        </p>
+      )}
     </section>
   );
 };

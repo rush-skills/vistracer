@@ -46,7 +46,10 @@ This architecture ensures you get authentic network diagnostics from your actual
 - GeoIP/ASN enrichment via local MaxMind GeoLite2 databases.
 - Enrichment through Team Cymru, RDAP, RIPEstat and PeeringDB, with retry/backoff, per-provider rate limits and a 7-day cache. A failed provider never hides the GeoLite2 data.
 - Hop locations from several sources (PeeringDB exchange LANs, router host names, GeoLite2), checked against the speed of light, with an honest confidence and radius per hop. Anycast addresses are marked and not drawn at a fake point.
-- 3D globe (CesiumJS) with NASA Blue Marble and Black Marble imagery bundled for offline use, raised great-circle arcs coloured by latency bands, per-hop markers and an uncertainty ring true to scale. Hover and selection stay in step with the hop table.
+- 3D globe (CesiumJS) with NASA Blue Marble and Black Marble imagery bundled for offline use, raised great-circle arcs coloured by latency bands, per-hop markers and an uncertainty ring true to scale. The globe fills the window; the controls float over it on translucent panels, in a dark or a light theme.
+- Hop timeline with each hop's RTT (average, min-max, every probe), loss and location confidence; latency jumps (such as an ocean cable) are marked. Selection and hover stay in step between the globe, the timeline and the hop table, and hovering a hop shows a compact card.
+- Layer panel: show or hide route arcs, hop markers, confidence rings, anycast reach, labels, day/night shading and online imagery.
+- Command bar (⌘K on macOS, Ctrl+K on Windows and Linux) for everything the app does, from the keyboard.
 - Battery-friendly rendering: the globe draws only when something changes, and stops completely when idle, hidden or minimized.
 - Detailed hop table with RTT stats, packet loss, location and ASN metadata (including PeeringDB facility context when available).
 - Snapshot and animation exports saved directly to your downloads folder (PNG/JPG/WebP for stills, WebM/GIF for animated routes).
@@ -67,11 +70,11 @@ VisTracer can provide rich geographic visualization and network details when Max
 **Quick Setup:**
 1. Create a free MaxMind account at https://www.maxmind.com/en/geolite2/signup
 2. Download `GeoLite2-City.mmdb` and `GeoLite2-ASN.mmdb`
-3. Launch VisTracer, open the settings gear beside the traceroute form, and browse to the downloaded files under **GeoIP databases**
+3. Launch VisTracer, open the settings (gear in the toolbar, top right), and browse to the downloaded files under **GeoIP databases**
 
 **For detailed setup instructions**, including custom paths and troubleshooting, see [GEOLITE2_SETUP.md](./GEOLITE2_SETUP.md).
 
-If databases are missing, a warning banner will appear in the footer. The same settings modal can be opened directly from the banner or the gear icon—no restart required.
+If databases are missing, a warning banner appears in the status bar (bottom left). The same settings can be opened from the banner or the gear icon; no restart is needed.
 
 ### External Enrichment Providers
 
@@ -85,7 +88,7 @@ In addition to GeoLite2, VisTracer looks up each public hop address in these reg
 | **PeeringDB** | Network type, peering policy, IXP and facility counts per ASN | optional API key (higher rate limit) | off |
 | **Internet exchanges** | PeeringDB's public exchange list, used to place hops at an exchange. Nothing about your route is sent. | none (uses the PeeringDB key if one is saved) | on |
 
-- Turn each provider on or off in **Integration settings** (gear icon) or with the quick toggles under the target field. The settings also hold the RDAP base URL and the PeeringDB API key.
+- Turn each provider on or off in **Integration settings** (gear icon) or with the lookup switches in the trace options (the sliders button next to **Trace**). The settings also hold the RDAP base URL and the PeeringDB API key.
 - Only public hop addresses are sent. Private, CGNAT, link-local and documentation addresses never leave your machine.
 - Answers are cached for 7 days in the app cache folder. **Force fresh lookups** skips the cache for one run.
 - Calls retry with backoff on rate limits, server errors and timeouts. If a provider still fails, the hop shows "N sources failed" and the hop details list each provider with its result.
@@ -180,7 +183,7 @@ assets/        Logo, app icons and README media (not shipped in the app, except 
 
 ## GeoLite2 Database Management
 
-Open the settings modal from the gear icon beside the traceroute form (or the footer banner, if shown) to review the current GeoLite2 status and edit paths. The modal displays the last update time along with success/error badges for each file.
+Open the settings from the gear icon in the toolbar (or the status bar banner, if shown) to review the current GeoLite2 status and edit paths. The modal displays the last update time along with success/error badges for each file.
 
 - **Configure databases**: Browse to new `.mmdb` files at any time; VisTracer will reload them immediately.
 - **Update databases**: Download newer versions from MaxMind and point the modal to the new paths or replace the files in place.
@@ -190,10 +193,29 @@ For detailed instructions on downloading, installing, and updating databases, se
 
 **Note**: The application works without databases but provides limited information (no geographic coordinates, city names, or ASN details).
 
+## Using the app
+
+- **Layout.** The trace panel is top left: type a host name or IP address and press **Trace**. The sliders button opens the trace options (max hops, timeout, probes, force fresh lookups, recent runs, lookup switches). The hop table and the selected hop's details are on the right, the hop timeline and the status bar at the bottom. Each panel can collapse, and VisTracer remembers which ones you collapsed, your theme and your layer switches.
+- **Hops.** Click a hop on the globe, in the timeline or in the table to select it everywhere; the globe flies to it. Hover a hop on the globe or in the timeline for a card with its host name, address, network, location (with source and confidence), RTT and loss. The card only shows data the app already has; hovering sends nothing anywhere.
+- **Timeline.** One column per hop: the bar is the average RTT, the line the min-max range, the ticks the single probes. An amber "+81" marks a rise of 20 ms or more over the previous hop that answered: usually a long link such as an ocean cable, sometimes a router that answers slowly. The three small bars show how sure the location is.
+- **Layers.** The layers button in the toolbar opens switches for route arcs, hop markers, confidence rings, anycast reach, labels, day/night shading and **Online imagery**. With online imagery off, VisTracer downloads no NASA GIBS tile at all and uses only the bundled imagery; the backend refuses those downloads too.
+- **Theme.** The sun/moon button switches between the dark (default) and the light theme. With "reduce motion" or "reduce transparency" set in your system, animations stop and the panels become solid.
+- **Credits.** The small "NASA, GIBS, CesiumJS" button in the lower right corner lists every data source and its license.
+
+### Keyboard shortcuts
+
+| Keys | Does |
+| --- | --- |
+| ⌘K (macOS), Ctrl+K (Windows, Linux) | Open or close the command bar: search any command, go to a hop, show or hide a layer, switch theme, export, clear the tile cache, or type a host name to trace it |
+| ↑ ↓, Enter, Esc | In the command bar: move, run, close |
+| ← → (or ↑ ↓), Home, End | In the hop timeline: select the previous, next, first or last hop |
+| Enter, Space | In the hop table: select the hop |
+| Esc | Close the command bar, the layer panel, the credits or a dialog; hide the hover card of a hop focused in the timeline |
+
 ## Globe imagery and day/night
 
 - **Offline first.** NASA Blue Marble (day) and Black Marble 2016 (night lights) ship with the app at five zoom levels (6.5 MB, about 5 km per pixel at the closest). The globe looks right with no network.
-- **Detail when you zoom in.** Closer than that, VisTracer loads Blue Marble tiles (down to about 600 m per pixel) from NASA GIBS (`gibs.earthdata.nasa.gov`, no account or key). The backend fetches them and keeps them in a 500 MB cache in the app cache folder; **Integration settings → Globe imagery** shows its size and clears it. Offline, the globe magnifies the bundled tiles and says that detailed imagery is unavailable. These downloads show NASA the approximate areas you zoom into. Automatic camera moves (following a trace, selecting a hop, exports) stay zoomed out far enough that they use only the bundled imagery, and online tiles stay off after them until you zoom, drag or tilt the globe yourself, so only your own camera moves download tiles.
+- **Detail when you zoom in.** Closer than that, VisTracer loads Blue Marble tiles (down to about 600 m per pixel) from NASA GIBS (`gibs.earthdata.nasa.gov`, no account or key). The backend fetches them and keeps them in a 500 MB cache in the app cache folder; **Integration settings → Globe imagery** shows its size and clears it. Offline, the globe magnifies the bundled tiles and says that detailed imagery is unavailable. These downloads show NASA the approximate areas you zoom into. Automatic camera moves (following a trace, selecting a hop, exports) stay zoomed out far enough that they use only the bundled imagery. Online tiles stay off at start-up and after such moves until you zoom, drag or tilt the globe yourself, so only your own camera moves download tiles. Switch **Online imagery** off in the layer panel to download none at all.
 - **Day and night.** The sun is placed from the current time (CesiumJS solar model). Far out, the dark side shows city lights; zoomed in, the globe is fully lit so you can see the ground under a hop.
 - **Battery.** The globe renders a frame only when the view or the data changes, runs no animation loop at all when idle, pauses while the window is hidden or minimized, and caps the frame rate at 60 (30 on battery where the webview reports it). The terminator moves every 10 minutes while idle.
 
@@ -201,7 +223,7 @@ Data sources and licenses: [docs/third-party-data.md](./docs/third-party-data.md
 
 ## Snapshot & Media Export
 
-- Click **Download export** in the footer to capture the current globe.
+- Click **Export route** in the status bar to capture the current globe, or use the command bar (**Export a PNG snapshot**, **Export a WebM animation**, **Export a GIF animation**; animations show each hop for 2 s).
 - Still images support PNG, JPG, and WebP. Animated exports support WebM (hardware-accelerated via `MediaRecorder`) and GIF (bundled encoder).
 - Configure the dwell time per hop for animated formats; the tooltip stays on-screen with ASN, PeeringDB, and location details for each hop.
 - Files are saved to your system's default download location (typically `~/Downloads` on macOS/Linux or `C:\Users\<username>\Downloads` on Windows).
@@ -214,8 +236,7 @@ Data sources and licenses: [docs/third-party-data.md](./docs/third-party-data.md
 
 - Scheduled GeoLite2 refresh (auto-download via license key works; periodic refresh is not yet automated)
 - MP4 export remains out of scope; use WebM or GIF instead.
-- Advanced heuristics (anycast detection, jitter visualisation, comparison view) are planned but not
-  implemented in this build
+- A view that compares two traces is planned but not implemented in this build
 - Windows `tracert` only sends ICMP probes, three per hop; the UDP/TCP choice does not apply there
 - Only the first responder of a multipath hop is geolocated and sent to the registry providers; the others show their address, host name and RTTs
 

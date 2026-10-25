@@ -1,11 +1,8 @@
 .globe-viewport {
-  position: relative;
-  background: #0d0e14;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  position: absolute;
+  inset: 0;
+  background: var(--globe-space);
   overflow: hidden;
-  min-width: 0;
-  min-height: 0; /* Allow shrinking below content size */
-  flex: 1;
 }
 
 .globe-viewport__canvas {
@@ -18,33 +15,35 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  max-width: 340px;
   margin: 0;
-  max-width: 320px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--globe-chip-bg);
+  color: var(--color-on-globe);
+  font-size: var(--text-md);
   text-align: center;
-  font-size: 0.95rem;
-  opacity: 0.6;
   pointer-events: none;
 }
 
 .globe-viewport__overlay--error {
-  opacity: 1;
-  color: #ffb4b4;
+  font-weight: 600;
 }
 
-.globe-viewport__credits {
-  position: absolute;
-  right: 0.6rem;
-  bottom: 0.4rem;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.2rem;
-  font-size: 0.68rem;
-  color: rgba(215, 219, 255, 0.55);
-  text-shadow: 0 0 3px #000;
-  pointer-events: none;
-}
-
+/* Centred below the trace panel row and the update banner. */
 .globe-viewport__notice {
-  color: #ffd59a;
+  position: absolute;
+  top: 128px;
+  left: 50%;
+  z-index: calc(var(--z-hud) + 1);
+  transform: translateX(-50%);
+  max-width: min(420px, 80vw);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-chip);
+  background: var(--globe-chip-bg);
+  color: var(--color-on-globe);
+  font-size: var(--text-xs);
+  text-align: center;
+  pointer-events: none;
 }

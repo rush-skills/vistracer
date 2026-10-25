@@ -10,6 +10,14 @@ type RunRegistry = Record<string, TracerouteRun>;
 
 type TracerouteStatus = "idle" | "running" | "success" | "error";
 
+/**
+ * Where the hover card points: the pointer on the globe, or the element
+ * of the hop in the timeline. Client (viewport) pixels.
+ */
+export type HoverAnchor =
+  | { kind: "point"; x: number; y: number }
+  | { kind: "rect"; left: number; top: number; width: number; height: number };
+
 export interface TracerouteStore {
   runs: RunRegistry;
   currentRunId?: string;
@@ -17,15 +25,24 @@ export interface TracerouteStore {
   error?: string;
   pendingRequest?: TracerouteRequest;
   selectedHopIndex?: number;
-  /** Hop under the pointer on the globe or in the hop table. */
+  /** Hop under the pointer on the globe, in the timeline or in the hop table. */
   hoveredHopIndex?: number;
+  /** Set when the hover came from the globe or the timeline: a hover card shows. */
+  hoverAnchor?: HoverAnchor;
   captureActive: boolean;
   startRun: (request: TracerouteRequest) => Promise<TracerouteExecutionResult | undefined>;
   cancelRun: () => Promise<void>;
   handleProgress: (event: TracerouteProgressEvent) => void;
   completeRun: (result: TracerouteExecutionResult) => void;
   setSelectedHop: (hopIndex: number | undefined) => void;
-  setHoveredHop: (hopIndex: number | undefined) => void;
+  /**
+   * A selection the user makes (globe, timeline, hop table, command bar).
+   * Ignored while an animated export records: the export moves the
+   * selection and the camera itself, and a flight to another hop would end
+   * up in the recording.
+   */
+  selectHopByUser: (hopIndex: number) => void;
+  setHoveredHop: (hopIndex: number | undefined, anchor?: HoverAnchor) => void;
   setCaptureActive: (active: boolean) => void;
   resetError: () => void;
 }
@@ -49,7 +66,8 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
       error: undefined,
       pendingRequest: request,
       captureActive: false,
-      hoveredHopIndex: undefined
+      hoveredHopIndex: undefined,
+      hoverAnchor: undefined
     });
 
     try {
@@ -167,14 +185,21 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
     });
   },
   setSelectedHop: (hopIndex) => set({ selectedHopIndex: hopIndex }),
-  setHoveredHop: (hopIndex) => set({ hoveredHopIndex: hopIndex }),
+  selectHopByUser: (hopIndex) => {
+    if (!get().captureActive) {
+      set({ selectedHopIndex: hopIndex });
+    }
+  },
+  setHoveredHop: (hopIndex, anchor) =>
+    set({ hoveredHopIndex: hopIndex, hoverAnchor: hopIndex == null ? undefined : anchor }),
   setCaptureActive: (active) => set({ captureActive: active }),
   resetError: () => set({ error: undefined }),
   error: undefined,
   pendingRequest: undefined,
   currentRunId: undefined,
   selectedHopIndex: undefined,
-  hoveredHopIndex: undefined
+  hoveredHopIndex: undefined,
+  hoverAnchor: undefined
 }));
 
 export const selectCurrentRun = (state: TracerouteStore): TracerouteRun | undefined => {

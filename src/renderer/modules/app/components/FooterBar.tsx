@@ -1,114 +1,79 @@
 import React, { useState } from "react";
 import { useGeoDatabaseMeta } from "@renderer/hooks/useGeoDatabaseMeta";
-import { useTracerouteStore, selectCurrentRun } from "@renderer/state/tracerouteStore";
+import { useExportStore } from "@renderer/state/exportStore";
+import { useCommand } from "@renderer/hooks/useCommands";
+import { useNoticeStore } from "@renderer/state/noticeStore";
 import { GeoWarningBanner } from "./GeoWarningBanner";
 import { GeoSettingsModal } from "./GeoSettingsModal";
 import { ExportMediaModal } from "./ExportMediaModal";
-import { runExport } from "../lib/exportCapture";
 import type { VisTracerWindow } from "@common/bridge";
 import "./FooterBar.css";
 
-type ExportState = "idle" | "working" | "success" | "error";
-
 export const FooterBar: React.FC = () => {
   const { data: geoMeta, refetch: refetchGeoMeta } = useGeoDatabaseMeta();
-  const currentRun = useTracerouteStore(selectCurrentRun);
-  const [exportState, setExportState] = useState<ExportState>("idle");
-  const [message, setMessage] = useState<string | undefined>();
+  const exporting = useExportStore((state) => state.working);
+  const dialogOpen = useExportStore((state) => state.dialogOpen);
+  const { closeDialog, start } = useExportStore.getState();
+  const exportRoute = useCommand("export.dialog");
+  const notice = useNoticeStore((state) => state.notice);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [defaultFormat, setDefaultFormat] = useState<"png" | "jpg" | "webp" | "webm" | "gif">("png");
-
-  const beginExport = () => {
-    if (!currentRun || exportState === "working") {
-      return;
-    }
-    setDefaultFormat("png");
-    setIsExportModalOpen(true);
-  };
-
-  const handleExportConfirm = async (options: { format: "png" | "jpg" | "webp" | "webm" | "gif"; dwellSeconds: number }) => {
-    if (!currentRun) {
-      setIsExportModalOpen(false);
-      return;
-    }
-
-    setDefaultFormat(options.format);
-    setIsExportModalOpen(false);
-    setExportState("working");
-    setMessage(undefined);
-    try {
-      const { filename } = await runExport(options, currentRun);
-      setExportState("success");
-      setMessage(`Saved ${filename}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Export failed";
-      setExportState("error");
-      setMessage(message);
-    } finally {
-      setTimeout(() => {
-        setExportState("idle");
-        setMessage(undefined);
-      }, 3500);
-    }
-  };
 
   const handleUpdateGeoPaths = async (cityPath?: string, asnPath?: string) => {
     await (window as VisTracerWindow).visTracer.updateGeoDatabasePaths(cityPath, asnPath);
     await refetchGeoMeta();
   };
 
-  const exportDisabled = !currentRun || exportState === "working";
-  const updatedLabel = geoMeta?.updatedAt
-    ? new Date(geoMeta.updatedAt).toLocaleDateString()
-    : "unknown";
+  const updated = geoMeta?.updatedAt
+    ? ` (updated ${new Date(geoMeta.updatedAt).toLocaleDateString()})`
+    : "";
 
   const geoStatus =
     geoMeta?.cityDbStatus === "loaded" && geoMeta?.asnDbStatus === "loaded"
-      ? `GeoLite2 loaded (updated ${updatedLabel})`
+      ? `GeoLite2 loaded${updated}`
       : geoMeta?.cityDbStatus === "loaded" || geoMeta?.asnDbStatus === "loaded"
-        ? `GeoLite2 partially loaded (updated ${updatedLabel})`
-        : "GeoLite2 database not configured";
+        ? `GeoLite2 partly loaded${updated}`
+        : "GeoLite2 not configured";
 
   return (
     <>
-      <footer className="footer-bar">
-        <div className="footer-bar__content">
-          <div className="footer-bar__legend">
-            <span className="footer-bar__legend-item">
-              <span className="footer-bar__color footer-bar__color--fast"></span>
-              Fast (&lt; 50ms)
-            </span>
-            <span className="footer-bar__legend-item">
-              <span className="footer-bar__color footer-bar__color--moderate"></span>
-              Moderate (50-150ms)
-            </span>
-            <span className="footer-bar__legend-item">
-              <span className="footer-bar__color footer-bar__color--slow"></span>
-              Slow (&gt; 150ms)
-            </span>
-          </div>
-          <div className="footer-bar__meta">
-            <span>{geoStatus}</span>
-            <button
-              type="button"
-              className="footer-bar__export"
-              onClick={beginExport}
-              disabled={exportDisabled}
-            >
-              {exportState === "working" ? "Exporting…" : "Download export"}
-            </button>
-            {message && <span className="footer-bar__message">{message}</span>}
-          </div>
-        </div>
+      <footer className="footer-bar glass">
         {geoMeta && (
-          <div className="footer-bar__warning">
-            <GeoWarningBanner
-              geoMeta={geoMeta}
-              onConfigure={() => setIsSettingsOpen(true)}
-            />
-          </div>
+          <GeoWarningBanner geoMeta={geoMeta} onConfigure={() => setIsSettingsOpen(true)} />
         )}
+        <div className="footer-bar__content">
+          <ul className="footer-bar__legend" aria-label="Arc colour: round-trip time">
+            <li>
+              <span className="footer-bar__color footer-bar__color--fast" />
+              &lt; 50 ms
+            </li>
+            <li>
+              <span className="footer-bar__color footer-bar__color--moderate" />
+              50–150 ms
+            </li>
+            <li>
+              <span className="footer-bar__color footer-bar__color--slow" />
+              &gt; 150 ms
+            </li>
+          </ul>
+          <span className="footer-bar__geo">{geoStatus}</span>
+          <button
+            type="button"
+            className="button footer-bar__export"
+            onClick={exportRoute.run}
+            disabled={Boolean(exportRoute.disabledReason)}
+            title={exportRoute.disabledReason}
+          >
+            {exporting ? "Exporting…" : "Export route"}
+          </button>
+          {notice && (
+            <span
+              className={`footer-bar__message footer-bar__message--${notice.tone}`}
+              role="status"
+            >
+              {notice.text}
+            </span>
+          )}
+        </div>
       </footer>
       {geoMeta && (
         <GeoSettingsModal
@@ -119,11 +84,11 @@ export const FooterBar: React.FC = () => {
         />
       )}
       <ExportMediaModal
-        isOpen={isExportModalOpen}
-        defaultFormat={defaultFormat}
-        onCancel={() => setIsExportModalOpen(false)}
-        onConfirm={handleExportConfirm}
-        disabled={exportState === "working"}
+        isOpen={dialogOpen}
+        defaultFormat="png"
+        onCancel={closeDialog}
+        onConfirm={(options) => void start(options)}
+        disabled={exporting}
       />
     </>
   );

@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useModalA11y } from "@renderer/hooks/useModalA11y";
+import { DEFAULT_DWELL_SECONDS, type ExportFormat } from "../lib/exportCapture";
 import "./ExportMediaModal.css";
-
-type ExportFormat = "png" | "jpg" | "webp" | "webm" | "gif";
 
 interface ExportMediaModalProps {
   isOpen: boolean;
@@ -12,8 +11,6 @@ interface ExportMediaModalProps {
   disabled?: boolean;
 }
 
-const dwellDefault = 2;
-
 export const ExportMediaModal: React.FC<ExportMediaModalProps> = ({
   isOpen,
   defaultFormat,
@@ -22,13 +19,13 @@ export const ExportMediaModal: React.FC<ExportMediaModalProps> = ({
   disabled
 }) => {
   const [format, setFormat] = useState<ExportFormat>(defaultFormat);
-  const [dwellSeconds, setDwellSeconds] = useState(dwellDefault);
+  const [dwellSeconds, setDwellSeconds] = useState(DEFAULT_DWELL_SECONDS);
   const modalRef = useModalA11y(isOpen, onCancel);
 
   useEffect(() => {
     if (isOpen) {
       setFormat(defaultFormat);
-      setDwellSeconds(dwellDefault);
+      setDwellSeconds(DEFAULT_DWELL_SECONDS);
     }
   }, [defaultFormat, isOpen]);
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUNDLED_IMAGERY,
+  CanvasDrag,
   ONLINE_IMAGERY,
   OnlineImageryGate,
   bundledOnlyHeight,
@@ -64,10 +65,34 @@ describe("bundledOnlyHeight", () => {
   });
 });
 
+describe("CanvasDrag", () => {
+  it("counts a held button as a globe drag only after a press on the canvas", () => {
+    const drag = new CanvasDrag();
+    // Selecting text in a panel and crossing the globe moves no camera.
+    expect(drag.isDragging(1)).toBe(false);
+    drag.pressOnCanvas();
+    expect(drag.isDragging(1)).toBe(true);
+    drag.release();
+    expect(drag.isDragging(1)).toBe(false);
+  });
+
+  it("ends a press whose release it missed", () => {
+    const drag = new CanvasDrag();
+    drag.pressOnCanvas();
+    // A move with no button held: the release happened outside the window.
+    expect(drag.isDragging(0)).toBe(false);
+    expect(drag.isDragging(1)).toBe(false);
+  });
+});
+
 describe("OnlineImageryGate", () => {
-  it("lets the user's own view load online tiles before any app move", () => {
+  it("keeps online tiles off at start until the user moves the camera", () => {
     const gate = new OnlineImageryGate();
+    // A very wide window can refine the start view past the bundled levels.
+    expect(gate.visible).toBe(false);
+    expect(gate.userMovedCamera()).toBe(true);
     expect(gate.visible).toBe(true);
+    // Later input changes nothing.
     expect(gate.userMovedCamera()).toBe(false);
     expect(gate.visible).toBe(true);
   });

@@ -1,0 +1,131 @@
+/*
+ * Design tokens. Every component colour, radius, size and duration comes from
+ * here. Dark is the default theme; `data-theme="light"` on <html> switches the
+ * panels to light glass. The globe itself looks the same in both themes.
+ *
+ * Glass alphas and text colours keep WCAG AA (4.5:1) against the worst case
+ * behind a panel: dark glass over white imagery, light glass over black space.
+ * src/renderer/styles/__tests__/tokens.test.ts checks this.
+ */
+
+:root {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* 12, 13, 14, 16, 20 px */
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.25rem;
+  --leading-tight: 1.25;
+  --leading-body: 1.45;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* Radius by role: panels hold controls, controls hold chips. */
+  --radius-panel: 16px;
+  --radius-control: 9px;
+  --radius-chip: 6px;
+  --radius-round: 999px;
+
+  --glass-blur: 20px;
+
+  --motion-quick: 120ms;
+  --motion-base: 180ms;
+  --motion-panel: 240ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --z-hud: 10;
+  --z-popover: 20;
+  --z-card: 30;
+  --z-modal: 1000;
+  --z-palette: 1100;
+
+  /* Latency bands of the route arcs (latencyToColor in lib/globe.ts). */
+  --latency-fast: #4bd67f;
+  --latency-moderate: #ffc773;
+  --latency-slow: #ff5f5f;
+  --latency-unknown: #4f5d75;
+
+  /* The globe looks the same in both themes. Its space colour matches the
+     Cesium scene background (BACKGROUND in globe/cesiumGlobe.ts). */
+  --globe-space: #0d0e14;
+  --globe-chip-bg: rgba(5, 8, 14, 0.72);
+  --color-on-globe: #eef2f8;
+
+  color-scheme: dark;
+  --color-space: #05070c;
+  --glass-bg: rgba(12, 18, 32, 0.8);
+  --glass-bg-solid: #0f1626;
+  --glass-border: rgba(148, 178, 214, 0.18);
+  --glass-shine: rgba(255, 255, 255, 0.05);
+  --shadow-panel: 0 14px 34px -14px rgba(0, 0, 0, 0.7), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --surface-1: rgba(148, 178, 214, 0.06);
+  --surface-2: rgba(148, 178, 214, 0.11);
+  --surface-3: rgba(148, 178, 214, 0.18);
+  --color-line: rgba(148, 178, 214, 0.14);
+  --color-text: #eef2f8;
+  --color-text-muted: #b3bfd1;
+  --color-accent: #6cc4ad;
+  --color-accent-text: #8fdcc6;
+  --color-on-accent: #04130f;
+  --color-accent-soft: rgba(108, 196, 173, 0.2);
+  /* Sodium city lights: latency jumps and warnings. */
+  --color-amber: #e8b45a;
+  --color-amber-soft: rgba(232, 180, 90, 0.2);
+  --color-danger: #ff9b92;
+  --color-danger-soft: rgba(255, 120, 110, 0.16);
+  --color-violet: #b9a4ff;
+  --color-violet-soft: rgba(185, 164, 255, 0.18);
+  --color-scrim: rgba(3, 5, 10, 0.6);
+  --color-focus: #8fdcc6;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --glass-bg: rgba(246, 248, 252, 0.82);
+  --glass-bg-solid: #f4f6fa;
+  --glass-border: rgba(20, 34, 58, 0.16);
+  --glass-shine: rgba(255, 255, 255, 0.6);
+  --shadow-panel: 0 14px 34px -16px rgba(9, 18, 36, 0.45), 0 2px 8px rgba(9, 18, 36, 0.12);
+  --surface-1: rgba(20, 34, 58, 0.04);
+  --surface-2: rgba(20, 34, 58, 0.08);
+  --surface-3: rgba(20, 34, 58, 0.14);
+  --color-line: rgba(20, 34, 58, 0.14);
+  --color-text: #101826;
+  --color-text-muted: #3c4a60;
+  --color-accent: #1f7f69;
+  --color-accent-text: #0f5a4a;
+  --color-on-accent: #ffffff;
+  --color-accent-soft: rgba(31, 127, 105, 0.14);
+  --color-amber: #6e4600;
+  --color-amber-soft: rgba(232, 180, 90, 0.28);
+  --color-danger: #9b1c13;
+  --color-danger-soft: rgba(180, 35, 24, 0.1);
+  --color-violet: #4c32a8;
+  --color-violet-soft: rgba(91, 63, 196, 0.12);
+  --color-scrim: rgba(9, 18, 36, 0.35);
+  --color-focus: #0f5a4a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-quick: 0ms;
+    --motion-base: 0ms;
+    --motion-panel: 0ms;
+  }
+}
+
+/* Solid panels: no blur, no see-through. */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme="light"] {
+    --glass-bg: var(--glass-bg-solid);
+    --glass-blur: 0px;
+  }
+}

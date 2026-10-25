@@ -2,11 +2,16 @@
 // Checks the production globe in headless Chrome, with the app's CSP and a
 // fake Tauri IPC (mock-ipc.js):
 //
-// - an idle globe runs no animation frames and no WebGL draws
+// - an idle globe runs no animation frames and no WebGL draws, and the
+//   glass panels over it (backdrop-filter blur) make no compositor frames
 // - camera moves the app makes (start view, following a trace, selecting a
 //   hop, exports) request no online tile, also when the window grows later;
 //   a zoom the user makes does
+// - a 7680 px wide start view, whose bundled levels Cesium would refine,
+//   requests no online tile before the user moves the camera
 // - a drag during a WebM export does not move the globe
+// - with "Online imagery" off in the layer panel, a user zoom requests no
+//   online tile; switched on again, it does
 // - exports write files, no page errors, no request leaves the machine
 //
 //   npm run build
@@ -19,149 +24,38 @@
 // browser with WebGL.
 
 import fs from "node:fs";
-import http from "node:http";
-import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { openApp, outputDir, sleep } from "./browser.mjs";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, "..", "..");
-const dist = path.join(repo, "dist", "renderer");
-const chromePath =
-  process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const outDir = outputDir("vistracer-globe-check");
 
-function exitWith(message) {
-  console.error(message);
-  process.exit(2);
-}
-
-if (!fs.existsSync(path.join(dist, "index.html"))) {
-  exitWith("dist/renderer is missing: run `npm run build` first.");
-}
-if (typeof WebSocket !== "function") {
-  exitWith("This check needs Node.js 22.4 or later (global WebSocket).");
-}
-if (!fs.existsSync(chromePath)) {
-  exitWith(`No browser at ${chromePath}. Set CHROME to a Chrome or Chromium binary.`);
-}
-const outDir = process.argv[2]
-  ? path.resolve(process.argv[2])
-  : fs.mkdtempSync(path.join(os.tmpdir(), "vistracer-globe-check-"));
-fs.mkdirSync(outDir, { recursive: true });
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// The production CSP from tauri.conf.json, sent with the page.
-const conf = JSON.parse(fs.readFileSync(path.join(repo, "src-tauri", "tauri.conf.json"), "utf8"));
-const csp = Object.entries(conf.app.security.csp)
-  .map(([directive, value]) => `${directive} ${value}`)
-  .join("; ");
-const types = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".json": "application/json",
-  ".geojson": "application/json"
+const results = [];
+const check = (name, ok, detail) => {
+  results.push(ok);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail}` : ""}`);
 };
-const server = http.createServer((request, response) => {
-  const url = new URL(request.url, "http://localhost");
-  const file = path.join(
-    dist,
-    url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname)
-  );
-  if (
-    !file.startsWith(dist + path.sep) ||
-    !fs.existsSync(file) ||
-    fs.statSync(file).isDirectory()
-  ) {
-    response.writeHead(404);
-    response.end();
-    return;
-  }
-  const headers = { "Content-Type": types[path.extname(file)] ?? "application/octet-stream" };
-  if (path.extname(file) === ".html") {
-    headers["Content-Security-Policy"] = csp;
-  }
-  response.writeHead(200, headers);
-  fs.createReadStream(file).pipe(response);
-});
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const appUrl = `http://127.0.0.1:${server.address().port}/`;
 
-const profile = path.join(outDir, "chrome-profile");
-fs.rmSync(profile, { recursive: true, force: true });
-const chrome = spawn(
-  chromePath,
-  [
-    "--headless=new",
-    "--remote-debugging-port=0",
-    `--user-data-dir=${profile}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--enable-unsafe-swiftshader",
-    "--hide-scrollbars",
-    "about:blank"
-  ],
-  { stdio: "ignore" }
-);
-let debuggerUrl;
-for (let i = 0; i < 100 && !debuggerUrl; i += 1) {
-  await sleep(100);
-  const portFile = path.join(profile, "DevToolsActivePort");
-  if (fs.existsSync(portFile)) {
-    const [port] = fs.readFileSync(portFile, "utf8").split("\n");
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-    debuggerUrl = targets.find((target) => target.type === "page")?.webSocketDebuggerUrl;
-  }
-}
-if (!debuggerUrl) {
-  chrome.kill();
-  server.close();
-  exitWith("Chrome did not start with remote debugging.");
-}
-
-const socket = new WebSocket(debuggerUrl);
-await new Promise((resolve) => socket.addEventListener("open", resolve));
-let sequence = 0;
-const pending = new Map();
-const events = [];
-socket.addEventListener("message", (message) => {
-  const data = JSON.parse(message.data);
-  if (data.id && pending.has(data.id)) {
-    pending.get(data.id)(data);
-    pending.delete(data.id);
-  } else if (data.method) {
-    events.push(data);
-  }
-});
-const send = (method, params = {}) =>
-  new Promise((resolve, reject) => {
-    const id = ++sequence;
-    pending.set(id, (data) =>
-      data.error ? reject(new Error(`${method}: ${data.error.message}`)) : resolve(data.result)
+// Cesium refines the 14,000 km start view past the bundled level 4 in a view
+// wider than about 6,600 px, so this window would load online tiles without
+// any input if OnlineImageryGate did not start held (a copy with the gate
+// starting open made 161 requests here).
+{
+  const wide = await openApp({ outDir, width: 7680, height: 2160, deviceScaleFactor: 1 });
+  try {
+    await sleep(12000);
+    const tiles = await wide.evaluate("window.__globeCheck.onlineTiles.length");
+    check(
+      "a 7680 px wide start view requests no online tile before user input",
+      tiles === 0,
+      `${tiles} requests`
     );
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-const evaluate = async (expression) => {
-  const result = await send("Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue: true
-  });
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
+  } finally {
+    await wide.close();
   }
-  return result.result.value;
-};
-const screenshot = async (name) => {
-  const { data } = await send("Page.captureScreenshot", { format: "png" });
-  fs.writeFileSync(path.join(outDir, `${name}.png`), Buffer.from(data, "base64"));
-};
-const mouse = (type, x, y, extra = {}) =>
-  send("Input.dispatchMouseEvent", { type, x, y, ...extra });
+}
+
+const { send, evaluate, screenshot, mouse, events, close } = await openApp({ outDir });
+
 const counters = () =>
   evaluate("({ ...window.__globeCheck, onlineTiles: window.__globeCheck.onlineTiles.length })");
 const centre = () =>
@@ -170,17 +64,43 @@ const centre = () =>
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   })()`);
 
-const results = [];
-const check = (name, ok, detail) => {
-  results.push(ok);
-  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail}` : ""}`);
-};
-
 /** Waits for flights and tile loads to end and the render loop to sleep. */
 const settle = () => sleep(4000);
+
+// Compositor work while `action` runs, from a Chrome trace: frames the
+// compositor drew (DrawFrame, BeginFrame) and main-thread paints.
+const FRAME_EVENTS = new Set(["DrawFrame", "BeginFrame", "Paint"]);
+const compositorFrames = async (action) => {
+  const from = events.length;
+  await send("Tracing.start", {
+    traceConfig: {
+      includedCategories: ["devtools.timeline", "disabled-by-default-devtools.timeline.frame"]
+    },
+    transferMode: "ReturnAsStream"
+  });
+  await action();
+  await send("Tracing.end");
+  let complete;
+  while (!(complete = events.slice(from).find((e) => e.method === "Tracing.tracingComplete"))) {
+    await sleep(50);
+  }
+  let data = "";
+  for (;;) {
+    const chunk = await send("IO.read", { handle: complete.params.stream });
+    data += chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString() : chunk.data;
+    if (chunk.eof) {
+      break;
+    }
+  }
+  await send("IO.close", { handle: complete.params.stream });
+  const trace = JSON.parse(data);
+  return (Array.isArray(trace) ? trace : trace.traceEvents).filter((e) => FRAME_EVENTS.has(e.name))
+    .length;
+};
+
 const idleWindow = async (name) => {
   const before = await counters();
-  await sleep(5000);
+  const composited = await compositorFrames(() => sleep(5000));
   const after = await counters();
   const frames = after.raf - before.raf;
   const draws = after.draws - before.draws;
@@ -188,6 +108,11 @@ const idleWindow = async (name) => {
     `idle globe draws nothing (${name})`,
     frames === 0 && draws === 0,
     `${frames} animation frames, ${draws} WebGL draws in 5 s`
+  );
+  check(
+    `idle glass panels make no compositor frames (${name})`,
+    composited === 0,
+    `${composited} frame and paint events in 5 s`
   );
 };
 /** Online tile requests made while `action` runs and the globe settles. */
@@ -210,6 +135,15 @@ const clickRow = (text) =>
   evaluate(
     `[...document.querySelectorAll('.hop-details__row')].find((row) => row.textContent.includes(${JSON.stringify(text)})).click()`
   );
+const userDrag = async (dx, dy) => {
+  const { x, y } = await centre();
+  await mouse("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1 });
+  for (let i = 1; i <= 20; i += 1) {
+    await mouse("mouseMoved", x + (dx * i) / 20, y + (dy * i) / 20, { button: "left", buttons: 1 });
+    await sleep(16);
+  }
+  await mouse("mouseReleased", x + dx, y + dy, { button: "left", buttons: 0, clickCount: 1 });
+};
 const userZoom = async () => {
   const { x, y } = await centre();
   for (let i = 0; i < 3; i += 1) {
@@ -219,19 +153,6 @@ const userZoom = async () => {
 };
 
 try {
-  await send("Page.enable");
-  await send("Runtime.enable");
-  await send("Network.enable");
-  await send("Emulation.setDeviceMetricsOverride", {
-    width: 1280,
-    height: 713,
-    deviceScaleFactor: 2,
-    mobile: false
-  });
-  await send("Page.addScriptToEvaluateOnNewDocument", {
-    source: fs.readFileSync(path.join(here, "mock-ipc.js"), "utf8")
-  });
-  await send("Page.navigate", { url: appUrl });
   await sleep(6000);
 
   check(
@@ -281,11 +202,11 @@ try {
   await tilesDuring(userZoom);
   const exportButton = () =>
     evaluate(
-      `[...document.querySelectorAll('button')].find((b) => /Download export|Exporting/.test(b.textContent))?.textContent ?? ""`
+      `[...document.querySelectorAll('button')].find((b) => /Export route|Exporting/.test(b.textContent))?.textContent ?? ""`
     );
   const startExport = async (format, dwellSeconds) => {
     await evaluate(
-      `[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Download export')).click()`
+      `[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Export route')).click()`
     );
     await sleep(500);
     await evaluate(`document.querySelector('input[type=radio][value="${format}"]').click()`);
@@ -300,9 +221,7 @@ try {
     }
     await evaluate(`[...document.querySelectorAll('.export-modal button')].at(-1).click()`);
   };
-  // Waits for the footer's "Saved <file>" message. The button is not a
-  // reliable signal: a previous export's 3.5 s reset timer can set it back
-  // to "Download export" while the next export still runs.
+  // Waits for the footer's "Saved <file>" message.
   const exportSaved = async (extension, timeoutMs) => {
     for (let waited = 0; waited < timeoutMs; waited += 250) {
       const message = await evaluate(
@@ -315,20 +234,20 @@ try {
     }
     return false;
   };
-  const canvasShot = async () => {
-    const rect = await evaluate(`(() => {
-      const r = document.querySelector('.globe-viewport canvas').getBoundingClientRect();
-      return { x: r.left, y: r.top, width: r.width, height: r.height };
+  // A fingerprint of the WebGL canvas's own pixels (it keeps its drawing
+  // buffer for exports). Not a screenshot: the panels float over the canvas,
+  // and their focus rings and hover states are not the globe.
+  const canvasShot = () =>
+    evaluate(`(() => {
+      const data = document.querySelector('.globe-viewport canvas').toDataURL();
+      let hash = 0;
+      for (let i = 0; i < data.length; i += 1) hash = (hash * 31 + data.charCodeAt(i)) | 0;
+      return data.length + ':' + hash;
     })()`);
-    return (await send("Page.captureScreenshot", { format: "png", clip: { ...rect, scale: 1 } }))
-      .data;
-  };
   let dragDuringExport;
   const exportTiles = await tilesDuring(async () => {
     await startExport("png");
     await exportSaved("png", 10000);
-    // Let the PNG export's reset timer run out before the next export.
-    await sleep(4000);
     // 8.8.8.8 trace: hop 1 is private, so after the first flight (to hop 2)
     // the export dwells 5 s on hop 1 with no camera move: a quiet window.
     await startExport("webm", 5);
@@ -402,8 +321,40 @@ try {
   });
   await settle();
 
+  // The layer panel's switch, as a user flips it.
+  const setOnlineImagery = async (on) => {
+    await evaluate(`document.querySelector('#layers-toggle').click()`);
+    await sleep(300);
+    await evaluate(`(() => {
+      const box = document.querySelector('input[aria-labelledby="layer-online-imagery-label"]');
+      if (box.checked !== ${on}) box.click();
+      document.querySelector('#layers-toggle').click();
+    })()`);
+    await sleep(300);
+  };
+  // Off, the user moves to new ground and zooms in: nothing is requested.
+  // On again, that view's online tiles load (they were never loaded, so
+  // Cesium's imagery cache cannot serve them).
+  await setOnlineImagery(false);
+  const offTiles = await tilesDuring(async () => {
+    await userDrag(-420, 60);
+    await userZoom();
+  });
+  check(
+    "with online imagery off, a user drag and zoom request no online tile",
+    offTiles === 0,
+    `${offTiles} requests`
+  );
+  const onTiles = await tilesDuring(() => setOnlineImagery(true));
+  check(
+    "switched on again, online imagery loads the user's view",
+    onTiles > 0,
+    `${onTiles} requests`
+  );
+
   const { x, y } = await centre();
   const beforeDrag = await counters();
+  const canvasBeforeDrag = await canvasShot();
   await mouse("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1 });
   for (let i = 1; i <= 20; i += 1) {
     await mouse("mouseMoved", x + i * 6, y + i * 2, { button: "left", buttons: 1 });
@@ -412,12 +363,28 @@ try {
   await mouse("mouseReleased", x + 120, y + 40, { button: "left", buttons: 0, clickCount: 1 });
   await sleep(2000);
   const afterDrag = await counters();
+  // Also shows that the canvas fingerprint above sees a moved globe.
+  const canvasMoved = canvasBeforeDrag !== (await canvasShot());
   check(
-    "a drag draws frames",
-    afterDrag.raf - beforeDrag.raf > 0,
-    `${afterDrag.raf - beforeDrag.raf} animation frames`
+    "a drag draws frames and moves the globe",
+    afterDrag.raf - beforeDrag.raf > 0 && canvasMoved,
+    `${afterDrag.raf - beforeDrag.raf} animation frames, canvas ${canvasMoved ? "changed" : "unchanged"}`
   );
   await idleWindow("after a drag");
+
+  // Control: the trace does see frames when something on the page animates.
+  const animated = await compositorFrames(async () => {
+    await evaluate(`(() => {
+      const probe = document.createElement('div');
+      probe.id = 'frame-probe';
+      Object.assign(probe.style, { position: 'fixed', left: '0', top: '0', width: '8px', height: '8px' });
+      document.body.append(probe);
+      probe.animate([{ backgroundColor: 'red' }, { backgroundColor: 'blue' }], { duration: 500, iterations: Infinity });
+    })()`);
+    await sleep(2000);
+    await evaluate(`document.querySelector('#frame-probe').remove()`);
+  });
+  check("control: an animated element makes compositor frames", animated > 0, `${animated} events`);
 
   const final = await evaluate("window.__globeCheck");
   check("no page errors", final.errors.length === 0, final.errors.join("; "));
@@ -442,9 +409,7 @@ try {
     [...hosts].join(", ")
   );
 } finally {
-  socket.close();
-  chrome.kill();
-  server.close();
+  await close();
 }
 
 console.log(`Screenshots and downloads: ${outDir}`);

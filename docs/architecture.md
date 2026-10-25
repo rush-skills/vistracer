@@ -417,6 +417,10 @@ would not fit (`flyHeight`). With `prefers-reduced-motion` the camera jumps.
 
 During a GIF or WebM export the camera does not take user input
 (`setInputEnabled(false)`), so a drag or zoom cannot get into the video.
+Hop selections from the globe, the timeline, the hop table and the command
+bar are ignored too (`selectHopByUser`; "Go to hop" says "An export is
+running."): the export moves the selection itself, and a flight to another
+hop would be recorded.
 The lock uses `enableRotate`, `enableZoom`, `enableTilt` and
 `enableTranslate` of the camera controller, not `enableInputs`: every
 Cesium flight sets `enableInputs` to false when it starts and back to true
@@ -443,10 +447,20 @@ user zoomed into, then moves to the hop at the floor or higher.
 The online layer is also hidden from the start of such a flight
 (`OnlineImageryGate`), so the wider view during the rise loads nothing. It
 stays hidden after the flight until the user zooms, drags or tilts the globe
-(wheel, or pointer move with a button pressed; not during a flight, not
+(wheel, or a pointer move with a button held after a press on the globe;
+a press that started in a panel does not count; not during a flight, not
 while input is locked). So a view the app chose never loads online tiles,
 even when the window is moved to a larger monitor later and the floor no
-longer holds. Only the user's own camera moves load online tiles.
+longer holds. The layer is hidden at start-up too: Cesium refines the
+14,000 km start view past level 4 in a view wider than about 6,600 px, so
+the start view loads nothing until the user first moves the camera. Only the
+user's own camera moves load online tiles.
+
+During the move step of a two-step flight, Cesium can apply user input: the
+rise step's completion turns `enableInputs` back on after the move step has
+started (`CameraFlightPath` wraps the `complete` callback). The flight sets
+the camera again on every frame, and the gate does not count that input, so
+the layer stays hidden.
 `scripts/globe-check/check.mjs` (below) counts the tile requests to show it.
 
 Picking: the arcs end at the markers and are drawn after them, so a pick that
@@ -477,25 +491,39 @@ An idle globe therefore runs no animation frames at all.
 
 `scripts/globe-check/check.mjs` checks this on the production build in
 headless Chrome, with the app's CSP and a fake Tauri IPC
-(`scripts/globe-check/mock-ipc.js`, two fixture traces). It counts
-animation frames, WebGL draws and online tile requests, and exits 1 when a
-check fails. It needs a local Chrome (`CHROME=...`), so it is not part of CI:
+(`scripts/globe-check/mock-ipc.js`, two fixture traces; the browser
+harness is `browser.mjs`). It counts animation frames, WebGL draws,
+compositor frames (from a Chrome trace) and online tile requests, and exits
+1 when a check fails. It needs a local Chrome (`CHROME=...`), so it is not
+part of CI. `ui-shots.mjs` uses the same harness to take screenshots of
+every UI state (dark, light, 960 x 640) for review; it checks nothing.
 
 ```bash
 npm run build
 node scripts/globe-check/check.mjs [output dir]
+node scripts/globe-check/ui-shots.mjs [output dir]
 ```
 
-Result on 2026-10-25 (18 checks pass):
+Result of one run on 2026-10-25, after the phase 4 UI (25 checks pass).
+The request counts of user zooms differ a little from run to run (the next
+user zoom made between 103 and 130 in four runs); the counts that must be
+0 were 0 in every run.
 
-- 0 animation frames and 0 WebGL draws in each 5 s idle window; a 20-step
-  drag ran about 60 frames, then stopped.
-- A user zoom made 47 online tile requests. Selecting a hop, following a
+- A 7680 x 2160 window at DPR 1 made 0 online tile requests in 12 s with no
+  input. Control: with the gate starting open, the same step made 161.
+- 0 animation frames and 0 WebGL draws in each 5 s idle window, and 0
+  compositor frames or paints with the glass panels over the idle globe
+  (a control with one animated element made 243); a 20-step drag ran
+  about 60 frames, changed the canvas, then stopped.
+- A user zoom made 65 online tile requests. Selecting a hop, following a
   trace and exporting, each from that zoomed-in view, made 0. Growing the
   window from 1280 to 3840 px after those app moves made 0; the next user
-  zoom made 149.
+  zoom made 130.
+- With **Online imagery** off in the layer panel, a user drag to new ground
+  and a zoom made 0 requests; switched on again, the same view made 16.
 - A 20-step drag during a WebM export made 0 WebGL draws and left the
-  canvas unchanged.
+  canvas pixels unchanged (compared with `toDataURL`, because the panels
+  float over the canvas).
 
 Control runs, each with one fix removed: without the floor and the hidden
 layer, the three app moves made 166, 99 and 42 requests; with the online
@@ -558,11 +586,205 @@ after a failed tile. Outside the desktop app (a plain browser) there is no
   it (`get_tile_cache_info`, `clear_tile_cache`). Clearing moves the folder
   aside and deletes it.
 
+## UI shell
+
+The globe fills the window. The controls float over it on translucent
+("glass") panels in a CSS grid (`.hud` in `modules/app/app.css`) that lets
+pointer events through to the globe; only the panels take input. Opening or
+collapsing a panel never resizes the canvas, so it wakes no globe frames.
+
+```mermaid
+flowchart LR
+    subgraph panels["Panels over the globe (App.tsx)"]
+        trace["TopBar<br/>trace panel, options"]
+        toolbar["Toolbar<br/>command bar, layers,<br/>theme, settings, guide"]
+        layerPanel["LayerPanel"]
+        hops["HopDetailsPane<br/>hop table, inspector"]
+        timeline["HopTimeline"]
+        footer["FooterBar<br/>legend, export, notices"]
+        credits["Attribution"]
+        card["HoverCard"]
+        palette["CommandPalette<br/>⌘K / Ctrl+K"]
+    end
+    subgraph stores["State (Zustand)"]
+        traceStore[("tracerouteStore<br/>runs, selectedHopIndex,<br/>hoveredHopIndex, hoverAnchor")]
+        uiStore[("uiStore<br/>theme, layers, collapsed,<br/>paletteOpen")]
+        exportStore[("exportStore, noticeStore")]
+    end
+    subgraph registries["Registries (pure, tested)"]
+        layers["lib/layers.ts<br/>LAYERS, LAYER_GROUPS"]
+        commands["lib/commands.ts<br/>buildCommands, searchCommands"]
+    end
+    viewport["GlobeViewport.tsx<br/>sceneForLayers, imageryForLayers"]
+    adapter["globe/cesiumGlobe.ts<br/>setScene, setImagery, flyTo"]
+    rust[("Rust: settings.json preferences.ui;<br/>TileService online switch")]
+
+    trace -->|startRun| traceStore
+    hops <-->|select, hover| traceStore
+    timeline <-->|"select, hover + anchor"| traceStore
+    traceStore -->|"hovered hop, anchor"| card
+    layerPanel --> layers
+    layerPanel -->|setLayerVisible| uiStore
+    palette --> commands
+    toolbar --> commands
+    footer --> commands
+    commands --> layers
+    commands -->|actions| traceStore
+    commands -->|actions| uiStore
+    commands -->|actions| exportStore
+    uiStore -->|"set_settings preferences.ui"| rust
+    uiStore --> viewport
+    traceStore --> viewport
+    viewport --> adapter
+    adapter -->|"pick: hover (pointer), click"| traceStore
+```
+
+### Panels and state
+
+| Panel | Place | Collapses (saved) |
+| --- | --- | --- |
+| Trace panel: target, protocol, Trace/Cancel; options (max hops, timeout, probes, force fresh, recent runs, lookup switches) | top left | options, collapsed by default |
+| Toolbar: command bar, Layers, theme, settings, guide | top right | no |
+| Layer panel | under the toolbar | yes, closed by default |
+| Hop pane: hop table and the selected hop's details | right | to a "Hops (n)" tab |
+| Hop timeline | lower left | yes |
+| Status bar: latency legend, GeoLite2 state, Export route, notices | bottom left | no |
+| Credits | lower right corner | opens on demand |
+
+- **One source of truth.** The trace store holds the selected and the hovered
+  hop. The globe, the hop table and the timeline write and read the same two
+  values, so they stay in step. A hover from the globe or the timeline also
+  stores an anchor (the pointer, or the hop's rectangle in the timeline); the
+  hover card shows only when there is an anchor, so a hover in the hop table
+  highlights without a card.
+- **Saved UI state.** `uiStore` keeps the theme, the layer switches and the
+  collapsed panels in `preferences.ui` (`UiPreferences` in
+  `commands/persistence.rs`): ids are checked (1–40 lowercase letters,
+  digits, dashes; at most 64 per map), and ids this version does not know are
+  kept. A saved section is read field by field, like the renderer's
+  `normalizeUiPreferences`: a field that does not parse (for example a theme
+  that a newer version added) falls back to its default and a bad entry is
+  dropped, so the other choices, including "Online imagery: off", stay; the
+  rest of `settings.json` is never dropped. Choices made while the file loads win, and writes are
+  queued so the last one carries the latest state. When the saved choices
+  cannot be read, the app uses the defaults, says so, and writes nothing for
+  the rest of the session, so it never replaces the saved choices with
+  defaults.
+- **Design tokens** (`styles/tokens.css`): colours, radii, blur, spacing,
+  type scale and durations, dark by default and light with
+  `data-theme="light"` on `<html>`. `prefers-reduced-motion` sets every
+  duration to 0 (scrolls jump, globe flights already jump);
+  `prefers-reduced-transparency` makes the panels solid with no blur.
+  `styles/__tests__/tokens.test.ts` checks 4.5:1 for every text token against
+  the worst case behind the glass (dark glass over white imagery, light glass
+  over black space) and on solid panels. The globe looks the same in both
+  themes, so text drawn straight on it uses two theme-independent tokens.
+
+### Layer registry
+
+`lib/layers.ts` lists the switches of the layer panel. The panel, the command
+bar and the globe only read it.
+
+| Layer | Group | Changes |
+| --- | --- | --- |
+| Route arcs, hop markers, confidence rings, anycast reach, labels | Route | drops the items from the `GlobeScene` (`sceneForLayers`) |
+| Day and night | Globe | `setImagery({ dayNight })`: no lighting from the clock, no night layer |
+| Online imagery | Globe | `setImagery({ online })`, see below |
+
+To add a layer (phase 5: exchanges, data centres, cloud regions, cables), add
+an entry with a new id, a group (add the group to `LAYER_GROUPS` if it is
+new) and a target: a new `GlobeScene` item that `buildGlobeScene` fills and
+the adapter draws, or a new imagery option. The panel, the saved switches and
+the command bar pick it up with no change. Unit tests check that the ids pass
+the backend's check and that every scene item has a switch.
+
+**Online imagery off** means no online tile request at all, enforced in
+three places:
+
+1. The adapter removes the online layer from Cesium's imagery collection, so
+   Cesium cannot ask it for a tile (`show = false` alone would also stop
+   requests; removal does not depend on it).
+2. `TileService` in Rust refuses upstream downloads while the switch is off
+   (403, "Online imagery is off"); tiles already on disk are still served,
+   which sends nothing anywhere. The switch is applied at start, before the
+   webview can ask for a tile.
+3. On is the default, and `OnlineImageryGate` still keeps the start view and
+   every app-made view on bundled imagery.
+
+Switched on again, the layer loads tiles for the view the user chose; after
+an app move the gate still holds it until the user moves the camera.
+
+### Command bar
+
+`lib/commands.ts` builds every command from the app state: run the last
+trace again, cancel, go to each hop, show/hide each layer and panel, switch
+theme, export PNG/WebM/GIF or open the export dialog, open settings, clear
+the tile cache, show the guide. A query that names a host ("trace x", or
+text with a dot or colon) adds "Trace x", checked like `validate_target` in
+Rust; the trace panel starts it with its current options
+(`UI_EVENTS.START_TRACE`). A host with a dot or colon comes first; "trace
+<word>" comes after the matching commands, so "trace again" still offers
+"Run the last trace again" first. A command that cannot run is listed with
+the reason and does nothing. No trace starts during an export (from the bar
+or the trace panel): a new run would end the export's camera lock. The toolbar buttons and the footer's Export route
+button run the same commands by id.
+
+Search: every word of the query must match, and the scores add up. A word
+as one piece of the text scores highest (more at a word start), else its
+letters in order, with runs of letters and word starts preferred. A match
+in the title counts double over one that also uses the group, detail and
+keywords.
+
+Keyboard: ⌘K (macOS) or Ctrl+K opens and closes the bar (not over another
+modal dialog). It is a modal dialog with a combobox over a listbox: arrow
+keys move (wrapping), Enter runs, Escape closes, Tab keeps the focus in the
+search field, a press elsewhere in the bar does not take the focus from
+it, and the focus returns to where it was.
+
+### Hop timeline and hover cards
+
+- **Timeline** (`lib/timeline.ts`, `HopTimeline.tsx`): one column per hop
+  with the average RTT as a bar on the run's scale (coloured like the arcs),
+  a min-max whisker, a tick per probe of the first responder, loss above 0,
+  and a three-step meter for the location confidence. A rise of the average
+  RTT by 20 ms or more over the previous hop that answered is a latency jump
+  (amber "+81"). It is a horizontal listbox with a roving tab stop: arrow
+  keys, Home and End move the selection and the focus.
+- **Hover card** (`lib/hoverCard.ts`, `HoverCard.tsx`): host name, address,
+  ASN and holder, the place with source, confidence and radius, RTT, loss,
+  and a note for anycast, private addresses, RTT conflicts and pending
+  lookups. It reads the run in the store only, so hovering sends no request.
+  `placeCard` keeps it in the window: next to the pointer and flipped near
+  the right and bottom edges, or centred above a timeline hop and below it
+  near the top. It ignores the pointer and hides during exports (and is
+  placed again when the export ends). Escape hides the card shown for a hop
+  focused in the timeline and keeps the highlight (WCAG 1.4.13).
+
+### Attribution
+
+A chip in the lower right corner ("NASA, GIBS, CesiumJS") opens the list of
+sources in `lib/attribution.ts`, consistent with
+[third-party-data.md](./third-party-data.md), including the
+acknowledgements that NASA GIBS and MaxMind GeoLite2 ask for. GIBS served
+the bundled tiles too, so its credit and acknowledgement always show; while
+online imagery is off, its entry adds "Online tiles: off". Sources are plain
+text: a link would open inside the app window.
+
+### Cost of the glass panels
+
+`backdrop-filter` over the WebGL canvas costs nothing while the globe is
+idle: the canvas does not change, so the compositor reuses the blurred
+backdrop. `scripts/globe-check/check.mjs` records a Chrome trace during each
+5 s idle window and counts `DrawFrame`, `BeginFrame` and `Paint` events: 0
+with the panels over an idle globe, while a control with one animated
+element makes over 200. UI animations are CSS transitions on user actions
+only; nothing animates while the app is idle.
+
 ## Settings and storage
 
 | What | Where |
 | --- | --- |
-| Settings (GeoIP paths, preferences, integrations, PeeringDB key) | `$APPDATA/settings.json` |
+| Settings (GeoIP paths, preferences, integrations, PeeringDB key; theme, layer switches and collapsed panels in `preferences.ui`) | `$APPDATA/settings.json` |
 | GeoLite2 downloads | `$APPDATA/databases/` |
 | Provider cache, including the PeeringDB IX list | `$APPCACHE/enrichment-cache.json` |
 | Globe tiles downloaded from NASA GIBS (500 MB, least recently used first out) | `$APPCACHE/tiles/` |
@@ -571,6 +793,8 @@ after a failed tile. Outside the desktop app (a plain browser) there is no
 
 Integration settings are validated in `set_settings` (`IntegrationSettings::validated`):
 the RDAP base URL must be `http(s)`, the PeeringDB key must not contain spaces.
+UI preferences are validated too (`UiPreferences::validated`), see
+[UI shell](#ui-shell).
 
 ## Security
 
