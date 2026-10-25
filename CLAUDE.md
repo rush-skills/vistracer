@@ -28,7 +28,7 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (352 tests across 38 files)
+npm run test           # Run unit + component tests (356 tests across 38 files)
 npm run test:e2e       # Run e2e tests (84 tests across 7 files)
 npm run test:watch     # Run tests in watch mode
 node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): wide start view, idle frames and compositor frames, online tile requests (incl. the online imagery switch), export input lock, infrastructure layers (no request while off, each source once, cable consent, no request to TeleGeography), satellites (no request or SGP4 code while off, consent, one frame per second, none while hidden), accessible names in headless Chrome (50 checks)
@@ -235,7 +235,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 352 tests across 38 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 356 tests across 38 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 11 tests: store behavior, hovered hop, user selections ignored during an export
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
@@ -260,20 +260,20 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - `src/renderer/modules/app/components/__tests__/LayerPanel.test.tsx` — 7 tests: switches from the registry by group, online imagery off saved, Escape returns focus, child switches, data status, cable notice before the first show and only once, satellite groups under Satellites behind their notice
   - `src/renderer/modules/app/components/__tests__/AsnLegend.test.tsx` — 2 tests: legend of the route's networks, status bar legend switches
   - `src/renderer/modules/app/components/__tests__/HopTimeline.test.tsx` — 9 tests: RTT/loss/confidence/jumps, selection sync both ways, arrow keys/Home/End, selection left to an export (keys still prevented), Escape hides the card, hover sync, scroll into view, aria-controls only to an existing list, collapse saved
-  - `src/renderer/modules/app/components/__tests__/HoverCard.test.tsx` — 6 tests: content from the store with no bridge call or fetch, satellite card (name, NORAD id, altitude, element age), likely satellite link of a hop, placed again after an export, no card for table hover or during export, site card from the loaded data (a hop wins)
+  - `src/renderer/modules/app/components/__tests__/HoverCard.test.tsx` — 7 tests: content from the store with no bridge call or fetch, satellite card (name, NORAD id, altitude, element age), likely satellite link of a hop (a low-confidence one called possible, with the reason), placed again after an export, no card for table hover or during export, site card from the loaded data (a hop wins)
   - `src/renderer/modules/app/components/__tests__/CommandPalette.test.tsx` — 12 tests: open/close per platform, held shortcut, focus return, combobox/listbox roles, fuzzy match, execute, disabled commands, typed host, focus trap (Tab and presses inside the bar), empty result, not over another dialog
   - `src/renderer/modules/app/components/__tests__/Attribution.test.tsx` — 4 tests: full credit list with required notices, GIBS credit and acknowledgement also while online imagery is off, TeleGeography credit and chip only while the cable layer is on, CelesTrak while the satellites are on and satellite.js always
   - `src/renderer/modules/app/components/__tests__/FooterBar.test.tsx` — 1 test: a finished export's reset timer does not end the next export
-  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 19 tests: infrastructure section (cloud match, nearest data centre), likely satellite link with a button that opens the notice (focus into it and back with Escape), dots in network colours, multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, row selection (not during an export), hover sync, scroll to selection, focus kept when the pane collapses
+  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 20 tests: infrastructure section (cloud match, nearest data centre), likely satellite link with a button that opens the notice (focus into it and back with Escape), a low-confidence link called possible, without the button, dots in network colours, multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, row selection (not during an export), hover sync, scroll to selection, focus kept when the pane collapses
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 11 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing, online tile disclosure
   - `src/renderer/modules/app/lib/__tests__/tileCache.test.ts` — 2 tests: cache size text
   - `src/renderer/modules/app/lib/__tests__/exportCredits.test.ts` — 2 tests: TeleGeography and CelesTrak credits in exports only while their layer is on, drawn in the lower right corner
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
-  - `src/renderer/hooks/__tests__/useInfraLoading.test.tsx` — 2 tests: a source read again when one of its layers is turned off and on (also while a sibling layer stays on), a failed source retried only then
+  - `src/renderer/hooks/__tests__/useInfraLoading.test.tsx` — 3 tests: a source read again when one of its layers is turned off and on (also while a sibling layer stays on), a failed source retried only then, a missing exchange list read again after a trace for the layers that show it
   - `src/renderer/lib/satellites/__tests__/propagate.test.ts` — 5 tests: SGP4 against Vallado's case 00005 (distance and z to the metre at 0 and 360 min), a geostationary longitude against IAU 1982 sidereal time (independent of satellite.js), a Starlink-like height, NaN for a decayed satellite
   - `src/renderer/lib/satellites/__tests__/clock.test.ts` — 5 tests: nothing while there is nothing to move, at most one update a second (also with new data), the first data at once, paused while hidden and one catch-up, stopped and disposed
-  - `src/renderer/lib/satellites/__tests__/satellites.test.ts` — 15 tests: `parseSatelliteGroup` (keys, malformed records dropped and counted, wrong group or shape), satellite ISP match (Starlink medium, GEO by RTT, other networks ignored, highlight only likely links), drawing (style, stable arrays, highlight, even thinning, 3:1 on the dark globe), `planSatelliteGroups` (keep, rebuild, remove), satellite card and key, element age text
+  - `src/renderer/lib/satellites/__tests__/satellites.test.ts` — 15 tests: `parseSatelliteGroup` (keys, malformed records dropped and counted, wrong group or shape), satellite ISP match (Starlink medium, GEO by RTT, other networks ignored, highlight only likely links, "possible" wording for low confidence), drawing (style, stable arrays, highlight, even thinning, 3:1 on the dark globe), `planSatelliteGroups` (keep, rebuild, remove), satellite card and key (own group names only), element age text
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
 
 - **E2E tests** (`vitest.e2e.config.ts`): 84 tests across 7 files
