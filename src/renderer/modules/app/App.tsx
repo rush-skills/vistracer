@@ -10,6 +10,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { Toolbar } from "./components/Toolbar";
 import { LayerPanel } from "./components/LayerPanel";
 import { HopTimeline } from "./components/HopTimeline";
+import { HoverCard } from "./components/HoverCard";
 import { useUpdateStore } from "@renderer/state/updateStore";
 import { selectTheme, useUiStore } from "@renderer/state/uiStore";
 import { UI_EVENTS } from "./lib/uiEvents";
@@ -158,6 +159,7 @@ export const App: React.FC = () => {
           <FooterBar />
         </div>
       </div>
+      <HoverCard />
       <UpdateBanner />
       <OnboardingModal
         isOpen={isOnboardingOpen}

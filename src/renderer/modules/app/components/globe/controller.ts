@@ -17,7 +17,8 @@ export interface GlobeController {
 
 export interface GlobeCallbacks {
   onSelectHop(hopIndex: number): void;
-  onHoverHop(hopIndex: number | undefined): void;
+  /** `at`: the pointer in client pixels, while a hop is under it. */
+  onHoverHop(hopIndex: number | undefined, at?: { x: number; y: number }): void;
   /** A detailed tile failed to load; the bundled imagery shows instead. */
   onImageryError(message: string): void;
 }

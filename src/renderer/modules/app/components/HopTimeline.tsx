@@ -99,6 +99,11 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
   }, [selectedHopIndex, collapsed]);
 
   const { setSelectedHop, setHoveredHop } = useTracerouteStore.getState();
+  /** The hover card points at the hop's column. */
+  const hover = (hopIndex: number, element: HTMLElement) => {
+    const { left, top, width, height } = element.getBoundingClientRect();
+    setHoveredHop(hopIndex, { kind: "rect", left, top, width, height });
+  };
   const focusIndex = hops.some((hop) => hop.hopIndex === selectedHopIndex)
     ? selectedHopIndex
     : hops[0]?.hopIndex;
@@ -190,9 +195,9 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
                   tabIndex={hop.hopIndex === focusIndex ? 0 : -1}
                   className={className}
                   onClick={() => setSelectedHop(hop.hopIndex)}
-                  onMouseEnter={() => setHoveredHop(hop.hopIndex)}
+                  onMouseEnter={(event) => hover(hop.hopIndex, event.currentTarget)}
                   onMouseLeave={() => setHoveredHop(undefined)}
-                  onFocus={() => setHoveredHop(hop.hopIndex)}
+                  onFocus={(event) => hover(hop.hopIndex, event.currentTarget)}
                   onBlur={() => setHoveredHop(undefined)}
                 >
                   <span className="timeline__jump" aria-hidden>

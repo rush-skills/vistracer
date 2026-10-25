@@ -50,7 +50,8 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
         }
         created = createCesiumGlobe(container, {
           onSelectHop: setSelectedHop,
-          onHoverHop: setHoveredHop,
+          onHoverHop: (hopIndex, at) =>
+            setHoveredHop(hopIndex, at && { kind: "point", x: at.x, y: at.y }),
           onImageryError: () => {
             setImageryNotice(true);
             window.clearTimeout(noticeTimer);

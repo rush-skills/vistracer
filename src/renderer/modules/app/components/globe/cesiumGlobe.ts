@@ -311,14 +311,17 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
 
   let hovered: number | undefined;
   let hoverPosition: Cartesian2 | undefined;
+  let hoverClient: { x: number; y: number } | undefined;
   let hoverTimer: number | undefined;
+  // While a hop stays under the pointer, each pick (at most every
+  // HOVER_PICK_MS) passes the new pointer position for the hover card.
   const setHovered = (hopIndex: number | undefined) => {
-    if (hopIndex === hovered) {
+    if (hopIndex === hovered && hopIndex == null) {
       return;
     }
     hovered = hopIndex;
     canvas.style.cursor = hopIndex == null ? "" : "pointer";
-    callbacks.onHoverHop(hopIndex);
+    callbacks.onHoverHop(hopIndex, hopIndex == null ? undefined : hoverClient);
   };
   const pickHover = () => {
     hoverTimer = undefined;
@@ -339,10 +342,12 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     }
     const rect = canvas.getBoundingClientRect();
     hoverPosition = new Cartesian2(event.clientX - rect.left, event.clientY - rect.top);
+    hoverClient = { x: event.clientX, y: event.clientY };
     hoverTimer ??= window.setTimeout(pickHover, HOVER_PICK_MS);
   };
   const onPointerLeave = () => {
     hoverPosition = undefined;
+    hoverClient = undefined;
     window.clearTimeout(hoverTimer);
     hoverTimer = undefined;
     setHovered(undefined);

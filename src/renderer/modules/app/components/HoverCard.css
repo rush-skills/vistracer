@@ -1,0 +1,59 @@
+.hover-card {
+  position: fixed;
+  z-index: var(--z-card);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: max-content;
+  max-width: 300px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  pointer-events: none;
+}
+
+.hover-card__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.hover-card__rtt {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.hover-card__host {
+  overflow-wrap: anywhere;
+}
+
+.hover-card__address {
+  color: var(--color-text-muted);
+}
+
+.hover-card__network {
+  color: var(--color-text-muted);
+}
+
+.hover-card__place {
+  margin-top: var(--space-1);
+}
+
+.hover-card__place small {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.hover-card__loss {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.hover-card__note {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+}
