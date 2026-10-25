@@ -1203,7 +1203,7 @@ idle window of 0 frames. Before `wakeForFrame`, the same 10 moves ran
 | Provider cache, including the PeeringDB IX list (exchanges, prefixes and facilities) | `$APPCACHE/enrichment-cache.json` |
 | Globe tiles downloaded from NASA GIBS (500 MB, least recently used first out) | `$APPCACHE/tiles/` |
 | Submarine cable map from TeleGeography (only after the user opted in; about 0.3 MB, used for 7 days) | `$APPCACHE/submarine-cables.json` |
-| Satellite groups from CelesTrak (only after the user opted in; Starlink about 2.8 MB, used for 12 hours) and the request log | `$APPCACHE/satellites/<group>.json`, `$APPCACHE/satellites/requests.json` |
+| Satellite groups from CelesTrak (only after the user opted in; Starlink about 3.4 MB, used for 12 hours) and the request log | `$APPCACHE/satellites/<group>.json`, `$APPCACHE/satellites/requests.json` |
 | Cloud regions | bundled (`src/renderer/public/infra/cloud-regions.json`) |
 | Airport table for host name hints | compiled in (`src-tauri/data/airports.csv`, see `src-tauri/data/README.md`) |
 | Reverse DNS cache, recent runs | memory only |
