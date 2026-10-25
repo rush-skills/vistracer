@@ -43,6 +43,7 @@ import {
   nightImageryShare,
   onlineTileTemplate
 } from "@renderer/lib/imagery";
+import { prefersReducedMotion } from "@renderer/lib/motion";
 import { GOVERNOR_RULES, RenderGovernor, renderQuality } from "@renderer/lib/renderGovernor";
 import type { CreateGlobe } from "./controller";
 
@@ -408,7 +409,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     .catch(() => undefined);
 
   const sunTimer = window.setInterval(() => scene.requestRender(), GOVERNOR_RULES.sunRefreshMs);
-  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const reducedMotion = prefersReducedMotion();
 
   scene.requestRender();
 
