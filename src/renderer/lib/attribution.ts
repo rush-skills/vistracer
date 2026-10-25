@@ -15,8 +15,11 @@ export interface Credit {
   source: string;
   /** Required acknowledgement wording, when the provider asks for one. */
   notice?: string;
-  /** Only used while online imagery is on. */
-  onlineOnly?: boolean;
+  /**
+   * Also serves the online tiles, which the "Online imagery" switch turns
+   * off. The credit stays either way; only a note says the online tiles are off.
+   */
+  servesOnlineTiles?: true;
 }
 
 export const CREDITS: readonly Credit[] = [
@@ -44,12 +47,13 @@ export const CREDITS: readonly Credit[] = [
   {
     name: "NASA GIBS",
     group: "Globe",
-    use: "Sharper day imagery when you zoom in",
+    // scripts/build-globe-imagery.mjs takes the bundled tiles from GIBS too.
+    use: "Served the bundled day and night tiles, and sharper day tiles when you zoom in (online imagery)",
     licence: "Open data",
     source: "gibs.earthdata.nasa.gov",
     notice:
       "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS).",
-    onlineOnly: true
+    servesOnlineTiles: true
   },
   {
     name: "Natural Earth",

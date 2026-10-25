@@ -35,14 +35,23 @@ describe("Attribution", () => {
     expect(document.activeElement).toBe(toggle);
   });
 
-  it("says that GIBS is not used while online imagery is off", () => {
+  it("credits GIBS with its acknowledgement also while online imagery is off", () => {
+    // The bundled day and night tiles come from GIBS too
+    // (scripts/build-globe-imagery.mjs), so the credit never goes away.
+    const gibs = () => screen.getByText("NASA GIBS").closest("li");
     render(<Attribution />);
-    act(() => useUiStore.setState({ layers: { "online-imagery": false } }));
     const toggle = screen.getByRole("button", { name: "Data sources and credits" });
-    expect(toggle.textContent).toBe("NASA, CesiumJS");
     fireEvent.click(toggle);
-    const panel = screen.getByRole("dialog");
-    expect(panel.textContent).toContain("Not used: online imagery is off.");
-    expect(panel.textContent).not.toContain("We acknowledge the use of imagery");
+    expect(gibs()?.textContent).toContain("Served the bundled day and night tiles");
+    expect(gibs()?.textContent).not.toContain("Online tiles: off.");
+
+    act(() => useUiStore.setState({ layers: { "online-imagery": false } }));
+    expect(toggle.textContent).toBe("NASA, GIBS, CesiumJS");
+    expect(gibs()?.textContent).toContain("Served the bundled day and night tiles");
+    expect(gibs()?.textContent).toContain("Online tiles: off.");
+    expect(gibs()?.textContent).toContain(
+      "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS)"
+    );
+    expect(screen.getByRole("dialog").textContent).not.toContain("Not used");
   });
 });

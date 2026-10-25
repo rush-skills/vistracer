@@ -751,9 +751,10 @@ it, and the focus returns to where it was.
 A chip in the lower right corner ("NASA, GIBS, CesiumJS") opens the list of
 sources in `lib/attribution.ts`, consistent with
 [third-party-data.md](./third-party-data.md), including the
-acknowledgements that NASA GIBS and MaxMind GeoLite2 ask for. While online
-imagery is off, GIBS is listed as not used. Sources are plain text: a link
-would open inside the app window.
+acknowledgements that NASA GIBS and MaxMind GeoLite2 ask for. GIBS served
+the bundled tiles too, so its credit and acknowledgement always show; while
+online imagery is off, its entry adds "Online tiles: off". Sources are plain
+text: a link would open inside the app window.
 
 ### Cost of the glass panels
 

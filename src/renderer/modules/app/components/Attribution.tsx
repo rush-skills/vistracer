@@ -62,21 +62,18 @@ export const Attribution: React.FC = () => {
             <section key={group} className="attribution__group" aria-label={group}>
               <h3>{group}</h3>
               <ul>
-                {CREDITS.filter((credit) => credit.group === group).map((credit) => {
-                  const unused = credit.onlineOnly && !online;
-                  return (
-                    <li key={credit.name} className={unused ? "attribution__unused" : undefined}>
-                      <strong>{credit.name}</strong> {credit.use}
-                      <small>
-                        {credit.licence}. {credit.source}
-                        {unused && ". Not used: online imagery is off."}
-                      </small>
-                      {credit.notice && !unused && (
-                        <small className="attribution__notice">{credit.notice}</small>
-                      )}
-                    </li>
-                  );
-                })}
+                {CREDITS.filter((credit) => credit.group === group).map((credit) => (
+                  <li key={credit.name}>
+                    <strong>{credit.name}</strong> {credit.use}
+                    <small>
+                      {credit.licence}. {credit.source}
+                      {credit.servesOnlineTiles && !online && ". Online tiles: off."}
+                    </small>
+                    {credit.notice && (
+                      <small className="attribution__notice">{credit.notice}</small>
+                    )}
+                  </li>
+                ))}
               </ul>
             </section>
           ))}
@@ -92,7 +89,7 @@ export const Attribution: React.FC = () => {
         onClick={() => (open ? close() : setOpen(true))}
       >
         <FiInfo aria-hidden />
-        <span>{online ? "NASA, GIBS, CesiumJS" : "NASA, CesiumJS"}</span>
+        <span>NASA, GIBS, CesiumJS</span>
       </button>
     </div>
   );
