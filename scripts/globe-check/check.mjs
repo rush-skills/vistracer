@@ -212,14 +212,16 @@ try {
     }
     return false;
   };
-  const canvasShot = async () => {
-    const rect = await evaluate(`(() => {
-      const r = document.querySelector('.globe-viewport canvas').getBoundingClientRect();
-      return { x: r.left, y: r.top, width: r.width, height: r.height };
+  // A fingerprint of the WebGL canvas's own pixels (it keeps its drawing
+  // buffer for exports). Not a screenshot: the panels float over the canvas,
+  // and their focus rings and hover states are not the globe.
+  const canvasShot = () =>
+    evaluate(`(() => {
+      const data = document.querySelector('.globe-viewport canvas').toDataURL();
+      let hash = 0;
+      for (let i = 0; i < data.length; i += 1) hash = (hash * 31 + data.charCodeAt(i)) | 0;
+      return data.length + ':' + hash;
     })()`);
-    return (await send("Page.captureScreenshot", { format: "png", clip: { ...rect, scale: 1 } }))
-      .data;
-  };
   let dragDuringExport;
   const exportTiles = await tilesDuring(async () => {
     await startExport("png");
@@ -330,6 +332,7 @@ try {
 
   const { x, y } = await centre();
   const beforeDrag = await counters();
+  const canvasBeforeDrag = await canvasShot();
   await mouse("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1 });
   for (let i = 1; i <= 20; i += 1) {
     await mouse("mouseMoved", x + i * 6, y + i * 2, { button: "left", buttons: 1 });
@@ -338,10 +341,12 @@ try {
   await mouse("mouseReleased", x + 120, y + 40, { button: "left", buttons: 0, clickCount: 1 });
   await sleep(2000);
   const afterDrag = await counters();
+  // Also shows that the canvas fingerprint above sees a moved globe.
+  const canvasMoved = canvasBeforeDrag !== (await canvasShot());
   check(
-    "a drag draws frames",
-    afterDrag.raf - beforeDrag.raf > 0,
-    `${afterDrag.raf - beforeDrag.raf} animation frames`
+    "a drag draws frames and moves the globe",
+    afterDrag.raf - beforeDrag.raf > 0 && canvasMoved,
+    `${afterDrag.raf - beforeDrag.raf} animation frames, canvas ${canvasMoved ? "changed" : "unchanged"}`
   );
   await idleWindow("after a drag");
 
