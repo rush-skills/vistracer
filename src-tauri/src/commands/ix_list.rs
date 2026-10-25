@@ -255,7 +255,11 @@ impl IxStore {
             state.downloading = false;
             match result {
                 Ok(dataset) => {
-                    self.cache.insert(IX_CACHE_KEY, Some(dataset.clone()));
+                    // One time for memory and disk: the exchange layers show
+                    // it, and must show the same after a restart.
+                    let stored_at_ms = now_ms();
+                    self.cache
+                        .insert_at(IX_CACHE_KEY, Some(dataset.clone()), stored_at_ms);
                     let index = Arc::new(IxIndex::new(dataset));
                     log::info!(
                         "Loaded {} IX peering LAN prefixes from PeeringDB",
@@ -263,7 +267,7 @@ impl IxStore {
                     );
                     state.loaded = Some(LoadedIx {
                         index,
-                        stored_at_ms: now_ms(),
+                        stored_at_ms,
                     });
                     state.last_failure = None;
                 }
