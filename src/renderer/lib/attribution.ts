@@ -26,6 +26,17 @@ export interface Credit {
   layer?: string;
 }
 
+/**
+ * The notices that exported images and videos must carry: those of opt-in
+ * data whose layer is on (CC BY asks for attribution in the medium, and an
+ * export leaves the app). Empty while no such layer is on.
+ */
+export function exportCredits(visibility: Readonly<Record<string, boolean>>): string[] {
+  return CREDITS.flatMap((credit) =>
+    credit.layer && credit.notice && visibility[credit.layer] ? [credit.notice] : []
+  );
+}
+
 export const CREDITS: readonly Credit[] = [
   {
     name: "CesiumJS",

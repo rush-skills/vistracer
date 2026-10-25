@@ -1,7 +1,10 @@
 import type { TracerouteRun } from "@common/ipc";
+import { exportCredits } from "@renderer/lib/attribution";
 import { hopIndexToColor, hopPosition } from "@renderer/lib/globe";
 import { createGif } from "@renderer/lib/gifjs";
+import { layerVisibility } from "@renderer/lib/layers";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
+import { useUiStore } from "@renderer/state/uiStore";
 
 export type ExportFormat = "png" | "jpg" | "webp" | "webm" | "gif";
 
@@ -40,14 +43,51 @@ const downloadBlob = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
+/**
+ * Credit lines in the lower right corner of an exported frame, on the
+ * globe's chip colours (`--globe-chip-bg`, `--color-on-globe`).
+ */
+export const drawCredits = (
+  ctx: Pick<
+    CanvasRenderingContext2D,
+    "font" | "fillStyle" | "textBaseline" | "measureText" | "fillRect" | "fillText"
+  >,
+  width: number,
+  height: number,
+  credits: readonly string[]
+) => {
+  if (credits.length === 0) {
+    return;
+  }
+  const size = Math.round(Math.max(11, height * 0.014));
+  const pad = Math.round(size * 0.6);
+  const lineHeight = Math.round(size * 1.35);
+  ctx.font = `500 ${size}px 'Inter', 'Segoe UI', sans-serif`;
+  const textWidth = Math.max(...credits.map((line) => ctx.measureText(line).width));
+  const boxWidth = Math.ceil(textWidth) + pad * 2;
+  const boxHeight = lineHeight * (credits.length - 1) + size + pad * 2;
+  const x = width - boxWidth - pad;
+  const y = height - boxHeight - pad;
+  ctx.fillStyle = "rgba(5, 8, 14, 0.72)";
+  ctx.fillRect(x, y, boxWidth, boxHeight);
+  ctx.fillStyle = "#eef2f8";
+  ctx.textBaseline = "top";
+  credits.forEach((line, index) => ctx.fillText(line, x + pad, y + pad + index * lineHeight));
+};
+
 const drawOverlay = (
   ctx: CanvasRenderingContext2D,
   sourceCanvas: HTMLCanvasElement,
-  hop: TracerouteRun["hops"][number]
+  hop: TracerouteRun["hops"][number] | undefined,
+  credits: readonly string[]
 ) => {
   const { width, height } = sourceCanvas;
   ctx.clearRect(0, 0, width, height);
   ctx.drawImage(sourceCanvas, 0, 0, width, height);
+  drawCredits(ctx, width, height, credits);
+  if (!hop) {
+    return;
+  }
 
   const padding = Math.round(width * 0.018);
   const maxBoxWidth = Math.round(Math.min(width * 0.26, 240));
@@ -186,10 +226,11 @@ const captureImageBlob = async (
   canvas: HTMLCanvasElement,
   overlayCtx: CanvasRenderingContext2D,
   hop: TracerouteRun["hops"][number] | undefined,
-  format: "image/png" | "image/jpeg" | "image/webp"
+  format: "image/png" | "image/jpeg" | "image/webp",
+  credits: readonly string[]
 ): Promise<Blob> => {
-  if (hop) {
-    drawOverlay(overlayCtx, canvas, hop);
+  if (hop || credits.length > 0) {
+    drawOverlay(overlayCtx, canvas, hop, credits);
     return await new Promise<Blob>((resolve, reject) => {
       overlayCtx.canvas.toBlob((blob) => {
         if (!blob) {
@@ -216,7 +257,8 @@ const captureGif = async (
   hops: TracerouteRun["hops"],
   canvas: HTMLCanvasElement,
   overlayCtx: CanvasRenderingContext2D,
-  dwellSeconds: number
+  dwellSeconds: number,
+  credits: readonly string[]
 ): Promise<Blob> => {
   const gif = await createGif({ workers: 4, quality: 20, repeat: 0, background: "#000" });
   const store = useTracerouteStore.getState();
@@ -244,7 +286,7 @@ const captureGif = async (
       }
       const endTime = performance.now() + Math.max(frameInterval, dwellSeconds * 1000);
       while (performance.now() < endTime) {
-        drawOverlay(overlayCtx, canvas, hop);
+        drawOverlay(overlayCtx, canvas, hop, credits);
         gif.addFrame(overlayCtx.canvas, {
           copy: true,
           delay: frameDelay
@@ -266,7 +308,8 @@ const captureWebm = async (
   hops: TracerouteRun["hops"],
   canvas: HTMLCanvasElement,
   overlayCtx: CanvasRenderingContext2D,
-  dwellSeconds: number
+  dwellSeconds: number,
+  credits: readonly string[]
 ): Promise<Blob> => {
   const fps = 30;
   const interval = 1000 / fps;
@@ -320,7 +363,7 @@ const captureWebm = async (
       }
       const endTime = performance.now() + dwellSeconds * 1000;
       while (performance.now() < endTime) {
-        drawOverlay(overlayCtx, canvas, hop);
+        drawOverlay(overlayCtx, canvas, hop, credits);
         await wait(interval);
       }
     }
@@ -351,6 +394,8 @@ export const runExport = async (options: ExportOptions, run: TracerouteRun): Pro
   const { setSelectedHop, setCaptureActive } = store;
   const originalSelected = store.selectedHopIndex;
 
+  // Opt-in data shown on the globe is credited in the file too.
+  const credits = exportCredits(layerVisibility(useUiStore.getState().layers));
   const sortedHops = run.hops.slice().sort((a, b) => a.hopIndex - b.hopIndex);
   const hopsWithGeo = sortedHops.filter((hop) => hopPosition(hop));
   const firstGeoHop = hopsWithGeo[0] ?? sortedHops[0];
@@ -377,7 +422,7 @@ export const runExport = async (options: ExportOptions, run: TracerouteRun): Pro
       case "jpg":
       case "webp": {
         const mime = options.format === "png" ? "image/png" : options.format === "jpg" ? "image/jpeg" : "image/webp";
-        const blob = await captureImageBlob(canvas, ctx, undefined, mime);
+        const blob = await captureImageBlob(canvas, ctx, undefined, mime, credits);
         const filename = buildFilename("vistracer-snapshot", options.format);
         downloadBlob(blob, filename);
         return { filename };
@@ -392,7 +437,7 @@ export const runExport = async (options: ExportOptions, run: TracerouteRun): Pro
           setSelectedHop(undefined);
           await waitNextFrame();
         }
-        const blob = await captureGif(sortedHops, canvas, ctx, options.dwellSeconds);
+        const blob = await captureGif(sortedHops, canvas, ctx, options.dwellSeconds, credits);
         const filename = buildFilename("vistracer-route", "gif");
         downloadBlob(blob, filename);
         setCaptureActive(false);
@@ -408,7 +453,7 @@ export const runExport = async (options: ExportOptions, run: TracerouteRun): Pro
           setSelectedHop(undefined);
           await waitNextFrame();
         }
-        const blob = await captureWebm(sortedHops, canvas, ctx, options.dwellSeconds);
+        const blob = await captureWebm(sortedHops, canvas, ctx, options.dwellSeconds, credits);
         const filename = buildFilename("vistracer-route", "webm");
         downloadBlob(blob, filename);
         setCaptureActive(false);
