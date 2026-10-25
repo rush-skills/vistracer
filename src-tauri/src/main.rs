@@ -6,6 +6,7 @@ mod commands;
 mod geoloc;
 mod net;
 mod types;
+mod upstream;
 
 use commands::app_info::{updater_pubkey_configured, AppInfo};
 use commands::geo::{
@@ -18,7 +19,7 @@ use commands::persistence::{
     IntegrationSettings, SharedStore, UiPreferences,
 };
 use commands::tile_cache::{
-    into_response, HttpFetcher, TileCacheInfo, TileError, TileService, TileStore,
+    into_response, tile_fetcher, HttpFetcher, TileCacheInfo, TileError, TileService, TileStore,
     DEFAULT_CAP_BYTES, TILE_SCHEME,
 };
 use commands::traceroute::{
@@ -325,7 +326,7 @@ fn main() {
 
             let tiles = Arc::new(TileService::new(
                 TileStore::new(cache_dir.join("tiles"), DEFAULT_CAP_BYTES),
-                HttpFetcher::default(),
+                tile_fetcher(),
             ));
             // Before the webview can ask for a tile.
             tiles.set_online_enabled(
