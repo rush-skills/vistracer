@@ -154,8 +154,11 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
     const { tracker, focus } = nextCameraFocus(trackerRef.current, runKey, hops, selectedHopIndex);
     trackerRef.current = tracker;
     if (focus) {
+      // An export records the canvas without the panels, so its flights
+      // centre the hop in the whole canvas.
       const canvas = containerRef.current;
-      controller.flyTo(focus, canvas ? measureInsets(canvas) : undefined);
+      const exporting = useTracerouteStore.getState().captureActive;
+      controller.flyTo(focus, canvas && !exporting ? measureInsets(canvas) : undefined);
     }
   }, [controller, runKey, hops, selectedHopIndex]);
 

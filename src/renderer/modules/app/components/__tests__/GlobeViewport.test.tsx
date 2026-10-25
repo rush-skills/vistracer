@@ -256,6 +256,20 @@ describe("GlobeViewport", () => {
     expect(useInfraStore.getState().hoveredSite).toBeUndefined();
   });
 
+  it("frames flights in the whole canvas during an export, which records no panels", async () => {
+    const run = runWith([located(1, 50.1, 8.7), located(2, 52.4, 4.9)]);
+    const { rerender } = render(<GlobeViewport run={run} selectedHopIndex={1} />);
+    await waitFor(() => expect(fake.controller.flyTo).toHaveBeenCalled());
+    expect(fake.controller.flyTo.mock.calls.at(-1)?.[1]).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    act(() => useTracerouteStore.getState().setCaptureActive(true));
+    rerender(<GlobeViewport run={run} selectedHopIndex={2} />);
+    expect(fake.controller.flyTo.mock.calls.at(-1)).toEqual([
+      { latitude: 52.4, longitude: 4.9, radiusKm: 50 },
+      undefined
+    ]);
+    act(() => useTracerouteStore.getState().setCaptureActive(false));
+  });
+
   it("does not rebuild site markers or cables for a hop update that changes nothing", async () => {
     const cableMap = {
       fetchedAt: 1,

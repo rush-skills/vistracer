@@ -613,6 +613,9 @@ export interface ViewFrame {
 const MIN_FREE_SHARE = 0.3;
 
 function freeArea(frame: ViewFrame): { width: number; height: number } | null {
+  if (!(frame.widthPx > 0 && frame.heightPx > 0)) {
+    return null;
+  }
   const width = frame.widthPx - frame.insets.left - frame.insets.right;
   const height = frame.heightPx - frame.insets.top - frame.insets.bottom;
   return width >= frame.widthPx * MIN_FREE_SHARE && height >= frame.heightPx * MIN_FREE_SHARE

@@ -420,42 +420,60 @@ describe("automatic camera moves use only bundled imagery", () => {
     ]);
   });
 
-  it("follows a whole trace from a zoomed-in view without crossing new ground below the floor", () => {
-    const route: Array<[number, number]> = [
-      [19.08, 72.88],
-      [13.08, 80.27],
-      [43.3, 5.37],
-      [50.11, 8.68],
-      [51.51, -0.13],
-      [40.71, -74.01]
-    ];
-    let position: CameraPosition = { latitude: 19.0, longitude: 72.8, height: 250_000 };
-    let tracker = INITIAL_CAMERA_TRACKER;
-    const hops: HopResolution[] = [];
-    let moves = 0;
-    route.forEach(([latitude, longitude], index) => {
-      const hopIndex = index + 1;
-      hops.push(baseHop({ hopIndex, location: at(latitude, longitude, "high", 30) }));
-      // The store selects each new hop during a run.
-      const next = nextCameraFocus(tracker, "run", [...hops], hopIndex);
-      tracker = next.tracker;
-      if (!next.focus) {
-        return;
-      }
-      for (const step of planFlight(position, next.focus, floor)) {
-        if (step.kind === "move") {
-          moves += 1;
-          // Cesium interpolates the height of a flat flight between both ends.
-          expect(Math.min(position.height, step.height)).toBeGreaterThanOrEqual(floor);
-          expect(levelFourError(step.height)).toBeLessThan(2);
-        } else {
-          expect([step.latitude, step.longitude]).toEqual([position.latitude, position.longitude]);
+  // The app passes a frame for the panels (here 960 × 640 with the hop
+  // pane, the timeline and the trace panel): the floor must hold as well.
+  const PANELS = {
+    insets: { top: 80, right: 348, bottom: 200, left: 0 },
+    widthPx: 960,
+    heightPx: 640,
+    fovRad: FOV
+  };
+
+  it.each([
+    ["without a frame", undefined],
+    ["framed in the free area", PANELS]
+  ] as const)(
+    "follows a whole trace from a zoomed-in view without crossing new ground below the floor (%s)",
+    (_name, frame) => {
+      const route: Array<[number, number]> = [
+        [19.08, 72.88],
+        [13.08, 80.27],
+        [43.3, 5.37],
+        [50.11, 8.68],
+        [51.51, -0.13],
+        [40.71, -74.01]
+      ];
+      let position: CameraPosition = { latitude: 19.0, longitude: 72.8, height: 250_000 };
+      let tracker = INITIAL_CAMERA_TRACKER;
+      const hops: HopResolution[] = [];
+      let moves = 0;
+      route.forEach(([latitude, longitude], index) => {
+        const hopIndex = index + 1;
+        hops.push(baseHop({ hopIndex, location: at(latitude, longitude, "high", 30) }));
+        // The store selects each new hop during a run.
+        const next = nextCameraFocus(tracker, "run", [...hops], hopIndex);
+        tracker = next.tracker;
+        if (!next.focus) {
+          return;
         }
-        position = step;
-      }
-    });
-    expect(moves).toBe(route.length);
-  });
+        for (const step of planFlight(position, next.focus, floor, frame)) {
+          if (step.kind === "move") {
+            moves += 1;
+            // Cesium interpolates the height of a flat flight between both ends.
+            expect(Math.min(position.height, step.height)).toBeGreaterThanOrEqual(floor);
+            expect(levelFourError(step.height)).toBeLessThan(2);
+          } else {
+            expect([step.latitude, step.longitude]).toEqual([
+              position.latitude,
+              position.longitude
+            ]);
+          }
+          position = step;
+        }
+      });
+      expect(moves).toBe(route.length);
+    }
+  );
 });
 
 describe("network colours", () => {
@@ -466,7 +484,12 @@ describe("network colours", () => {
       asn: asn == null ? null : { asn, name: `AS-${asn}` },
       location: at(latitude, longitude)
     });
-  const hops = [hop(1, 19.08, 72.88, 9498), hop(2, 13.08, 80.27, 9498), hop(3, 43.3, 5.37, 6453), hop(4, 50.11, 8.68)];
+  const hops = [
+    hop(1, 19.08, 72.88, 9498),
+    hop(2, 13.08, 80.27, 9498),
+    hop(3, 43.3, 5.37, 6453),
+    hop(4, 50.11, 8.68)
+  ];
 
   it("colours markers and rings by network, and hops without an ASN in grey", () => {
     const scene = buildGlobeScene(hops, undefined, undefined, { asnColors: true });
