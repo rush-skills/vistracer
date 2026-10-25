@@ -102,20 +102,56 @@ fn is_registry_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// A damaged `ui` section in settings.json falls back to the defaults. A
-/// strict parse would fail the whole file and also drop the database paths
-/// and provider settings.
+/// Reads the saved `ui` section field by field, like `normalizeUiPreferences`
+/// in src/renderer/lib/uiPreferences.ts: a field that does not parse falls
+/// back to its default, and a bad entry is dropped on its own. So one bad
+/// value (for example a theme that a newer version added) keeps the other
+/// choices, including "Online imagery: off". A strict parse would also fail
+/// the whole file and drop the database paths and provider settings.
 fn lenient_ui<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<UiPreferences, D::Error> {
     let value = serde_json::Value::deserialize(deserializer)?;
-    let parsed = serde_json::from_value::<UiPreferences>(value)
-        .map_err(|e| e.to_string())
-        .and_then(UiPreferences::validated);
-    Ok(parsed.unwrap_or_else(|error| {
-        log::warn!("Ignoring invalid UI preferences in settings.json: {error}");
-        UiPreferences::default()
-    }))
+    let mut dropped = !value.is_object();
+    let field = |name: &str| value.get(name).filter(|raw| !raw.is_null());
+    let theme = match field("theme") {
+        None => Theme::default(),
+        Some(raw) => serde_json::from_value(raw.clone()).unwrap_or_else(|_| {
+            dropped = true;
+            Theme::default()
+        }),
+    };
+    let layers = saved_switches(field("layers"), &mut dropped);
+    let collapsed = saved_switches(field("collapsed"), &mut dropped);
+    if dropped {
+        log::warn!("Ignored invalid parts of the UI preferences in settings.json");
+    }
+    Ok(UiPreferences {
+        theme,
+        layers,
+        collapsed,
+    })
+}
+
+/// The valid id → bool entries of a saved switch map, at most MAX_UI_ENTRIES.
+fn saved_switches(raw: Option<&serde_json::Value>, dropped: &mut bool) -> BTreeMap<String, bool> {
+    let mut kept = BTreeMap::new();
+    let Some(raw) = raw else {
+        return kept;
+    };
+    let Some(entries) = raw.as_object() else {
+        *dropped = true;
+        return kept;
+    };
+    for (id, shown) in entries {
+        match shown.as_bool() {
+            Some(shown) if is_registry_id(id) && kept.len() < MAX_UI_ENTRIES => {
+                kept.insert(id.clone(), shown);
+            }
+            _ => *dropped = true,
+        }
+    }
+    kept
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -613,6 +649,51 @@ mod tests {
             Some("/data/GeoLite2-City.mmdb")
         );
         assert!(parsed.integrations.peering_db.enabled);
+    }
+
+    #[test]
+    fn one_bad_ui_field_keeps_the_other_saved_choices() {
+        // A theme from a newer version, and bad entries next to good ones.
+        let file = r#"{"preferences":{"ui":{
+            "theme": "system",
+            "layers": { "online-imagery": false, "rings": "yes", "BAD ID": true, "ixp-sites": true },
+            "collapsed": { "hops": true }
+        }}}"#;
+        let ui = serde_json::from_str::<PersistedSettings>(file)
+            .unwrap()
+            .preferences
+            .ui;
+        assert_eq!(ui.theme, Theme::Dark);
+        assert!(
+            !ui.online_imagery(),
+            "a saved 'online imagery off' survives"
+        );
+        assert_eq!(
+            ui.layers,
+            BTreeMap::from([("ixp-sites".into(), true), ("online-imagery".into(), false)])
+        );
+        assert_eq!(ui.collapsed, BTreeMap::from([("hops".into(), true)]));
+
+        // A map that is not a map keeps the theme.
+        let other = r#"{"preferences":{"ui":{"theme":"light","layers":[1,2],"collapsed":null}}}"#;
+        let ui = serde_json::from_str::<PersistedSettings>(other)
+            .unwrap()
+            .preferences
+            .ui;
+        assert_eq!(ui.theme, Theme::Light);
+        assert!(ui.layers.is_empty() && ui.collapsed.is_empty());
+
+        // Too many entries: the first MAX_UI_ENTRIES valid ones are kept.
+        let many: serde_json::Map<String, serde_json::Value> = (0..70)
+            .map(|i| (format!("panel-{i:02}"), serde_json::Value::Bool(true)))
+            .collect();
+        let file = serde_json::json!({ "preferences": { "ui": { "collapsed": many } } });
+        let ui = serde_json::from_value::<PersistedSettings>(file)
+            .unwrap()
+            .preferences
+            .ui;
+        assert_eq!(ui.collapsed.len(), MAX_UI_ENTRIES);
+        assert!(ui.validated().is_ok());
     }
 
     #[test]

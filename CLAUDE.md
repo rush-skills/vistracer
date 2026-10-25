@@ -35,7 +35,7 @@ node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): idle frames 
 node scripts/globe-check/ui-shots.mjs [dir]  # After a build: screenshots of every UI state, dark/light/960x640
 
 # Rust
-cd src-tauri && cargo test                                # 168 tests (+2 ignored network smoke tests)
+cd src-tauri && cargo test                                # 169 tests (+2 ignored network smoke tests)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -121,7 +121,7 @@ Key Events (Tauri emit/listen):
 - `commands/app_info.rs`: App version and updater key state
 - `commands/tile_cache.rs`: globe tile cache: allowlisted GIBS layers, URI parsing, `$APPCACHE/tiles` with a 500 MB LRU cap, single-flight downloads, 3-failure pause, redirect allowlist; no upstream request while the "Online imagery" layer switch is off (`set_online_enabled`, applied at start and on every `set_settings`)
 - `commands/geodb_downloader.rs`: MaxMind database auto-download
-- `commands/persistence.rs`: In-memory store for settings, DNS cache, runs; settings validation; `UiPreferences` (theme, layer switches, collapsed panels; ids checked, unknown ids kept, a damaged section loads as defaults)
+- `commands/persistence.rs`: In-memory store for settings, DNS cache, runs; settings validation; `UiPreferences` (theme, layer switches, collapsed panels; ids checked, unknown ids kept; a saved section is read field by field, so one bad value keeps the other choices)
 - `geoloc/estimate.rs`: per-run location of every hop: candidates, RTT bound, reference hop, anycast, precedence
 - `geoloc/rtt.rs`: speed-of-light check (infeasible / tightened / widened / feasible); never moves an estimate
 - `geoloc/hostname.rs` + `geoloc/places.rs`: location hints in router host names; bundled airport table `data/airports.csv` (OurAirports, public domain; see `data/README.md`)
@@ -241,13 +241,13 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 168 tests in `src-tauri/src/` (plus two ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache) covering:
+- 169 tests in `src-tauri/src/` (plus two ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
   - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
-  - Settings validation (including `ixMatching` defaults for old settings files), UI preferences (defaults, bad ids and unbounded maps rejected, a damaged `ui` section keeps the rest of the file), updater key detection
+  - Settings validation (including `ixMatching` defaults for old settings files), UI preferences (defaults, bad ids and unbounded maps rejected, a damaged `ui` section keeps the rest of the file, one bad field keeps the other saved choices), updater key detection
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
   - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers and interrupted clears, clear, single flight for one tile, concurrent writes of many tiles, failure pause, no download while online imagery is off (cached tiles still served), GET/HEAD only (405 otherwise), `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
 

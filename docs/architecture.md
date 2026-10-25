@@ -652,8 +652,11 @@ flowchart LR
   collapsed panels in `preferences.ui` (`UiPreferences` in
   `commands/persistence.rs`): ids are checked (1–40 lowercase letters,
   digits, dashes; at most 64 per map), and ids this version does not know are
-  kept. A damaged section loads as the defaults without dropping the rest of
-  `settings.json`. Choices made while the file loads win, and writes are
+  kept. A saved section is read field by field, like the renderer's
+  `normalizeUiPreferences`: a field that does not parse (for example a theme
+  that a newer version added) falls back to its default and a bad entry is
+  dropped, so the other choices, including "Online imagery: off", stay; the
+  rest of `settings.json` is never dropped. Choices made while the file loads win, and writes are
   queued so the last one carries the latest state. When the saved choices
   cannot be read, the app uses the defaults, says so, and writes nothing for
   the rest of the session, so it never replaces the saved choices with
