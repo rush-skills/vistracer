@@ -148,7 +148,7 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
           className="icon-button"
           aria-label={collapsed ? "Show hop timeline" : "Hide hop timeline"}
           aria-expanded={!collapsed}
-          aria-controls="timeline-track"
+          aria-controls={!collapsed && hops.length > 0 ? "timeline-track" : undefined}
           onClick={() => setCollapsed(!collapsed)}
         >
           {collapsed ? <FiChevronUp aria-hidden /> : <FiChevronDown aria-hidden />}

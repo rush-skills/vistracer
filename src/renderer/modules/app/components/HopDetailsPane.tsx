@@ -28,6 +28,21 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
   const setHoveredHop = useTracerouteStore((state) => state.setHoveredHop);
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
   const [collapsed, setCollapsed] = usePanel("hops");
+  // Collapsing swaps the pane for a tab, so the focused toggle unmounts;
+  // the focus moves to the toggle that replaces it.
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const focusToggle = useRef(false);
+  const toggle = (value: boolean) => {
+    focusToggle.current = true;
+    setCollapsed(value);
+  };
+
+  useEffect(() => {
+    if (focusToggle.current) {
+      focusToggle.current = false;
+      toggleRef.current?.focus();
+    }
+  }, [collapsed]);
 
   // A hop picked on the globe (or reached during a run) scrolls into view.
   useEffect(() => {
@@ -57,11 +72,12 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
   if (collapsed) {
     return (
       <button
+        ref={toggleRef}
         type="button"
         className="hop-details__expand glass"
         aria-label="Show hop details"
         aria-expanded={false}
-        onClick={() => setCollapsed(false)}
+        onClick={() => toggle(false)}
       >
         <FiChevronsLeft aria-hidden />
         Hops{run ? ` (${run.hops.length})` : ""}
@@ -80,12 +96,13 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
           {statusLabelMap[status]}
         </span>
         <button
+          ref={toggleRef}
           type="button"
           className="icon-button"
           aria-label="Hide hop details"
           aria-expanded={true}
           title="Hide hop details"
-          onClick={() => setCollapsed(true)}
+          onClick={() => toggle(true)}
         >
           <FiChevronsRight aria-hidden />
         </button>

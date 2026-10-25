@@ -111,6 +111,18 @@ describe("HopTimeline", () => {
     }
   });
 
+  it("points its toggle only at a hop list that exists", () => {
+    const { unmount } = render(<HopTimeline />);
+    const toggle = screen.getByRole("button", { name: "Hide hop timeline" });
+    expect(toggle.hasAttribute("aria-controls")).toBe(false);
+    unmount();
+    render(<Connected />);
+    const controls = screen
+      .getByRole("button", { name: "Hide hop timeline" })
+      .getAttribute("aria-controls");
+    expect(document.getElementById(controls ?? "")).toBe(screen.getByRole("listbox"));
+  });
+
   it("collapses and saves that it is collapsed", async () => {
     render(<Connected />);
     fireEvent.click(screen.getByRole("button", { name: "Hide hop timeline" }));

@@ -503,6 +503,18 @@ describe("HopDetailsPane", () => {
     expect(rowOf("8.8.8.8").className).not.toContain("hop-details__row--hovered");
   });
 
+  it("keeps the focus on the toggle when the pane collapses and expands", () => {
+    render(<HopDetailsPane run={run} status="success" />);
+    const hide = screen.getByRole("button", { name: "Hide hop details" });
+    hide.focus();
+    fireEvent.click(hide);
+    const show = screen.getByRole("button", { name: "Show hop details" });
+    expect(show.textContent).toContain("Hops (8)");
+    expect(document.activeElement).toBe(show);
+    fireEvent.click(show);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Hide hop details" }));
+  });
+
   it("scrolls a hop selected on the globe into view", () => {
     const scrolled: string[] = [];
     const original = Element.prototype.scrollIntoView;
