@@ -237,6 +237,15 @@ async fn clear_tile_cache(state: tauri::State<'_, AppState>) -> Result<TileCache
     state.tiles.clear().await
 }
 
+/// Exchanges and data centres for the globe layers. Reads the IX list that
+/// exchange matching downloaded; `None` when there is none yet. Sends nothing.
+#[tauri::command]
+async fn get_peeringdb_sites(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<PeeringDbSites>, String> {
+    Ok(state.enrichment.peeringdb_sites())
+}
+
 #[tauri::command]
 fn get_app_info(app: tauri::AppHandle) -> AppInfo {
     AppInfo {
@@ -353,6 +362,7 @@ fn main() {
             get_app_info,
             get_tile_cache_info,
             clear_tile_cache,
+            get_peeringdb_sites,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

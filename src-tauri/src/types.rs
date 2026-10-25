@@ -379,3 +379,45 @@ pub struct GeoDbDownloadProgress {
     pub percent: Option<u32>,
     pub error: Option<String>,
 }
+
+/// Exchanges and data centres for the globe layers, from the PeeringDB IX
+/// list that exchange matching downloads (`get_peeringdb_sites`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeeringDbSites {
+    /// When the list was downloaded, ms since the epoch.
+    pub stored_at: i64,
+    /// False for a list saved by an older version, which has no facilities;
+    /// the next exchange matching refresh replaces it.
+    pub complete: bool,
+    pub exchanges: Vec<ExchangeSite>,
+    pub facilities: Vec<FacilitySite>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangeSite {
+    pub id: u64,
+    pub name: String,
+    pub city: Option<String>,
+    pub country: Option<String>,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub radius_km: f64,
+    pub facility_count: u32,
+    pub network_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FacilitySite {
+    pub id: u64,
+    pub name: String,
+    pub org: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub network_count: u32,
+    pub exchange_count: u32,
+}

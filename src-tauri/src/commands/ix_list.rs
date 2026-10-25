@@ -11,6 +11,7 @@ use super::enrichment_cache::ProviderCache;
 use super::integrations::{get_json, peeringdb_headers};
 use super::retry::{with_retry, ProviderError, RetryPolicy};
 use crate::geoloc::ixp::{build_dataset, IxDataset, IxIndex, IxResponses};
+use crate::types::PeeringDbSites;
 use serde_json::Value;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -35,9 +36,13 @@ const IX_DOWNLOAD_BUDGET: Duration = Duration::from_secs(150);
 const IX_OBJECTS: [(&str, &str); 5] = [
     ("ixpfx", "ixlan_id,prefix"),
     ("ixlan", "id,ix_id"),
-    ("ix", "id,name,city,country"),
+    ("ix", "id,name,city,country,net_count"),
     ("ixfac", "ix_id,fac_id"),
-    ("fac", "id,latitude,longitude"),
+    // Name, operator and counts too: the globe's data centre layer shows them.
+    (
+        "fac",
+        "id,name,org_name,city,country,latitude,longitude,net_count,ix_count",
+    ),
 ];
 
 #[derive(Default)]
@@ -139,28 +144,45 @@ impl IxStore {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Fills the state from the provider cache after a restart.
+    fn load_cached(&self, state: &mut IxState) {
+        if state.loaded.is_some() {
+            return;
+        }
+        if let Some((Some(dataset), stored_at_ms)) = self
+            .cache
+            .get_stored::<IxDataset>(IX_CACHE_KEY, IX_MAX_STALE_MS)
+        {
+            state.loaded = Some(LoadedIx {
+                index: Arc::new(IxIndex::new(dataset)),
+                stored_at_ms,
+            });
+        }
+    }
+
+    /// The exchanges and facilities of the list in memory or in the provider
+    /// cache, up to `IX_MAX_STALE_MS` old. Never starts a download: the
+    /// globe layers only show what exchange matching already fetched.
+    pub fn sites(&self) -> Option<PeeringDbSites> {
+        let mut state = self.state();
+        self.load_cached(&mut state);
+        let loaded = state.loaded.as_ref()?;
+        ((now_ms() - loaded.stored_at_ms).max(0) < IX_MAX_STALE_MS)
+            .then(|| loaded.index.sites(loaded.stored_at_ms))
+    }
+
     /// The IX index for a lookup. See the module documentation.
     pub async fn index(self: &Arc<Self>, api_key: Option<&str>) -> Result<IxLoad, IxUnavailable> {
         let mut done = {
             let mut state = self.state();
             let now = now_ms();
-            if state.loaded.is_none() {
-                if let Some((Some(dataset), stored_at_ms)) = self
-                    .cache
-                    .get_stored::<IxDataset>(IX_CACHE_KEY, IX_MAX_STALE_MS)
-                {
-                    state.loaded = Some(LoadedIx {
-                        index: Arc::new(IxIndex::new(dataset)),
-                        stored_at_ms,
-                    });
-                }
-            }
+            self.load_cached(&mut state);
             // A clock that moved back gives a negative age; count it as new.
             let age = state.loaded.as_ref().map(|l| (now - l.stored_at_ms).max(0));
             if let Some(loaded) = state
                 .loaded
                 .as_ref()
-                .filter(|_| age.is_some_and(|a| a < IX_TTL_MS))
+                .filter(|l| age.is_some_and(|a| a < IX_TTL_MS) && l.index.is_current())
             {
                 return Ok(IxLoad {
                     index: loaded.index.clone(),
