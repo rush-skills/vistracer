@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { HopLocation, HopResolution, TracerouteRun } from "@common/ipc";
 import type { GlobeScene } from "@renderer/lib/globe";
+import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
+import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
 import type { GlobeCallbacks, GlobeController } from "../globe/controller";
 import { GlobeViewport } from "../GlobeViewport";
 
@@ -93,6 +95,14 @@ describe("GlobeViewport", () => {
       captureActive: false
     });
     useUiStore.setState({ layers: {} });
+    useInfraStore.setState({
+      sources: {
+        "peeringdb-sites": { status: "ready", data: PEERINGDB },
+        "cloud-regions": { status: "ready", data: CLOUD },
+        "submarine-cables": { status: "idle" }
+      },
+      hoveredSite: undefined
+    });
   });
 
   afterEach(() => {
@@ -198,5 +208,53 @@ describe("GlobeViewport", () => {
     expect(screen.queryByRole("status")).toBeNull();
     act(() => fake.callbacks?.onImageryError("HTTP 503"));
     expect(screen.getByRole("status").textContent).toContain("Detailed imagery is unavailable");
+  });
+
+  it("draws the infrastructure layers that are on, and none that are off", async () => {
+    render(<GlobeViewport run={runWith([located(1, 50.1, 8.7)])} selectedHopIndex={1} />);
+    await waitFor(() => expect(fake.controller.setScene).toHaveBeenCalled());
+    const empty = lastScene();
+    expect([empty?.exchanges, empty?.facilities, empty?.cloudRegions, empty?.cables]).toEqual([[], [], [], []]);
+
+    act(() => useUiStore.setState({ layers: { exchanges: true, "cloud-regions": true, "cloud-gcp": false } }));
+    const scene = lastScene();
+    expect(scene?.exchanges.length).toBeGreaterThan(0);
+    expect(scene?.facilities).toEqual([]);
+    expect(scene?.cloudRegions.some((site) => site.filterKey === "gcp")).toBe(false);
+    expect(scene?.cloudRegions.some((site) => site.filterKey === "aws")).toBe(true);
+  });
+
+  it("clusters again when the adapter reports a new zoom level, and not on a hop hover", async () => {
+    useUiStore.setState({ layers: { "data-centres": true } });
+    render(<GlobeViewport run={runWith([located(1, 50.1, 8.7)])} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => fake.callbacks?.onClusterLevel(10));
+    const far = lastScene()?.facilities;
+    act(() => useTracerouteStore.getState().setHoveredHop(1));
+    // The route changed; the site markers are the same list, so the adapter keeps them.
+    expect(lastScene()?.facilities).toBe(far);
+    act(() => fake.callbacks?.onClusterLevel(0));
+    expect(lastScene()?.facilities.length).toBeGreaterThan(far?.length ?? 0);
+  });
+
+  it("puts the hovered site in the store with its cluster, for the hover card", async () => {
+    useUiStore.setState({ layers: { "data-centres": true } });
+    render(<GlobeViewport run={runWith([])} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => fake.callbacks?.onClusterLevel(10));
+    const frankfurt = lastScene()?.facilities.find((site) => site.members.length > 1);
+    act(() => fake.callbacks?.onHoverSite(frankfurt?.key, { x: 5, y: 6 }));
+    expect(useInfraStore.getState().hoveredSite).toEqual({
+      specKey: frankfurt?.key,
+      layer: "facilities",
+      keys: frankfurt?.members,
+      anchor: { kind: "point", x: 5, y: 6 }
+    });
+    // The hovered marker is drawn larger.
+    expect(lastScene()?.facilities.find((site) => site.key === frankfurt?.key)?.pixelSize).toBe(
+      (frankfurt?.pixelSize ?? 0) + 2
+    );
+    act(() => fake.callbacks?.onHoverSite(undefined));
+    expect(useInfraStore.getState().hoveredSite).toBeUndefined();
   });
 });

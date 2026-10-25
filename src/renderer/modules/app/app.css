@@ -22,7 +22,7 @@
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   grid-template-areas:
     "trace tools"
-    ". hops"
+    "legend hops"
     "timeline hops"
     "status credits";
   gap: var(--space-3);
@@ -39,6 +39,13 @@
   grid-area: tools;
   position: relative;
   justify-self: end;
+}
+
+.hud__legend {
+  grid-area: legend;
+  align-self: end;
+  justify-self: start;
+  min-width: 0;
 }
 
 .hud__hops {

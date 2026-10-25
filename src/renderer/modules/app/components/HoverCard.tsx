@@ -1,20 +1,40 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { hoverCardContent, placeCard } from "@renderer/lib/hoverCard";
+import { siteCardContent } from "@renderer/lib/infra/siteCard";
+import { useRouteInfra } from "@renderer/hooks/useInfra";
+import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
 import "./HoverCard.css";
 
 /**
- * A compact card for the hop under the pointer on the globe or in the
- * timeline. It reads the run in the store only, so hovering sends nothing
- * anywhere. The card ignores the pointer so it never steals the hover.
+ * A compact card for the hop, site or cable under the pointer on the globe,
+ * or the hop in the timeline. It reads the stores only, so hovering sends
+ * nothing anywhere. The card ignores the pointer so it never steals the
+ * hover. A hop wins over a site.
  */
 export const HoverCard: React.FC = () => {
   const hopIndex = useTracerouteStore((state) => state.hoveredHopIndex);
-  const anchor = useTracerouteStore((state) => state.hoverAnchor);
+  const hopAnchor = useTracerouteStore((state) => state.hoverAnchor);
   const capturing = useTracerouteStore((state) => state.captureActive);
   const run = useTracerouteStore(selectCurrentRun);
+  const hoveredSite = useInfraStore((state) => state.hoveredSite);
+  const sources = useInfraStore((state) => state.sources);
+  const route = useRouteInfra();
   const hop = run?.hops.find((candidate) => candidate.hopIndex === hopIndex);
+  const cloud = hop ? route.cloudMatches.get(hop.hopIndex) : undefined;
   const content = useMemo(() => (hop ? hoverCardContent(hop) : null), [hop]);
+  const site = useMemo(() => {
+    if (content || !hoveredSite) {
+      return null;
+    }
+    const input = {
+      peeringdb: readySource(sources, "peeringdb-sites"),
+      cloud: readySource(sources, "cloud-regions"),
+      cables: readySource(sources, "submarine-cables")
+    };
+    return siteCardContent(hoveredSite, input, route);
+  }, [content, hoveredSite, sources, route]);
+  const anchor = content ? hopAnchor : site ? hoveredSite?.anchor : undefined;
   const cardRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ left: number; top: number }>();
 
@@ -33,9 +53,9 @@ export const HoverCard: React.FC = () => {
     );
     // `capturing`: the card is not rendered during an export, so it must be
     // measured and placed again when the export ends.
-  }, [anchor, content, capturing]);
+  }, [anchor, content, site, capturing]);
 
-  if (!content || !anchor || capturing) {
+  if ((!content && !site) || !anchor || capturing) {
     return null;
   }
 
@@ -51,21 +71,50 @@ export const HoverCard: React.FC = () => {
           : { left: 0, top: 0, visibility: "hidden" }
       }
     >
-      <div className="hover-card__title">
-        <strong>{content.title}</strong>
-        {content.rtt && <span className="hover-card__rtt">{content.rtt}</span>}
-      </div>
-      {content.host && <div className="hover-card__host">{content.host}</div>}
-      <code className="hover-card__address">{content.address}</code>
-      {content.network && <div className="hover-card__network">{content.network}</div>}
-      {content.place && (
-        <div className="hover-card__place">
-          {content.place}
-          <small>{content.placeDetail}</small>
-        </div>
+      {content && (
+        <>
+          <div className="hover-card__title">
+            <strong>{content.title}</strong>
+            {content.rtt && <span className="hover-card__rtt">{content.rtt}</span>}
+          </div>
+          {content.host && <div className="hover-card__host">{content.host}</div>}
+          <code className="hover-card__address">{content.address}</code>
+          {content.network && <div className="hover-card__network">{content.network}</div>}
+          {content.place && (
+            <div className="hover-card__place">
+              {content.place}
+              <small>{content.placeDetail}</small>
+            </div>
+          )}
+          {content.loss && <div className="hover-card__loss">{content.loss}</div>}
+          {cloud && (
+            <div className="hover-card__cloud">
+              {cloud.region
+                ? `Cloud: ${cloud.provider.shortName} ${cloud.region.code}, ${cloud.confidence} confidence`
+                : `Cloud: ${cloud.provider.name}'s network, ${cloud.confidence} confidence`}
+            </div>
+          )}
+          {content.note && <p className="hover-card__note">{content.note}</p>}
+        </>
       )}
-      {content.loss && <div className="hover-card__loss">{content.loss}</div>}
-      {content.note && <p className="hover-card__note">{content.note}</p>}
+      {site && (
+        <>
+          <div className="hover-card__title">
+            <strong>{site.title}</strong>
+          </div>
+          {site.lines.map((line) => (
+            <div key={line} className="hover-card__network">
+              {line}
+            </div>
+          ))}
+          {site.route.map((line) => (
+            <div key={line} className="hover-card__route">
+              {line}
+            </div>
+          ))}
+          {site.more && <p className="hover-card__note">{site.more}</p>}
+        </>
+      )}
     </div>
   );
 };

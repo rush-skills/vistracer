@@ -361,6 +361,20 @@ describe("Tauri Bridge Layer", () => {
     });
   });
 
+  describe("infrastructure layers", () => {
+    it("reads the exchange list and the cable map through their commands, unparsed", async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+      await expect(api.getPeeringDbSites()).resolves.toBeNull();
+      expect(mockInvoke).toHaveBeenCalledWith("get_peeringdb_sites");
+
+      mockInvoke.mockRejectedValueOnce(
+        "Submarine cables are off: turn the layer on in Layers and accept its notice. Nothing was downloaded."
+      );
+      await expect(api.getSubmarineCables()).rejects.toContain("Nothing was downloaded");
+      expect(mockInvoke).toHaveBeenCalledWith("get_submarine_cables");
+    });
+  });
+
   describe("exportSnapshot", () => {
     it("returns client-side export notice for Tauri", async () => {
       const result = await api.exportSnapshot({ format: "png" });

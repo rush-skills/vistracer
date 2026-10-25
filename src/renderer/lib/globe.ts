@@ -1,4 +1,5 @@
 import type { HopResolution, LocationConfidence, LocationEstimate } from "@common/ipc";
+import { asnColor, assignAsnColors } from "./infra/asnColors";
 
 /**
  * Pure mapping from hop data to what the globe draws. Positions are degrees
@@ -84,13 +85,61 @@ export interface LabelSpec {
   text: string;
 }
 
-export interface GlobeScene {
+export interface RouteScene {
   markers: MarkerSpec[];
   arcs: ArcSpec[];
   rings: RingSpec[];
   reaches: ReachSpec[];
   labels: LabelSpec[];
 }
+
+export type SiteLayer = "exchanges" | "facilities" | "cloudRegions";
+
+/**
+ * A marker of an infrastructure layer: one site, or a cluster of sites
+ * drawn at its most important one (lib/infra/scene.ts).
+ */
+export interface SiteSpec {
+  /** Pick id: unique in the scene. */
+  key: string;
+  layer: SiteLayer;
+  /** Site keys (lib/infra/sources.ts), the one drawn first. */
+  members: string[];
+  position: GeoPoint;
+  color: string;
+  outline: string;
+  pixelSize: number;
+  outlineWidth: number;
+  /** The layer filter this site belongs to (a cloud provider). */
+  filterKey?: string;
+  /** Sites on the route are labelled. */
+  label?: string;
+}
+
+export interface CableSpec {
+  key: string;
+  positions: GeoPoint[];
+  color: string;
+  width: number;
+  /** Guessed cables are named on the globe. */
+  label?: { position: GeoPoint; text: string };
+}
+
+export interface InfraScene {
+  exchanges: SiteSpec[];
+  facilities: SiteSpec[];
+  cloudRegions: SiteSpec[];
+  cables: CableSpec[];
+}
+
+export type GlobeScene = RouteScene & InfraScene;
+
+export const EMPTY_INFRA_SCENE: InfraScene = {
+  exchanges: [],
+  facilities: [],
+  cloudRegions: [],
+  cables: []
+};
 
 export function latencyToColor(avgRttMs: number | null | undefined): string {
   if (avgRttMs == null) {
@@ -258,8 +307,19 @@ function emphasisOf(hopIndex: number, selected?: number, hovered?: number): Emph
   return hopIndex === hovered ? "hovered" : "normal";
 }
 
-/** Arcs between consecutive located hops, coloured by the first hop's latency. */
-export function buildArcs(hops: HopResolution[]): ArcSpec[] {
+/** The colour of a hop's marker and ring. */
+type HopColor = (hop: HopResolution) => string;
+
+const byHopIndex: HopColor = (hop) => hopIndexToColor(hop.hopIndex);
+
+/**
+ * Arcs between consecutive located hops. By default coloured by the first
+ * hop's latency. With `asnColor`, an arc between two networks is split in
+ * the middle: the first half in the colour of the network it leaves, the
+ * second in the one it enters, so the colour changes where the route hands
+ * over to the next network.
+ */
+export function buildArcs(hops: HopResolution[], asnColorOf?: HopColor): ArcSpec[] {
   const located = locatedHops(hops);
   const arcs: ArcSpec[] = [];
   for (let i = 0; i < located.length - 1; i += 1) {
@@ -268,12 +328,20 @@ export function buildArcs(hops: HopResolution[]): ArcSpec[] {
     if (greatCircleKm(from.position, to.position) < MIN_ARC_KM) {
       continue;
     }
-    arcs.push({
-      fromHopIndex: from.hop.hopIndex,
-      toHopIndex: to.hop.hopIndex,
-      positions: arcPositions(from.position, to.position),
-      color: latencyToColor(from.hop.latency.avgRttMs)
-    });
+    const positions = arcPositions(from.position, to.position);
+    const base = { fromHopIndex: from.hop.hopIndex, toHopIndex: to.hop.hopIndex };
+    if (!asnColorOf) {
+      arcs.push({ ...base, positions, color: latencyToColor(from.hop.latency.avgRttMs) });
+      continue;
+    }
+    const [leaving, entering] = [asnColorOf(from.hop), asnColorOf(to.hop)];
+    if (leaving === entering) {
+      arcs.push({ ...base, positions, color: leaving });
+      continue;
+    }
+    const middle = Math.floor(positions.length / 2);
+    arcs.push({ ...base, positions: positions.slice(0, middle + 1), color: leaving });
+    arcs.push({ ...base, positions: positions.slice(middle), color: entering });
   }
   return arcs;
 }
@@ -282,7 +350,8 @@ export function buildArcs(hops: HopResolution[]): ArcSpec[] {
 export function buildRings(
   hops: HopResolution[],
   selectedHopIndex?: number,
-  hoveredHopIndex?: number
+  hoveredHopIndex?: number,
+  colorOf: HopColor = byHopIndex
 ): RingSpec[] {
   return locatedHops(hops).flatMap(({ hop, position }) => {
     if (position.radiusKm <= 0 || position.radiusKm > MAX_RING_RADIUS_KM) {
@@ -298,7 +367,7 @@ export function buildRings(
         hopIndex: hop.hopIndex,
         radiusKm: position.radiusKm,
         confidence: position.confidence,
-        color: hopIndexToColor(hop.hopIndex),
+        color: colorOf(hop),
         positions: circlePositions(position.latitude, position.longitude, position.radiusKm),
         opacity: emphasised ? 1 : style.opacity,
         dashed: style.dashed,
@@ -342,12 +411,13 @@ function buildReaches(
 export function buildMarkers(
   hops: HopResolution[],
   selectedHopIndex?: number,
-  hoveredHopIndex?: number
+  hoveredHopIndex?: number,
+  colorOf: HopColor = byHopIndex
 ): MarkerSpec[] {
   const markers = locatedHops(hops).map(({ hop, position }) => ({
     hopIndex: hop.hopIndex,
     position: { latitude: position.latitude, longitude: position.longitude, height: 0 },
-    color: hopIndexToColor(hop.hopIndex),
+    color: colorOf(hop),
     emphasis: emphasisOf(hop.hopIndex, selectedHopIndex, hoveredHopIndex)
   }));
   // Emphasised markers last, so they draw on top of hops at the same place.
@@ -397,16 +467,20 @@ function buildLabels(
   });
 }
 
+/** The route items of the scene; `style.asnColors` colours them by network. */
 export function buildGlobeScene(
   hops: HopResolution[],
   selectedHopIndex?: number,
-  hoveredHopIndex?: number
-): GlobeScene {
+  hoveredHopIndex?: number,
+  style: { asnColors: boolean } = { asnColors: false }
+): RouteScene {
   const reaches = buildReaches(hops, selectedHopIndex, hoveredHopIndex);
+  const colors = style.asnColors ? assignAsnColors(hops) : undefined;
+  const colorOf: HopColor = colors ? (hop) => asnColor(colors, hop) : byHopIndex;
   return {
-    markers: buildMarkers(hops, selectedHopIndex, hoveredHopIndex),
-    arcs: buildArcs(hops),
-    rings: buildRings(hops, selectedHopIndex, hoveredHopIndex),
+    markers: buildMarkers(hops, selectedHopIndex, hoveredHopIndex, colorOf),
+    arcs: buildArcs(hops, colors ? colorOf : undefined),
+    rings: buildRings(hops, selectedHopIndex, hoveredHopIndex, colorOf),
     reaches,
     labels: buildLabels(hops, reaches, selectedHopIndex, hoveredHopIndex)
   };

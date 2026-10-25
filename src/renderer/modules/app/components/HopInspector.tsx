@@ -1,5 +1,8 @@
 import React from "react";
 import type { HopResolution, LocationEstimate, PeeringDbDetails } from "@common/ipc";
+import { useRouteInfra } from "@renderer/hooks/useInfra";
+import { regionTitle } from "@renderer/lib/infra/cloudMatch";
+import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { PROVIDER_LABELS, findProvider } from "../lib/providers";
 import { HINT_RULE_LABELS, SOURCE_LABELS, describeRtt, formatRadius } from "../lib/location";
 
@@ -232,6 +235,93 @@ const LocationSection: React.FC<HopInspectorProps> = ({ hop }) => {
   );
 };
 
+const km = (value: number | null) =>
+  value == null ? "" : ` (${Math.round(value).toLocaleString("en-US")} km)`;
+
+/**
+ * What the shown infrastructure layers say about this hop: the cloud
+ * region it is likely in, the exchange and data centre near it, and
+ * cables that may carry the link to it. Nothing while those layers are off.
+ */
+const InfraSection: React.FC<HopInspectorProps> = ({ hop }) => {
+  const route = useRouteInfra();
+  const sites = useInfraStore((state) => readySource(state.sources, "peeringdb-sites"));
+  const cloud = route.cloudMatches.get(hop.hopIndex);
+  const linked = (links: typeof route.exchangeLinks, names: Map<string, string>) =>
+    [...links.entries()].flatMap(([key, list]) =>
+      list
+        .filter((link) => link.hopIndex === hop.hopIndex)
+        .map((link) => ({ name: names.get(key) ?? key, link }))
+    );
+  const exchanges = linked(
+    route.exchangeLinks,
+    new Map(sites?.exchanges.map((site) => [site.key, site.name]))
+  );
+  const facilities = linked(
+    route.facilityLinks,
+    new Map(sites?.facilities.map((site) => [site.key, site.name]))
+  );
+  const cables = route.cableGuesses.filter((guess) => guess.toHopIndex === hop.hopIndex);
+  if (!cloud && exchanges.length === 0 && facilities.length === 0 && cables.length === 0) {
+    return null;
+  }
+  return (
+    <section className="hop-inspector__section" aria-label="Infrastructure">
+      <h4>Infrastructure</h4>
+      <dl className="hop-inspector__facts">
+        {cloud && (
+          <>
+            <dt>Cloud</dt>
+            <dd>
+              {cloud.region
+                ? regionTitle(cloud.provider, cloud.region)
+                : `${cloud.provider.name} network`}{" "}
+              <span className={`hop-details__confidence hop-details__confidence--${cloud.confidence}`}>
+                {cloud.confidence}
+              </span>
+              <small>{cloud.reason}</small>
+            </dd>
+          </>
+        )}
+        {exchanges.map(({ name, link }) => (
+          <React.Fragment key={`ix-${name}`}>
+            <dt>Exchange</dt>
+            <dd>
+              {name}
+              <small>
+                {link.kind === "on-lan"
+                  ? "The address is on its peering LAN."
+                  : `Nearest exchange to the estimate${km(link.distanceKm)}.`}
+              </small>
+            </dd>
+          </React.Fragment>
+        ))}
+        {facilities.map(({ name, link }) => (
+          <React.Fragment key={`fac-${name}`}>
+            <dt>Data centre</dt>
+            <dd>
+              {name}
+              <small>Nearest data centre to the estimate{km(link.distanceKm)}; a guess.</small>
+            </dd>
+          </React.Fragment>
+        ))}
+        {cables.length > 0 && (
+          <>
+            <dt>Cable</dt>
+            <dd>
+              {cables.map((guess) => guess.name).join(" or ")}
+              <small>
+                A guess from landing points near hops {cables[0].fromHopIndex} and {hop.hopIndex}{" "}
+                (TeleGeography data). The link may use another cable.
+              </small>
+            </dd>
+          </>
+        )}
+      </dl>
+    </section>
+  );
+};
+
 export const HopInspector: React.FC<HopInspectorProps> = ({ hop }) => {
   const responders = hop.responders ?? [];
 
@@ -266,6 +356,7 @@ export const HopInspector: React.FC<HopInspectorProps> = ({ hop }) => {
       </section>
 
       <LocationSection hop={hop} />
+      <InfraSection hop={hop} />
 
       {hop.asn && (
         <section className="hop-inspector__section" aria-label="Network">

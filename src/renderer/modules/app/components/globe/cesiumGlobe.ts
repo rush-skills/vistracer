@@ -34,6 +34,7 @@ import {
   type GeoPoint,
   type GlobeScene
 } from "@renderer/lib/globe";
+import { clusterLevel, kmPerPixel } from "@renderer/lib/infra/cluster";
 import {
   BUNDLED_IMAGERY,
   CanvasDrag,
@@ -56,6 +57,8 @@ const BACKGROUND = Color.fromCssColorString("#0d0e14");
 const GLOBE_BASE = Color.fromCssColorString("#0a1220");
 const MARKER_OUTLINE = Color.fromCssColorString("rgba(8, 10, 16, 0.9)");
 const LABEL_BACKGROUND = Color.fromCssColorString("rgba(12, 14, 21, 0.85)");
+const LABEL_FONT = "600 13px system-ui, -apple-system, 'Segoe UI', sans-serif";
+const SITE_LABEL_FONT = "500 12px system-ui, -apple-system, 'Segoe UI', sans-serif";
 const BORDER_COLOR = Color.WHITE.withAlpha(0.22);
 const FLY_SECONDS = 1.2;
 const RISE_SECONDS = 0.6;
@@ -75,19 +78,31 @@ interface HopId {
   hopIndex: number;
 }
 
-/** The hop of a picked marker or ring; `scene.pick` returns untyped objects. */
-function pickedHopIndex(picked: unknown): number | undefined {
+/** Site markers and cable lines: the spec key, for the hover card. */
+interface SiteId {
+  siteKey: string;
+}
+
+function pickedId(picked: unknown): object | undefined {
   if (typeof picked !== "object" || picked === null || !("id" in picked)) {
     return undefined;
   }
   const id: unknown = picked.id;
-  return typeof id === "object" &&
-    id !== null &&
-    "hopIndex" in id &&
-    typeof id.hopIndex === "number"
-    ? id.hopIndex
-    : undefined;
+  return typeof id === "object" && id !== null ? id : undefined;
 }
+
+/** The hop of a picked marker or ring; `scene.pick` returns untyped objects. */
+function pickedHopIndex(picked: unknown): number | undefined {
+  const id = pickedId(picked);
+  return id && "hopIndex" in id && typeof id.hopIndex === "number" ? id.hopIndex : undefined;
+}
+
+function pickedSiteKey(picked: unknown): string | undefined {
+  const id = pickedId(picked);
+  return id && "siteKey" in id && typeof id.siteKey === "string" ? id.siteKey : undefined;
+}
+
+type PickTarget = { kind: "hop"; hopIndex: number } | { kind: "site"; key: string };
 
 const toCartesians = (points: GeoPoint[]) =>
   Cartesian3.fromDegreesArrayHeights(
@@ -229,9 +244,22 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   controls.enableLook = false;
   camera.setView({ destination: Cartesian3.fromDegrees(15, 25, CAMERA_LIMITS.initialHeight) });
 
+  const horizontalFov = () =>
+    camera.frustum instanceof PerspectiveFrustum && camera.frustum.fov !== undefined
+      ? camera.frustum.fov
+      : CesiumMath.PI_OVER_THREE;
   let framesDrawn = 0;
+  let level: number | undefined;
   const removePostRender = scene.postRender.addEventListener(() => {
     framesDrawn += 1;
+    // Only on frames drawn anyway: a new level re-clusters the site layers.
+    const next = clusterLevel(
+      kmPerPixel(camera.positionCartographic.height, horizontalFov(), canvas.clientWidth)
+    );
+    if (next !== level) {
+      level = next;
+      callbacks.onClusterLevel(next);
+    }
   });
   const governor = new RenderGovernor(
     () => {
@@ -255,12 +283,26 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     governor.wake();
   };
 
-  // Added in draw order: borders under the route, labels on top.
+  // Added in draw order: borders and cables under the route, the
+  // infrastructure sites under the hop markers, labels on top.
   const borders = new PolylineCollection();
+  const cableLines = new PolylineCollection();
   const lines = new PolylineCollection();
+  const sitePoints = new PointPrimitiveCollection();
   const markers = new PointPrimitiveCollection();
+  const cableLabels = new LabelCollection({ scene });
+  const siteLabels = new LabelCollection({ scene });
   const labels = new LabelCollection({ scene });
-  for (const collection of [borders, lines, markers, labels]) {
+  for (const collection of [
+    borders,
+    cableLines,
+    lines,
+    sitePoints,
+    markers,
+    cableLabels,
+    siteLabels,
+    labels
+  ]) {
     scene.primitives.add(collection);
   }
 
@@ -291,42 +333,57 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       console.warn("Country borders are not drawn: world.geojson did not load.", error);
     });
 
-  const pickHop = (position: Cartesian2): number | undefined => {
+  /** A hop wins over a site: hops are what the user traced. */
+  const pickTarget = (position: Cartesian2): PickTarget | undefined => {
     const picked: unknown = scene.pick(position);
+    if (picked === undefined) {
+      return undefined;
+    }
     const hopIndex = pickedHopIndex(picked);
-    if (hopIndex != null || picked === undefined) {
-      return hopIndex;
+    if (hopIndex != null) {
+      return { kind: "hop", hopIndex };
     }
     // Arcs end at the markers and draw over them; look underneath.
     const below: unknown[] = scene.drillPick(position, PICK_DEPTH);
-    return below.map(pickedHopIndex).find((index) => index != null);
+    const hopBelow = below.map(pickedHopIndex).find((index) => index != null);
+    if (hopBelow != null) {
+      return { kind: "hop", hopIndex: hopBelow };
+    }
+    const key = [picked, ...below].map(pickedSiteKey).find((siteKey) => siteKey != null);
+    return key ? { kind: "site", key } : undefined;
   };
 
   const clickHandler = new ScreenSpaceEventHandler(canvas);
   clickHandler.setInputAction((event: ScreenSpaceEventHandler.PositionedEvent) => {
-    const hopIndex = pickHop(event.position);
-    if (hopIndex != null) {
-      callbacks.onSelectHop(hopIndex);
+    const target = pickTarget(event.position);
+    if (target?.kind === "hop") {
+      callbacks.onSelectHop(target.hopIndex);
     }
   }, ScreenSpaceEventType.LEFT_CLICK);
 
-  let hovered: number | undefined;
+  let hovered: PickTarget | undefined;
   let hoverPosition: Cartesian2 | undefined;
   let hoverClient: { x: number; y: number } | undefined;
   let hoverTimer: number | undefined;
-  // While a hop stays under the pointer, each pick (at most every
+  // While a hop or site stays under the pointer, each pick (at most every
   // HOVER_PICK_MS) passes the new pointer position for the hover card.
-  const setHovered = (hopIndex: number | undefined) => {
-    if (hopIndex === hovered && hopIndex == null) {
+  const setHovered = (target: PickTarget | undefined) => {
+    if (target === undefined && hovered === undefined) {
       return;
     }
-    hovered = hopIndex;
-    canvas.style.cursor = hopIndex == null ? "" : "pointer";
-    callbacks.onHoverHop(hopIndex, hopIndex == null ? undefined : hoverClient);
+    const before = hovered;
+    hovered = target;
+    canvas.style.cursor = target?.kind === "hop" ? "pointer" : "";
+    if (target?.kind === "hop" || before?.kind === "hop") {
+      callbacks.onHoverHop(target?.kind === "hop" ? target.hopIndex : undefined, hoverClient);
+    }
+    if (target?.kind === "site" || before?.kind === "site") {
+      callbacks.onHoverSite(target?.kind === "site" ? target.key : undefined, hoverClient);
+    }
   };
   const pickHover = () => {
     hoverTimer = undefined;
-    setHovered(hoverPosition ? pickHop(hoverPosition) : undefined);
+    setHovered(hoverPosition ? pickTarget(hoverPosition) : undefined);
   };
   const wake = () => governor.wake();
   const userMovedCamera = () => {
@@ -430,68 +487,155 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   const sunTimer = window.setInterval(() => scene.requestRender(), GOVERNOR_RULES.sunRefreshMs);
   const reducedMotion = prefersReducedMotion();
 
+  let last: GlobeScene | undefined;
+  const drawRoute = (spec: GlobeScene) => {
+    lines.removeAll();
+    markers.removeAll();
+    labels.removeAll();
+    for (const ring of spec.rings) {
+      const color = Color.fromCssColorString(ring.color).withAlpha(ring.opacity);
+      lines.add({
+        id: { hopIndex: ring.hopIndex } satisfies HopId,
+        positions: toCartesians(ring.positions),
+        width: ring.lineWidth,
+        material: ring.dashed ? dashed(color, 12) : solid(color)
+      });
+    }
+    for (const reach of spec.reaches) {
+      lines.add({
+        id: { hopIndex: reach.hopIndex } satisfies HopId,
+        positions: toCartesians(reach.positions),
+        width: 1.5,
+        material: dashed(Color.fromCssColorString(reach.color).withAlpha(reach.opacity), 6)
+      });
+    }
+    for (const arc of spec.arcs) {
+      lines.add({
+        positions: toCartesians(arc.positions),
+        width: 7,
+        material: Material.fromType("PolylineGlow", {
+          color: Color.fromCssColorString(arc.color),
+          glowPower: 0.22,
+          taperPower: 1
+        })
+      });
+    }
+    for (const marker of spec.markers) {
+      const style = MARKER_STYLE[marker.emphasis];
+      markers.add({
+        id: { hopIndex: marker.hopIndex } satisfies HopId,
+        position: toCartesian(marker.position),
+        pixelSize: style.pixelSize,
+        color: Color.fromCssColorString(marker.color),
+        outlineColor: style.outline,
+        outlineWidth: style.outlineWidth
+      });
+    }
+    for (const label of spec.labels) {
+      labels.add({
+        id: { hopIndex: label.hopIndex } satisfies HopId,
+        position: toCartesian(label.position),
+        text: label.text,
+        font: LABEL_FONT,
+        fillColor: Color.WHITE,
+        showBackground: true,
+        backgroundColor: LABEL_BACKGROUND,
+        backgroundPadding: new Cartesian2(7, 5),
+        pixelOffset: new Cartesian2(0, -14),
+        verticalOrigin: VerticalOrigin.BOTTOM,
+        horizontalOrigin: HorizontalOrigin.CENTER
+      });
+    }
+  };
+  const drawSites = (spec: GlobeScene) => {
+    sitePoints.removeAll();
+    siteLabels.removeAll();
+    for (const site of [...spec.facilities, ...spec.exchanges, ...spec.cloudRegions]) {
+      const position = toCartesian(site.position);
+      sitePoints.add({
+        id: { siteKey: site.key } satisfies SiteId,
+        position,
+        pixelSize: site.pixelSize,
+        color: Color.fromCssColorString(site.color),
+        outlineColor: Color.fromCssColorString(site.outline),
+        outlineWidth: site.outlineWidth
+      });
+      if (site.label) {
+        siteLabels.add({
+          id: { siteKey: site.key } satisfies SiteId,
+          position,
+          text: site.label,
+          font: SITE_LABEL_FONT,
+          fillColor: Color.WHITE,
+          showBackground: true,
+          backgroundColor: LABEL_BACKGROUND,
+          backgroundPadding: new Cartesian2(6, 4),
+          pixelOffset: new Cartesian2(0, 12),
+          verticalOrigin: VerticalOrigin.TOP,
+          horizontalOrigin: HorizontalOrigin.CENTER
+        });
+      }
+    }
+  };
+  const drawCables = (spec: GlobeScene) => {
+    cableLines.removeAll();
+    cableLabels.removeAll();
+    for (const cable of spec.cables) {
+      cableLines.add({
+        id: { siteKey: cable.key } satisfies SiteId,
+        positions: toCartesians(cable.positions),
+        width: cable.width,
+        material: solid(Color.fromCssColorString(cable.color))
+      });
+      if (cable.label) {
+        cableLabels.add({
+          id: { siteKey: cable.key } satisfies SiteId,
+          position: toCartesian(cable.label.position),
+          text: cable.label.text,
+          font: SITE_LABEL_FONT,
+          fillColor: Color.WHITE,
+          showBackground: true,
+          backgroundColor: LABEL_BACKGROUND,
+          backgroundPadding: new Cartesian2(6, 4),
+          verticalOrigin: VerticalOrigin.CENTER,
+          horizontalOrigin: HorizontalOrigin.CENTER
+        });
+      }
+    }
+  };
+
   scene.requestRender();
 
   return {
     setScene(spec: GlobeScene) {
-      lines.removeAll();
-      markers.removeAll();
-      labels.removeAll();
-      for (const ring of spec.rings) {
-        const color = Color.fromCssColorString(ring.color).withAlpha(ring.opacity);
-        lines.add({
-          id: { hopIndex: ring.hopIndex } satisfies HopId,
-          positions: toCartesians(ring.positions),
-          width: ring.lineWidth,
-          material: ring.dashed ? dashed(color, 12) : solid(color)
-        });
+      // Each group is rebuilt only when its lists changed, so a hover on
+      // the route does not rebuild a thousand cable lines.
+      const routeChanged =
+        !last ||
+        spec.markers !== last.markers ||
+        spec.arcs !== last.arcs ||
+        spec.rings !== last.rings ||
+        spec.reaches !== last.reaches ||
+        spec.labels !== last.labels;
+      const sitesChanged =
+        !last ||
+        spec.exchanges !== last.exchanges ||
+        spec.facilities !== last.facilities ||
+        spec.cloudRegions !== last.cloudRegions;
+      const cablesChanged = !last || spec.cables !== last.cables;
+      last = spec;
+      if (routeChanged) {
+        drawRoute(spec);
       }
-      for (const reach of spec.reaches) {
-        lines.add({
-          id: { hopIndex: reach.hopIndex } satisfies HopId,
-          positions: toCartesians(reach.positions),
-          width: 1.5,
-          material: dashed(Color.fromCssColorString(reach.color).withAlpha(reach.opacity), 6)
-        });
+      if (sitesChanged) {
+        drawSites(spec);
       }
-      for (const arc of spec.arcs) {
-        lines.add({
-          positions: toCartesians(arc.positions),
-          width: 7,
-          material: Material.fromType("PolylineGlow", {
-            color: Color.fromCssColorString(arc.color),
-            glowPower: 0.22,
-            taperPower: 1
-          })
-        });
+      if (cablesChanged) {
+        drawCables(spec);
       }
-      for (const marker of spec.markers) {
-        const style = MARKER_STYLE[marker.emphasis];
-        markers.add({
-          id: { hopIndex: marker.hopIndex } satisfies HopId,
-          position: toCartesian(marker.position),
-          pixelSize: style.pixelSize,
-          color: Color.fromCssColorString(marker.color),
-          outlineColor: style.outline,
-          outlineWidth: style.outlineWidth
-        });
+      if (routeChanged || sitesChanged || cablesChanged) {
+        scene.requestRender();
       }
-      for (const label of spec.labels) {
-        labels.add({
-          id: { hopIndex: label.hopIndex } satisfies HopId,
-          position: toCartesian(label.position),
-          text: label.text,
-          font: "600 13px system-ui, -apple-system, 'Segoe UI', sans-serif",
-          fillColor: Color.WHITE,
-          showBackground: true,
-          backgroundColor: LABEL_BACKGROUND,
-          backgroundPadding: new Cartesian2(7, 5),
-          pixelOffset: new Cartesian2(0, -14),
-          verticalOrigin: VerticalOrigin.BOTTOM,
-          horizontalOrigin: HorizontalOrigin.CENTER
-        });
-      }
-      scene.requestRender();
     },
 
     flyTo(focus) {
@@ -512,10 +656,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           window.screen.width,
           window.screen.height
         ),
-        fovRad:
-          camera.frustum instanceof PerspectiveFrustum && camera.frustum.fov !== undefined
-            ? camera.frustum.fov
-            : CesiumMath.PI_OVER_THREE,
+        fovRad: horizontalFov(),
         maximumScreenSpaceError: globe.maximumScreenSpaceError
       });
       const steps = planFlight(

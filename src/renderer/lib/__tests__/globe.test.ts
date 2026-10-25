@@ -20,6 +20,7 @@ import {
   type CameraPosition
 } from "@renderer/lib/globe";
 import { bundledOnlyHeight } from "@renderer/lib/imagery";
+import { ASN_PALETTE, UNKNOWN_ASN_COLOR } from "@renderer/lib/infra/asnColors";
 import type { AnycastInfo, HopLocation, HopResolution, LocationConfidence } from "@common/ipc";
 
 const noLocation: HopLocation = {
@@ -453,6 +454,49 @@ describe("automatic camera moves use only bundled imagery", () => {
       }
     });
     expect(moves).toBe(route.length);
+  });
+});
+
+describe("network colours", () => {
+  const hop = (hopIndex: number, latitude: number, longitude: number, asn?: number) =>
+    baseHop({
+      hopIndex,
+      ipAddress: `198.51.100.${hopIndex}`,
+      asn: asn == null ? null : { asn, name: `AS-${asn}` },
+      location: at(latitude, longitude)
+    });
+  const hops = [hop(1, 19.08, 72.88, 9498), hop(2, 13.08, 80.27, 9498), hop(3, 43.3, 5.37, 6453), hop(4, 50.11, 8.68)];
+
+  it("colours markers and rings by network, and hops without an ASN in grey", () => {
+    const scene = buildGlobeScene(hops, undefined, undefined, { asnColors: true });
+    const color = (hopIndex: number) => scene.markers.find((m) => m.hopIndex === hopIndex)?.color;
+    expect(color(1)).toBe(color(2));
+    expect(color(3)).not.toBe(color(1));
+    expect(color(4)).toBe(UNKNOWN_ASN_COLOR);
+    expect(ASN_PALETTE).toContain(color(1));
+    expect(scene.rings.find((r) => r.hopIndex === 3)?.color).toBe(color(3));
+  });
+
+  it("splits an arc between two networks where the route hands over", () => {
+    const arcs = buildGlobeScene(hops, undefined, undefined, { asnColors: true }).arcs;
+    // 1→2 stays in one network: one arc; 2→3 and 3→4 change network: two halves each.
+    expect(arcs.map((arc) => [arc.fromHopIndex, arc.toHopIndex])).toEqual([
+      [1, 2],
+      [2, 3],
+      [2, 3],
+      [3, 4],
+      [3, 4]
+    ]);
+    const [first, second] = arcs.filter((arc) => arc.fromHopIndex === 2);
+    expect(first.positions.at(-1)).toEqual(second.positions[0]);
+    expect(first.color).not.toBe(second.color);
+  });
+
+  it("keeps the latency colours and hop colours while the layer is off", () => {
+    const scene = buildGlobeScene(hops);
+    expect(scene.arcs).toHaveLength(3);
+    expect(scene.arcs[0].color).toBe(latencyToColor(11));
+    expect(scene.markers.find((m) => m.hopIndex === 3)?.color).toBe(hopIndexToColor(3));
   });
 });
 

@@ -1,6 +1,12 @@
 import type { ThemeName, TracerouteRequest, TracerouteRun } from "@common/ipc";
 import { hopPosition } from "./globe";
-import { LAYERS, type LayerId, type LayerVisibility } from "./layers";
+import {
+  LAYERS,
+  layerById,
+  type LayerDefinition,
+  type LayerId,
+  type LayerVisibility
+} from "./layers";
 import { PANELS, type PanelId } from "./uiPreferences";
 
 /**
@@ -105,14 +111,24 @@ export function buildCommands(ctx: CommandContext): Command[] {
     });
   }
 
-  for (const layer of LAYERS) {
-    const visible = ctx.layers[layer.id];
+  for (const layer of LAYERS as readonly LayerDefinition[]) {
+    const id = layer.id as LayerId;
+    const visible = ctx.layers[id];
+    const parent = layer.parent as LayerId | undefined;
+    // Showing a switch under a hidden layer shows that layer too.
+    const showParent = !visible && parent != null && !ctx.layers[parent];
     commands.push({
       id: `layer.${layer.id}`,
-      title: `${visible ? "Hide" : "Show"} ${layer.label.toLowerCase()}`,
+      title: `${visible ? "Hide" : "Show"} ${layer.commandName ?? layer.label.toLowerCase()}`,
       group: "Layers",
+      detail: showParent ? `Also shows ${layerById(parent)?.label.toLowerCase()}` : undefined,
       keywords: `layer toggle ${layer.description}`,
-      run: () => actions.setLayerVisible(layer.id, !visible)
+      run: () => {
+        if (showParent) {
+          actions.setLayerVisible(parent, true);
+        }
+        actions.setLayerVisible(id, !visible);
+      }
     });
   }
 

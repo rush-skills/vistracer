@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useGeoDatabaseMeta } from "@renderer/hooks/useGeoDatabaseMeta";
 import { useExportStore } from "@renderer/state/exportStore";
 import { useCommand } from "@renderer/hooks/useCommands";
 import { useNoticeStore } from "@renderer/state/noticeStore";
+import { layerVisibility } from "@renderer/lib/layers";
+import { useUiStore } from "@renderer/state/uiStore";
 import { GeoWarningBanner } from "./GeoWarningBanner";
 import { GeoSettingsModal } from "./GeoSettingsModal";
 import { ExportMediaModal } from "./ExportMediaModal";
@@ -17,6 +19,8 @@ export const FooterBar: React.FC = () => {
   const exportRoute = useCommand("export.dialog");
   const notice = useNoticeStore((state) => state.notice);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const savedLayers = useUiStore((state) => state.layers);
+  const byNetwork = useMemo(() => layerVisibility(savedLayers)["asn-colors"], [savedLayers]);
 
   const handleUpdateGeoPaths = async (cityPath?: string, asnPath?: string) => {
     await (window as VisTracerWindow).visTracer.updateGeoDatabasePaths(cityPath, asnPath);
@@ -41,20 +45,24 @@ export const FooterBar: React.FC = () => {
           <GeoWarningBanner geoMeta={geoMeta} onConfigure={() => setIsSettingsOpen(true)} />
         )}
         <div className="footer-bar__content">
-          <ul className="footer-bar__legend" aria-label="Arc colour: round-trip time">
-            <li>
-              <span className="footer-bar__color footer-bar__color--fast" />
-              &lt; 50 ms
-            </li>
-            <li>
-              <span className="footer-bar__color footer-bar__color--moderate" />
-              50–150 ms
-            </li>
-            <li>
-              <span className="footer-bar__color footer-bar__color--slow" />
-              &gt; 150 ms
-            </li>
-          </ul>
+          {byNetwork ? (
+            <span className="footer-bar__legend">Arc colour: network (ASN), see the legend</span>
+          ) : (
+            <ul className="footer-bar__legend" aria-label="Arc colour: round-trip time">
+              <li>
+                <span className="footer-bar__color footer-bar__color--fast" />
+                &lt; 50 ms
+              </li>
+              <li>
+                <span className="footer-bar__color footer-bar__color--moderate" />
+                50–150 ms
+              </li>
+              <li>
+                <span className="footer-bar__color footer-bar__color--slow" />
+                &gt; 150 ms
+              </li>
+            </ul>
+          )}
           <span className="footer-bar__geo">{geoStatus}</span>
           <button
             type="button"

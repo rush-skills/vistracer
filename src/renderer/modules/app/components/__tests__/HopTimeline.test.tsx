@@ -156,7 +156,8 @@ describe("HopTimeline", () => {
     expect(setSettings).toHaveBeenLastCalledWith("preferences.ui", {
       theme: "dark",
       layers: {},
-      collapsed: { timeline: true }
+      collapsed: { timeline: true },
+      consents: {}
     });
     fireEvent.click(screen.getByRole("button", { name: "Show hop timeline" }));
     expect(screen.getByRole("listbox")).toBeTruthy();

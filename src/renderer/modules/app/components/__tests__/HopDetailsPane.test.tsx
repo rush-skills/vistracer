@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { HopLocation, HopResolution, LocationEstimate, TracerouteRun } from "@common/ipc";
+import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
+import { useUiStore } from "@renderer/state/uiStore";
+import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
 import { HopDetailsPane } from "../HopDetailsPane";
 
 const latency = { minRttMs: 11.9, maxRttMs: 12.2, avgRttMs: 12.05, jitterMs: 0.3 };
@@ -259,7 +262,7 @@ const privateHop: HopResolution = {
   rawLine: " 8  10.0.0.1  1 ms"
 };
 
-const run: TracerouteRun = {
+const baseRun: TracerouteRun = {
   request: {
     target: "8.8.8.8",
     protocol: "ICMP",
@@ -277,6 +280,7 @@ const run: TracerouteRun = {
   },
   hops: [multipathHop, unenrichedHop, pendingHop, ixpHop, hintHop, ruledOutHop, unknownHop, privateHop]
 };
+const run = baseRun;
 
 const inspector = (hopIndex: number) => screen.getByLabelText(`Hop ${hopIndex} details`);
 
@@ -542,5 +546,37 @@ describe("HopDetailsPane", () => {
     } finally {
       Element.prototype.scrollIntoView = original;
     }
+  });
+
+  it("says which cloud region and data centre a hop is likely in, while those layers are on", () => {
+    const awsHop: HopResolution = {
+      ...multipathHop,
+      hopIndex: 6,
+      asn: { asn: 16509, name: "AMAZON-02" },
+      location: {
+        ...noLocation,
+        best: { ...(multipathHop.location.best as LocationEstimate), latitude: 50.1, longitude: 8.7, label: "Frankfurt", radiusKm: 50, confidence: "high" }
+      }
+    };
+    const run: TracerouteRun = { ...baseRun, hops: [awsHop] };
+    useInfraStore.setState({
+      sources: {
+        "peeringdb-sites": { status: "ready", data: PEERINGDB },
+        "cloud-regions": { status: "ready", data: CLOUD },
+        "submarine-cables": { status: "idle" }
+      }
+    });
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    act(() => useUiStore.setState({ layers: {} }));
+    const { rerender } = render(<HopDetailsPane run={run} selectedHopIndex={6} status="success" />);
+    expect(screen.queryByRole("region", { name: "Infrastructure" })).toBeNull();
+
+    act(() => useUiStore.setState({ layers: { "cloud-regions": true, "data-centres": true } }));
+    rerender(<HopDetailsPane run={run} selectedHopIndex={6} status="success" />);
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(section.textContent).toContain("AWS eu-central-1");
+    expect(section.textContent).toContain("high");
+    expect(section.textContent).toContain("AS16509 is Amazon Web Services's network");
+    expect(section.textContent).toContain("Digital Realty Frankfurt FRA1-27");
   });
 });

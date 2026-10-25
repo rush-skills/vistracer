@@ -7,7 +7,15 @@ import {
   nextCameraFocus,
   type CameraTracker
 } from "@renderer/lib/globe";
-import { imageryForLayers, layerVisibility, sceneForLayers } from "@renderer/lib/layers";
+import { MAX_CLUSTER_LEVEL } from "@renderer/lib/infra/cluster";
+import {
+  imageryForLayers,
+  layerVisibility,
+  sceneForLayers,
+  styleForLayers
+} from "@renderer/lib/layers";
+import { useInfraScene } from "@renderer/hooks/useInfra";
+import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
 import type { GlobeController } from "./globe/controller";
@@ -31,6 +39,12 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
   const [loadError, setLoadError] = useState<string>();
   const [imageryNotice, setImageryNotice] = useState(false);
   const trackerRef = useRef<CameraTracker>(INITIAL_CAMERA_TRACKER);
+  const [clusterLevel, setClusterLevel] = useState(MAX_CLUSTER_LEVEL);
+  const hoveredSiteKey = useInfraStore((state) => state.hoveredSite?.specKey);
+  const infra = useInfraScene(clusterLevel, hoveredSiteKey);
+  // The adapter's callbacks are made once; they read the latest clusters here.
+  const membersRef = useRef(infra.members);
+  membersRef.current = infra.members;
   const runKey = run ? `${run.summary.target}@${run.summary.startedAt}` : undefined;
 
   useEffect(() => {
@@ -51,6 +65,17 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
           onSelectHop: selectHopByUser,
           onHoverHop: (hopIndex, at) =>
             setHoveredHop(hopIndex, at && { kind: "point", x: at.x, y: at.y }),
+          onHoverSite: (key, at) => {
+            const site = key ? membersRef.current(key) : undefined;
+            useInfraStore
+              .getState()
+              .setHoveredSite(
+                key && site && at
+                  ? { specKey: key, ...site, anchor: { kind: "point", x: at.x, y: at.y } }
+                  : undefined
+              );
+          },
+          onClusterLevel: setClusterLevel,
           onImageryError: () => {
             setImageryNotice(true);
             window.clearTimeout(noticeTimer);
@@ -74,9 +99,14 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
   }, []);
 
   const hops = useMemo(() => run?.hops ?? [], [run]);
+  const style = useMemo(() => styleForLayers(visibility), [visibility]);
+  const route = useMemo(
+    () => buildGlobeScene(hops, selectedHopIndex, hoveredHopIndex, style),
+    [hops, selectedHopIndex, hoveredHopIndex, style]
+  );
   const scene = useMemo(
-    () => sceneForLayers(buildGlobeScene(hops, selectedHopIndex, hoveredHopIndex), visibility),
-    [hops, selectedHopIndex, hoveredHopIndex, visibility]
+    () => sceneForLayers({ ...route, ...infra.scene }, visibility),
+    [route, infra.scene, visibility]
   );
   const imagery = useMemo(() => imageryForLayers(visibility), [visibility]);
 
