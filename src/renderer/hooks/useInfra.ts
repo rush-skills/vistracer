@@ -116,9 +116,10 @@ export interface InfraView {
 /**
  * The infrastructure items of the globe scene at a cluster level. Each
  * step is memoised on its own inputs: clustering runs when the data, the
- * switches, the route or the level change; a hover only restyles markers.
+ * switches, the route or the level change. A hover changes nothing here:
+ * the adapter restyles the hovered marker (`setHoveredSite`).
  */
-export function useInfraScene(level: number, hoveredKey: string | undefined): InfraView {
+export function useInfraScene(level: number): InfraView {
   const saved = useUiStore((state) => state.layers);
   const sources = useInfraStore((state) => state.sources);
   const route = useRouteInfra();
@@ -137,9 +138,9 @@ export function useInfraScene(level: number, hoveredKey: string | undefined): In
     () =>
       clusters.exchanges.length + clusters.facilities.length + clusters.cloudRegions.length > 0 ||
       cables.length > 0
-        ? infraScene(clusters, cables, hoveredKey)
+        ? infraScene(clusters, cables)
         : EMPTY_INFRA_SCENE,
-    [clusters, cables, hoveredKey]
+    [clusters, cables]
   );
   const members = useMemo(() => {
     const byKey = new Map<string, { layer: SiteLayer | "cables"; keys: string[] }>();

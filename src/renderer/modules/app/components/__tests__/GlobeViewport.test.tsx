@@ -16,6 +16,7 @@ const fake = vi.hoisted(() => ({
     flyTo: vi.fn(),
     setInputEnabled: vi.fn(),
     setImagery: vi.fn(),
+    setHoveredSite: vi.fn(),
     destroy: vi.fn()
   },
   callbacks: undefined as GlobeCallbacks | undefined,
@@ -243,7 +244,8 @@ describe("GlobeViewport", () => {
     await waitFor(() => expect(fake.callbacks).toBeDefined());
     act(() => fake.callbacks?.onClusterLevel(10));
     // Far out, the two Frankfurt data centres form one cluster at the larger one.
-    const frankfurt = lastScene()?.facilities.find((site) => site.key === "facilities|fac:58");
+    const far = lastScene()?.facilities;
+    const frankfurt = far?.find((site) => site.key === "facilities|fac:58");
     act(() => fake.callbacks?.onHoverSite(frankfurt?.key, { x: 5, y: 6 }));
     const hovered = useInfraStore.getState().hoveredSite;
     expect(hovered).toMatchObject({
@@ -253,12 +255,13 @@ describe("GlobeViewport", () => {
     });
     expect(hovered?.keys.length).toBeGreaterThan(1);
     expect(frankfurt?.key).toBe(`facilities|${hovered?.keys[0]}`);
-    // The hovered marker is drawn larger.
-    expect(lastScene()?.facilities.find((site) => site.key === frankfurt?.key)?.pixelSize).toBe(
-      (frankfurt?.pixelSize ?? 0) + 2
-    );
+    // The adapter restyles the hovered marker; the site markers are not rebuilt.
+    expect(fake.controller.setHoveredSite).toHaveBeenLastCalledWith(frankfurt?.key);
+    expect(lastScene()?.facilities).toBe(far);
     act(() => fake.callbacks?.onHoverSite(undefined));
     expect(useInfraStore.getState().hoveredSite).toBeUndefined();
+    expect(fake.controller.setHoveredSite).toHaveBeenLastCalledWith(undefined);
+    expect(lastScene()?.facilities).toBe(far);
   });
 
   it("frames flights in the whole canvas during an export, which records no panels", async () => {

@@ -281,13 +281,20 @@ function siteColors(site: SiteCluster): { fill: string; outline: string } {
   return SITE_COLORS[site.provider as keyof typeof SITE_COLORS] ?? SITE_COLORS.exchange;
 }
 
-/** Marker specs; cheap, so hover emphasis does not cluster again. */
-export function siteSpecs(sites: readonly SiteCluster[], hoveredKey: string | undefined): SiteSpec[] {
+/**
+ * The style of the marker under the pointer. The adapter applies it to
+ * that one point, so a hover does not rebuild the site markers.
+ */
+export function hoveredSiteStyle(spec: SiteSpec): { pixelSize: number; outline: string } {
+  return { pixelSize: spec.pixelSize + 2, outline: OUTLINE_ON_ROUTE };
+}
+
+/** Marker specs, built once per clustering. */
+export function siteSpecs(sites: readonly SiteCluster[]): SiteSpec[] {
   const specs = sites.map((site) => {
     const key = siteSpecKey(site.layer, site.cluster.key);
     const { fill, outline } = siteColors(site);
     const extra = Math.min(8, 2 * Math.log2(site.cluster.members.length));
-    const hovered = key === hoveredKey;
     const base = site.layer === "facilities" ? 7 : 6;
     const { latitude, longitude } = site.cluster;
     return {
@@ -295,10 +302,10 @@ export function siteSpecs(sites: readonly SiteCluster[], hoveredKey: string | un
       layer: site.layer,
       position: { latitude, longitude, height: 0 },
       color: fill,
-      outline: site.linked || hovered ? OUTLINE_ON_ROUTE : outline,
+      outline: site.linked ? OUTLINE_ON_ROUTE : outline,
       // A ring (facility) needs a wider outline to read as a ring.
       outlineWidth: (site.layer === "facilities" ? 2 : 1) + (site.linked ? 1 : 0),
-      pixelSize: base + extra + (site.linked ? 4 : 0) + (hovered ? 2 : 0),
+      pixelSize: base + extra + (site.linked ? 4 : 0),
       label: site.label
     };
   });
@@ -353,15 +360,11 @@ export function cableSpecs(
   return specs.sort((a, b) => guess(a) - guess(b));
 }
 
-export function infraScene(
-  clusters: SiteClusters,
-  cables: CableSpec[],
-  hoveredKey: string | undefined
-): InfraScene {
+export function infraScene(clusters: SiteClusters, cables: CableSpec[]): InfraScene {
   return {
-    exchanges: siteSpecs(clusters.exchanges, hoveredKey),
-    facilities: siteSpecs(clusters.facilities, hoveredKey),
-    cloudRegions: siteSpecs(clusters.cloudRegions, hoveredKey),
+    exchanges: siteSpecs(clusters.exchanges),
+    facilities: siteSpecs(clusters.facilities),
+    cloudRegions: siteSpecs(clusters.cloudRegions),
     cables
   };
 }

@@ -37,6 +37,7 @@ const globe = vi.hoisted(() => ({
     flyTo: vi.fn(),
     setInputEnabled: vi.fn(),
     setImagery: vi.fn(),
+    setHoveredSite: vi.fn(),
     destroy: vi.fn()
   }
 }));

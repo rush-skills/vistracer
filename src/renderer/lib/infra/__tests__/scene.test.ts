@@ -6,6 +6,7 @@ import {
   buildSiteClusters,
   cableLines,
   cableSpecs,
+  hoveredSiteStyle,
   infraScene,
   keepUnchanged,
   routeInfra,
@@ -63,7 +64,7 @@ describe("infrastructure scene", () => {
   it("lights up and labels the sites on the route", () => {
     const route = routeInfra(HOPS, ALL_ON, INPUT);
     const clusters = buildSiteClusters(ALL_ON, 4, INPUT, route);
-    const scene = infraScene(clusters, [], undefined);
+    const scene = infraScene(clusters, []);
     const decix = scene.exchanges.find((site) => site.key === siteSpecKey("exchanges", "ix:31"));
     expect(decix?.label).toBe("DE-CIX Frankfurt · hop 5");
     expect(decix?.outline).toBe("#FFFFFF");
@@ -93,15 +94,18 @@ describe("infrastructure scene", () => {
   it("styles markers by layer and grows clusters and the hovered marker", () => {
     const route = routeInfra([], ALL_ON, INPUT);
     const clusters = buildSiteClusters(ALL_ON, 10, INPUT, route);
-    const specs = siteSpecs(clusters.facilities, undefined);
-    const single = siteSpecs(buildSiteClusters(ALL_ON, 0, INPUT, route).facilities, undefined)[0];
+    const specs = siteSpecs(clusters.facilities);
+    const single = siteSpecs(buildSiteClusters(ALL_ON, 0, INPUT, route).facilities)[0];
     const cluster = clusters.facilities.find((site) => site.cluster.members.length > 1);
     const key = siteSpecKey("facilities", cluster?.cluster.key ?? "");
     const frankfurt = specs.find((site) => site.key === key);
     expect(frankfurt?.color).toBe(SITE_COLORS.facility.fill);
     expect(frankfurt?.pixelSize).toBeGreaterThan(single.pixelSize);
-    const hovered = siteSpecs(clusters.facilities, key).find((site) => site.key === key);
-    expect(hovered?.pixelSize).toBe((frankfurt?.pixelSize ?? 0) + 2);
+    // The hovered marker is restyled in place: larger, with a white outline.
+    expect(frankfurt && hoveredSiteStyle(frankfurt)).toEqual({
+      pixelSize: (frankfurt?.pixelSize ?? 0) + 2,
+      outline: "#FFFFFF"
+    });
   });
 
   it("highlights every line of a guessed cable and names it once", () => {

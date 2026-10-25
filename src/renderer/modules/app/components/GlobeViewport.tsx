@@ -72,7 +72,7 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
   const trackerRef = useRef<CameraTracker>(INITIAL_CAMERA_TRACKER);
   const [clusterLevel, setClusterLevel] = useState(MAX_CLUSTER_LEVEL);
   const hoveredSiteKey = useInfraStore((state) => state.hoveredSite?.specKey);
-  const infra = useInfraScene(clusterLevel, hoveredSiteKey);
+  const infra = useInfraScene(clusterLevel);
   // The adapter's callbacks are made once; they read the latest clusters here.
   const membersRef = useRef(infra.members);
   membersRef.current = infra.members;
@@ -148,6 +148,10 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
   useEffect(() => {
     controller?.setImagery(imagery);
   }, [controller, imagery]);
+
+  useEffect(() => {
+    controller?.setHoveredSite(hoveredSiteKey);
+  }, [controller, hoveredSiteKey]);
 
   useEffect(() => {
     if (!controller) {

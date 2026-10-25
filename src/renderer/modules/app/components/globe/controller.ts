@@ -14,6 +14,8 @@ export interface GlobeController {
   setInputEnabled(enabled: boolean): void;
   /** Day/night shading and online imagery (layer panel switches). */
   setImagery(options: ImageryOptions): void;
+  /** Emphasises the site marker with this spec key (or none); rebuilds nothing. */
+  setHoveredSite(key: string | undefined): void;
   destroy(): void;
 }
 

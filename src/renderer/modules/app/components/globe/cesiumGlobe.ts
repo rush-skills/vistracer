@@ -14,6 +14,7 @@ import {
   Math as CesiumMath,
   PerspectiveFrustum,
   PointPrimitiveCollection,
+  type PointPrimitive,
   PolylineCollection,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
@@ -33,9 +34,11 @@ import {
   type Emphasis,
   type FlightStep,
   type GeoPoint,
-  type GlobeScene
+  type GlobeScene,
+  type SiteSpec
 } from "@renderer/lib/globe";
 import { clusterLevel } from "@renderer/lib/infra/cluster";
+import { hoveredSiteStyle } from "@renderer/lib/infra/scene";
 import {
   BUNDLED_IMAGERY,
   CanvasDrag,
@@ -550,12 +553,26 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       });
     }
   };
+  // The drawn site markers by spec key, to restyle the hovered one in place.
+  const sitePointByKey = new Map<string, { point: PointPrimitive; spec: SiteSpec }>();
+  let hoveredSiteKey: string | undefined;
+  const styleSite = (key: string | undefined, hovered: boolean) => {
+    const site = key ? sitePointByKey.get(key) : undefined;
+    if (!site) {
+      return false;
+    }
+    const style = hovered ? hoveredSiteStyle(site.spec) : site.spec;
+    site.point.pixelSize = style.pixelSize;
+    site.point.outlineColor = Color.fromCssColorString(style.outline);
+    return true;
+  };
   const drawSites = (spec: GlobeScene) => {
     sitePoints.removeAll();
     siteLabels.removeAll();
+    sitePointByKey.clear();
     for (const site of [...spec.facilities, ...spec.exchanges, ...spec.cloudRegions]) {
       const position = toCartesian(site.position);
-      sitePoints.add({
+      const point = sitePoints.add({
         id: { siteKey: site.key } satisfies SiteId,
         position,
         pixelSize: site.pixelSize,
@@ -563,6 +580,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
         outlineColor: Color.fromCssColorString(site.outline),
         outlineWidth: site.outlineWidth
       });
+      sitePointByKey.set(site.key, { point, spec: site });
       if (site.label) {
         siteLabels.add({
           id: { siteKey: site.key } satisfies SiteId,
@@ -579,6 +597,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
         });
       }
     }
+    styleSite(hoveredSiteKey, true);
   };
   const drawCables = (spec: GlobeScene) => {
     cableLines.removeAll();
@@ -708,6 +727,17 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       controls.enableTilt = enabled;
       controls.enableTranslate = enabled;
       onlineGate.setInputLocked(!enabled);
+    },
+
+    setHoveredSite(key) {
+      if (key === hoveredSiteKey) {
+        return;
+      }
+      const restyled = styleSite(hoveredSiteKey, false);
+      hoveredSiteKey = key;
+      if (styleSite(key, true) || restyled) {
+        scene.requestRender();
+      }
     },
 
     setImagery(options) {
