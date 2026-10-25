@@ -1,7 +1,7 @@
 import React from "react";
 import type { HopResolution, LocationEstimate, PeeringDbDetails } from "@common/ipc";
 import { useRouteInfra } from "@renderer/hooks/useInfra";
-import { regionTitle } from "@renderer/lib/infra/cloudMatch";
+import { formatKm, regionTitle } from "@renderer/lib/infra/cloudMatch";
 import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { PROVIDER_LABELS, findProvider } from "../lib/providers";
 import { HINT_RULE_LABELS, SOURCE_LABELS, describeRtt, formatRadius } from "../lib/location";
@@ -235,8 +235,7 @@ const LocationSection: React.FC<HopInspectorProps> = ({ hop }) => {
   );
 };
 
-const km = (value: number | null) =>
-  value == null ? "" : ` (${Math.round(value).toLocaleString("en-US")} km)`;
+const km = (value: number | null) => (value == null ? "" : ` (${formatKm(value)})`);
 
 /**
  * What the shown infrastructure layers say about this hop: the cloud

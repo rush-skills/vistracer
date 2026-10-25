@@ -579,4 +579,16 @@ describe("HopDetailsPane", () => {
     expect(section.textContent).toContain("AS16509 is Amazon Web Services's network");
     expect(section.textContent).toContain("Digital Realty Frankfurt FRA1-27");
   });
+
+  it("colours each hop's dot like its marker: by network while network colours are on", () => {
+    act(() => useUiStore.setState({ layers: {} }));
+    const { rerender } = render(<HopDetailsPane run={run} status="success" />);
+    const dot = () =>
+      (document.querySelector(".hop-details__dot") as HTMLElement | null)?.style.backgroundColor;
+    const before = dot();
+    expect(before).toBeTruthy();
+    act(() => useUiStore.setState({ layers: { "asn-colors": true } }));
+    rerender(<HopDetailsPane run={run} status="success" />);
+    expect(dot()).not.toBe(before);
+  });
 });

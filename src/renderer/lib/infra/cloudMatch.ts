@@ -29,7 +29,10 @@ export interface CloudMatch {
   reason: string;
 }
 
-const km = (value: number) => `${Math.round(value).toLocaleString("en-US")} km`;
+/** "12 km", "1,200 km"; a distance that rounds to 0 is "under 1 km". */
+export const formatKm = (value: number) =>
+  value < 0.5 ? "under 1 km" : `${Math.round(value).toLocaleString("en-US")} km`;
+const km = formatKm;
 
 export const regionTitle = (provider: CloudProvider, region: CloudRegion) =>
   `${provider.shortName} ${region.code}${region.city !== region.name ? ` (${region.city})` : ""}`;

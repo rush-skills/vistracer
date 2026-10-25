@@ -4,6 +4,9 @@ import type { TracerouteRun } from "@common/ipc";
 import { usePanel } from "@renderer/hooks/usePanel";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { hopIndexToColor } from "@renderer/lib/globe";
+import { asnColor, assignAsnColors } from "@renderer/lib/infra/asnColors";
+import { layerVisibility } from "@renderer/lib/layers";
+import { useUiStore } from "@renderer/state/uiStore";
 import { describeFailures, failedProviders } from "../lib/providers";
 import { SOURCE_LABELS, formatRadius, locationLabel } from "../lib/location";
 import { HopInspector } from "./HopInspector";
@@ -51,20 +54,25 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
     }
   }, [selectedHopIndex, collapsed]);
 
+  const savedLayers = useUiStore((state) => state.layers);
+  const byNetwork = useMemo(() => layerVisibility(savedLayers)["asn-colors"], [savedLayers]);
+
   const hopRows = useMemo(() => {
     if (!run) return [];
+    // The dot matches the hop's marker on the globe.
+    const networks = byNetwork ? assignAsnColors(run.hops) : undefined;
     return run.hops.map((hop) => {
       const failures = failedProviders(hop);
       return {
         hop,
-        hopColor: hopIndexToColor(hop.hopIndex),
+        hopColor: networks ? asnColor(networks, hop) : hopIndexToColor(hop.hopIndex),
         location: locationLabel(hop),
         extraPaths: Math.max(0, (hop.responders?.length ?? 0) - 1),
         failures,
         failureSummary: describeFailures(failures)
       };
     });
-  }, [run]);
+  }, [run, byNetwork]);
 
   const selectedHop = run?.hops.find((hop) => hop.hopIndex === selectedHopIndex);
   const notices = run?.summary.notices ?? [];

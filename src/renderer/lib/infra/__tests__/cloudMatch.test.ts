@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HopResolution, LocationEstimate } from "@common/ipc";
-import { matchCloudRegion, matchCloudRegions } from "@renderer/lib/infra/cloudMatch";
+import { formatKm, matchCloudRegion, matchCloudRegions } from "@renderer/lib/infra/cloudMatch";
 import { shownCloud } from "@renderer/lib/infra/scene";
 import { layerVisibility } from "@renderer/lib/layers";
 import { estimate, makeHop } from "@renderer/test/fixtures";
@@ -91,5 +91,17 @@ describe("matchCloudRegion", () => {
     const all = shownCloud(CLOUD, layerVisibility({ "cloud-regions": true }));
     expect(matchCloudRegions([hop], all.providers, all.regions).get(7)?.provider.id).toBe("aws");
     expect(shownCloud(CLOUD, layerVisibility({})).providers).toEqual([]);
+  });
+});
+
+describe("formatKm", () => {
+  it("rounds to whole km and says when a distance is under 1 km", () => {
+    expect([0, 0.4, 0.6, 12.4, 1234.5].map(formatKm)).toEqual([
+      "under 1 km",
+      "under 1 km",
+      "1 km",
+      "12 km",
+      "1,235 km"
+    ]);
   });
 });
