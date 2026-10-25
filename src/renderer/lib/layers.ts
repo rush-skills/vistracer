@@ -363,17 +363,6 @@ export function layerActive(visibility: LayerVisibility, id: LayerId): boolean {
   return visibility[id] && (parent == null || visibility[parent]);
 }
 
-/** The data sources that the shown layers need. */
-export function sourcesForLayers(visibility: LayerVisibility): Set<InfraSourceId> {
-  const sources = new Set<InfraSourceId>();
-  for (const layer of LAYER_LIST) {
-    if (layer.data && layerActive(visibility, layer.id)) {
-      sources.add(layer.data);
-    }
-  }
-  return sources;
-}
-
 /** Filter keys switched off for `items` (applied before clustering). */
 export function hiddenFilterKeys(visibility: LayerVisibility, items: FilterableItems): Set<string> {
   const hidden = new Set<string>();

@@ -3,10 +3,12 @@ import { act, render, waitFor } from "@testing-library/react";
 import type { RendererApi } from "@common/bridge";
 import { useInfraLoading } from "@renderer/hooks/useInfra";
 import { NO_EXCHANGE_LIST, useInfraStore } from "@renderer/state/infraStore";
+import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
 
 const initialInfra = useInfraStore.getState();
 const initialUi = useUiStore.getState();
+const initialTrace = useTracerouteStore.getState();
 
 const Loader = () => {
   useInfraLoading();
@@ -23,6 +25,7 @@ beforeEach(() => {
   window.visTracer = { getPeeringDbSites } as unknown as RendererApi;
   useInfraStore.setState(initialInfra, true);
   useUiStore.setState(initialUi, true);
+  useTracerouteStore.setState(initialTrace, true);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 
@@ -74,5 +77,28 @@ describe("useInfraLoading", () => {
     setLayers({ exchanges: true, "data-centres": false });
     setLayers({ exchanges: true, "data-centres": true });
     await waitFor(() => expect(getPeeringDbSites).toHaveBeenCalledTimes(2));
+  });
+
+  it("reads a missing exchange list again after a trace, for the layers that show it", async () => {
+    render(<Loader />);
+    setLayers({ "data-centres": true });
+    await waitFor(() =>
+      expect(useInfraStore.getState().sources["peeringdb-sites"].status).toBe("unavailable")
+    );
+    expect(getPeeringDbSites).toHaveBeenCalledTimes(1);
+    // Exchange matching may have downloaded the list during the trace.
+    getPeeringDbSites.mockResolvedValueOnce(sites);
+    act(() => useTracerouteStore.setState({ status: "success" }));
+    await waitFor(() =>
+      expect(useInfraStore.getState().sources["peeringdb-sites"].status).toBe("ready")
+    );
+    expect(getPeeringDbSites).toHaveBeenCalledTimes(2);
+
+    // With neither the exchange nor the data centre layer shown, a trace reads nothing.
+    act(() => useTracerouteStore.setState({ status: "running" }));
+    useInfraStore.setState(initialInfra, true);
+    setLayers({ "cloud-regions": false, "data-centres": false });
+    act(() => useTracerouteStore.setState({ status: "success" }));
+    expect(getPeeringDbSites).toHaveBeenCalledTimes(2);
   });
 });

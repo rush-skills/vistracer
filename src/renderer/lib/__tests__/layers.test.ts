@@ -18,7 +18,6 @@ import {
   layerVisibility,
   satelliteGroupsForLayers,
   sceneForLayers,
-  sourcesForLayers,
   styleForLayers
 } from "@renderer/lib/layers";
 import { parseCloudRegions } from "@renderer/lib/infra/sources";
@@ -167,14 +166,7 @@ describe("layerVisibility", () => {
 });
 
 describe("data sources, filters and styles", () => {
-  it("needs only the data of shown layers, and a child switch needs its parent", () => {
-    expect(sourcesForLayers(layerVisibility({}))).toEqual(new Set());
-    expect(
-      sourcesForLayers(layerVisibility({ exchanges: true, "data-centres": true, "cloud-aws": true }))
-    ).toEqual(new Set(["peeringdb-sites"]));
-    expect(sourcesForLayers(layerVisibility({ [SUBMARINE_CABLES_LAYER_ID]: true }))).toEqual(
-      new Set(["submarine-cables"])
-    );
+  it("shows a child switch only with its parent on", () => {
     const parentOff = layerVisibility({ "cloud-aws": true });
     expect(layerActive(parentOff, "cloud-aws")).toBe(false);
     expect(layerActive(layerVisibility({ "cloud-regions": true }), "cloud-aws")).toBe(true);
@@ -182,12 +174,11 @@ describe("data sources, filters and styles", () => {
 
   it("shows the satellite groups only with the satellites layer on", () => {
     expect(satelliteGroupsForLayers(layerVisibility({}))).toEqual([]);
-    expect(sourcesForLayers(layerVisibility({ "satellites-geo": true }))).toEqual(new Set());
+    const groupOnly = layerVisibility({ "satellites-geo": true });
+    expect(satelliteGroupsForLayers(groupOnly)).toEqual([]);
+    expect(layerActive(groupOnly, "satellites-geo")).toBe(false);
     const on = layerVisibility({ [SATELLITES_LAYER_ID]: true });
     expect(satelliteGroupsForLayers(on)).toEqual(["starlink", "gps", "stations"]);
-    expect(sourcesForLayers(on)).toEqual(
-      new Set(["celestrak-starlink", "celestrak-gps", "celestrak-stations"])
-    );
     expect(
       satelliteGroupsForLayers(
         layerVisibility({ [SATELLITES_LAYER_ID]: true, "satellites-starlink": false, "satellites-geo": true })

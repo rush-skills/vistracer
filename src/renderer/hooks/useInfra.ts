@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { HopResolution } from "@common/ipc";
 import { EMPTY_INFRA_SCENE, type InfraScene, type SiteLayer } from "@renderer/lib/globe";
-import { LAYER_LIST, layerActive, layerVisibility, type LayerId } from "@renderer/lib/layers";
+import { LAYER_LIST, layerActive, layerVisibility } from "@renderer/lib/layers";
 import type { InfraCode } from "@renderer/lib/infra/code";
 import type { InfraInput, RouteInfra, SiteClusters } from "@renderer/lib/infra/scene";
 import { readySource, useInfraStore, type InfraSources } from "@renderer/state/infraStore";
@@ -9,6 +9,11 @@ import { selectCurrentRun, useTracerouteStore } from "@renderer/state/traceroute
 import { useUiStore } from "@renderer/state/uiStore";
 
 const NO_HOPS: HopResolution[] = [];
+
+/** The layers that show the PeeringDB list exchange matching downloads. */
+const EXCHANGE_LIST_LAYERS = LAYER_LIST.filter((layer) => layer.data === "peeringdb-sites").map(
+  (layer) => layer.id
+);
 
 /** What the route has to do with the layers before their code is loaded: nothing. */
 const NO_ROUTE_INFRA: RouteInfra = {
@@ -51,9 +56,8 @@ export function useInfraLoading(): void {
   }, [shownKey]);
 
   useEffect(() => {
-    const exchangeLayers: LayerId[] = ["exchanges", "data-centres"];
     const shown = shownKey.split(",");
-    if (status !== "success" || !exchangeLayers.some((id) => shown.includes(id))) {
+    if (status !== "success" || !EXCHANGE_LIST_LAYERS.some((id) => shown.includes(id))) {
       return;
     }
     const { sources, reload } = useInfraStore.getState();

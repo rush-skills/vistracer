@@ -27,8 +27,6 @@ export class PeriodicTicker {
   private running = false;
   private visible = true;
   private disposed = false;
-  /** Ticks run so far (for tests and checks). */
-  ticks = 0;
 
   constructor(
     private readonly tick: () => void,
@@ -93,7 +91,6 @@ export class PeriodicTicker {
       return;
     }
     this.lastTick = this.timers.now();
-    this.ticks += 1;
     this.tick();
     if (this.active && this.handle === null) {
       this.handle = this.timers.setTimeout(this.fire, this.intervalMs);
