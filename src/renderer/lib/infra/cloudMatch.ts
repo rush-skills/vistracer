@@ -1,12 +1,15 @@
-import type { HopResolution, LocationConfidence } from "@common/ipc";
+import type { HopResolution, LocationConfidence, LocationEstimate } from "@common/ipc";
 import { greatCircleKm, hopPosition } from "../globe";
 import type { CloudProvider, CloudRegion } from "./sources";
 
 /**
  * Is a hop likely inside a cloud region? The network (ASN) says whose
  * router it is; the location estimate says which region it is near. Only
- * the two together give high confidence: every large city has a region,
- * and a provider's network also has edge sites far from any region.
+ * the two together, with an estimate the app trusts, give high confidence:
+ * every large city has a region, and the operators' networks (Amazon,
+ * Google, Microsoft, Cloudflare) also carry other services and edge sites.
+ * An edge site in the same city as a region looks the same, which the
+ * reason says.
  */
 
 /** A region this close to the hop's estimate (or inside its radius) matches. */
@@ -34,6 +37,14 @@ export const formatKm = (value: number) =>
   value < 0.5 ? "under 1 km" : `${Math.round(value).toLocaleString("en-US")} km`;
 const km = formatKm;
 
+/** Why an estimate cannot support a high match, or null when it can. */
+function estimateDoubt(position: LocationEstimate): string | null {
+  if (position.rtt?.verdict === "conflict") {
+    return "disputed by the RTT check";
+  }
+  return position.confidence === "low" ? "low confidence" : null;
+}
+
 export const regionTitle = (provider: CloudProvider, region: CloudRegion) =>
   `${provider.shortName} ${region.code}${region.city !== region.name ? ` (${region.city})` : ""}`;
 
@@ -55,10 +66,13 @@ function nearest(
  * The cloud match of one hop against the regions of the shown providers.
  *
  * - high: the hop's ASN is the provider's and one of its regions is within
- *   `REGION_MATCH_KM` (or the estimate's radius) of a precise estimate.
- * - medium: the provider's ASN, a region within `NEAR_REGION_KM`.
+ *   `REGION_MATCH_KM` (or the estimate's radius) of a precise estimate of
+ *   medium or high confidence that the RTT check does not dispute.
+ * - medium: the provider's ASN, a region within `NEAR_REGION_KM` (also a
+ *   close region with a weak or disputed estimate).
  * - low: the provider's ASN with no region near (an edge site, or no
- *   location); or no ASN at all and a precise estimate next to a region.
+ *   location); or no ASN at all and a trusted, precise estimate next to a
+ *   region.
  * - none: the ASN belongs to another network, however close a region is.
  */
 export function matchCloudRegion(
@@ -79,7 +93,7 @@ export function matchCloudRegion(
     provider.sites === "regions" ? "region" : "data centre";
 
   if (owner) {
-    const network = `AS${asn} is ${owner.name}'s network`;
+    const network = `AS${asn} is ${owner.operator}'s network`;
     const own = regions.filter((region) => region.provider === owner.id);
     if (!position) {
       const why = hop.location.anycast ? "it is anycast" : "it has no location";
@@ -99,23 +113,21 @@ export function matchCloudRegion(
     const { region, distanceKm } = found;
     const title = regionTitle(owner, region);
     const limit = Math.max(REGION_MATCH_KM, position.radiusKm);
+    const doubt = estimateDoubt(position);
+    const close = distanceKm <= limit && position.radiusKm <= PRECISE_ESTIMATE_KM;
     const confidence: LocationConfidence =
-      distanceKm <= limit && position.radiusKm <= PRECISE_ESTIMATE_KM
-        ? "high"
-        : distanceKm <= NEAR_REGION_KM
-          ? "medium"
-          : "low";
+      close && !doubt ? "high" : distanceKm <= NEAR_REGION_KM ? "medium" : "low";
     const reason =
       confidence === "high"
-        ? `${network}, and ${title} is ${km(distanceKm)} from the hop's estimate.`
+        ? `${network}, and ${title} is ${km(distanceKm)} from the hop's estimate. An edge site of the same network in that city would look the same.`
         : confidence === "medium"
-          ? `${network}; ${title} is ${km(distanceKm)} from the hop's estimate (±${km(position.radiusKm)}), so the ${kind(owner)} is a guess.`
+          ? `${network}; ${title} is ${km(distanceKm)} from the hop's estimate (±${km(position.radiusKm)}${doubt ? `, ${doubt}` : ""}), so the ${kind(owner)} is a guess.`
           : `${network}, but the nearest ${owner.shortName} ${kind(owner)}, ${title}, is ${km(distanceKm)} away: probably an edge site.`;
     return { hopIndex: hop.hopIndex, provider: owner, region, distanceKm, confidence, reason };
   }
 
-  // No ASN for this hop: proximity alone, and only for a precise estimate.
-  if (!position || position.radiusKm > REGION_MATCH_KM) {
+  // No ASN for this hop: proximity alone, and only for a precise, trusted estimate.
+  if (!position || position.radiusKm > REGION_MATCH_KM || estimateDoubt(position)) {
     return null;
   }
   const found = nearest(regions, position);

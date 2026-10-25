@@ -60,6 +60,7 @@
    "id": "aws",
    "name": "Amazon Web Services",
    "shortName": "AWS",
+   "operator": "Amazon",
    "asns": [
     16509,
     14618,
@@ -71,6 +72,7 @@
    "id": "gcp",
    "name": "Google Cloud",
    "shortName": "Google Cloud",
+   "operator": "Google",
    "asns": [
     15169,
     396982,
@@ -85,6 +87,7 @@
    "id": "azure",
    "name": "Microsoft Azure",
    "shortName": "Azure",
+   "operator": "Microsoft",
    "asns": [
     8075,
     8068,
@@ -97,6 +100,7 @@
    "id": "cloudflare",
    "name": "Cloudflare",
    "shortName": "Cloudflare",
+   "operator": "Cloudflare",
    "asns": [
     13335,
     209242

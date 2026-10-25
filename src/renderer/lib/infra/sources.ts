@@ -50,6 +50,8 @@ export interface CloudProvider {
   id: string;
   name: string;
   shortName: string;
+  /** The company whose networks the ASNs are ("Google" for Google Cloud). */
+  operator: string;
   asns: number[];
   /** Cloudflare has data centres, not regions. */
   sites: "regions" | "data-centres";
@@ -251,12 +253,13 @@ function provider(row: Fields): (CloudProvider & { key: string }) | null {
   const id = text(row.id);
   const name = text(row.name);
   const shortName = text(row.shortName);
+  const operator = text(row.operator);
   const asns = Array.isArray(row.asns) ? row.asns.map(count) : null;
   const sites = row.sites === "regions" || row.sites === "data-centres" ? row.sites : null;
-  if (!id || !name || !shortName || !asns || asns.some((asn) => asn == null) || !sites) {
+  if (!id || !name || !shortName || !operator || !asns || asns.some((asn) => asn == null) || !sites) {
     return null;
   }
-  return { key: id, id, name, shortName, asns: asns as number[], sites };
+  return { key: id, id, name, shortName, operator, asns: asns as number[], sites };
 }
 
 function source(row: unknown): SnapshotSource | null {
@@ -315,10 +318,11 @@ export function parseCloudRegions(raw: unknown): CloudRegionData {
   return {
     builtAt: text(raw.meta.builtAt) ?? "unknown",
     sources: sources.filter((entry): entry is SnapshotSource => entry !== null),
-    providers: providers.kept.map(({ id, name, shortName, asns, sites }) => ({
+    providers: providers.kept.map(({ id, name, shortName, operator, asns, sites }) => ({
       id,
       name,
       shortName,
+      operator,
       asns,
       sites
     })),

@@ -17,6 +17,11 @@ export interface CuratedProvider {
   name: string;
   /** Short name for labels, e.g. "AWS". */
   shortName: string;
+  /**
+   * The company whose networks the ASNs are, e.g. "Amazon". Most of them
+   * carry the company's other services and edge sites too, not only its cloud.
+   */
+  operator: string;
   /** ASNs the provider's cloud uses (checked in PeeringDB). */
   asns: readonly number[];
   /** Documentation pages the regions come from. */
@@ -39,11 +44,11 @@ export interface CuratedRegion {
 }
 
 export const CURATED_PROVIDERS = [
-  { id: "aws", name: "Amazon Web Services", shortName: "AWS", asns: [16509, 14618, 7224], sources: ["https://docs.aws.amazon.com/global-infrastructure/latest/regions/aws-regions.html", "https://aws.amazon.com/about-aws/global-infrastructure/regions_az/"], checkedAt: "2026-10-25" },
-  { id: "gcp", name: "Google Cloud", shortName: "Google Cloud", asns: [15169, 396982, 19527, 36040, 43515, 139070], sources: ["https://cloud.google.com/compute/docs/regions-zones"], checkedAt: "2026-10-25" },
-  { id: "azure", name: "Microsoft Azure", shortName: "Azure", asns: [8075, 8068, 8069, 12076], sources: ["https://learn.microsoft.com/en-us/azure/reliability/regions-list"], checkedAt: "2026-10-25" },
+  { id: "aws", name: "Amazon Web Services", shortName: "AWS", operator: "Amazon", asns: [16509, 14618, 7224], sources: ["https://docs.aws.amazon.com/global-infrastructure/latest/regions/aws-regions.html", "https://aws.amazon.com/about-aws/global-infrastructure/regions_az/"], checkedAt: "2026-10-25" },
+  { id: "gcp", name: "Google Cloud", shortName: "Google Cloud", operator: "Google", asns: [15169, 396982, 19527, 36040, 43515, 139070], sources: ["https://cloud.google.com/compute/docs/regions-zones"], checkedAt: "2026-10-25" },
+  { id: "azure", name: "Microsoft Azure", shortName: "Azure", operator: "Microsoft", asns: [8075, 8068, 8069, 12076], sources: ["https://learn.microsoft.com/en-us/azure/reliability/regions-list"], checkedAt: "2026-10-25" },
   // Data centres, not regions: downloaded from the status page by the build script.
-  { id: "cloudflare", name: "Cloudflare", shortName: "Cloudflare", asns: [13335, 209242], sources: ["https://www.cloudflarestatus.com/api/v2/components.json", "https://www.cloudflare.com/network/"], checkedAt: "2026-10-25" }
+  { id: "cloudflare", name: "Cloudflare", shortName: "Cloudflare", operator: "Cloudflare", asns: [13335, 209242], sources: ["https://www.cloudflarestatus.com/api/v2/components.json", "https://www.cloudflare.com/network/"], checkedAt: "2026-10-25" }
 ] as const satisfies readonly CuratedProvider[];
 
 export const CURATED_REGIONS = [

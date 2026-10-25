@@ -66,9 +66,9 @@ export const PEERINGDB: PeeringDbSiteData = {
 };
 
 export const PROVIDERS: CloudProvider[] = [
-  { id: "aws", name: "Amazon Web Services", shortName: "AWS", asns: [16509, 14618], sites: "regions" },
-  { id: "gcp", name: "Google Cloud", shortName: "Google Cloud", asns: [15169, 396982], sites: "regions" },
-  { id: "cloudflare", name: "Cloudflare", shortName: "Cloudflare", asns: [13335], sites: "data-centres" }
+  { id: "aws", name: "Amazon Web Services", shortName: "AWS", operator: "Amazon", asns: [16509, 14618], sites: "regions" },
+  { id: "gcp", name: "Google Cloud", shortName: "Google Cloud", operator: "Google", asns: [15169, 396982], sites: "regions" },
+  { id: "cloudflare", name: "Cloudflare", shortName: "Cloudflare", operator: "Cloudflare", asns: [13335], sites: "data-centres" }
 ];
 
 export const region = (

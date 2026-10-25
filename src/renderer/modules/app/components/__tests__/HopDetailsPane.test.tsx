@@ -576,7 +576,7 @@ describe("HopDetailsPane", () => {
     const section = screen.getByRole("region", { name: "Infrastructure" });
     expect(section.textContent).toContain("AWS eu-central-1");
     expect(section.textContent).toContain("high");
-    expect(section.textContent).toContain("AS16509 is Amazon Web Services's network");
+    expect(section.textContent).toContain("AS16509 is Amazon's network");
     expect(section.textContent).toContain("Digital Realty Frankfurt FRA1-27");
   });
 

@@ -25,8 +25,32 @@ describe("matchCloudRegion", () => {
     expect(result).toMatchObject({ confidence: "high", distanceKm: expect.any(Number) });
     expect(result?.region?.code).toBe("eu-central-1");
     expect(result?.reason).toBe(
-      "AS16509 is Amazon Web Services's network, and AWS eu-central-1 is 2 km from the hop's estimate."
+      "AS16509 is Amazon's network, and AWS eu-central-1 is 2 km from the hop's estimate. An edge site of the same network in that city would look the same."
     );
+  });
+
+  it("is at most medium when the estimate is weak or disputed by the RTT check", () => {
+    // A GeoLite2 city record the app rates low (radius 150 km), next to the region.
+    const weak = match(at(16509, estimate("Frankfurt", 50.1, 8.7, "low", "geolite-city", 150)));
+    expect(weak?.confidence).toBe("medium");
+    expect(weak?.reason).toContain("(±150 km, low confidence), so the region is a guess");
+    const disputed = estimate("Frankfurt", 50.1, 8.7, "high", "hostname-hint", 50);
+    disputed.rtt = {
+      verdict: "conflict",
+      distanceKm: 900,
+      maxDistanceKm: 500,
+      originalRadiusKm: 50,
+      referenceHopIndex: 2,
+      referenceSource: "geolite-city",
+      boundHopIndex: 7,
+      boundRttMs: 20
+    };
+    const conflict = match(at(16509, disputed));
+    expect(conflict?.confidence).toBe("medium");
+    expect(conflict?.reason).toContain("disputed by the RTT check");
+    // Without an ASN, a weak or disputed estimate gives no match at all.
+    expect(match(at(null, estimate("Frankfurt", 50.11, 8.68, "low", "geolite-city", 80)))).toBeNull();
+    expect(match(at(null, disputed))).toBeNull();
   });
 
   it("is medium for the provider's network with its region within 500 km", () => {

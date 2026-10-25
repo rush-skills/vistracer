@@ -234,10 +234,11 @@ const snapshot = {
       }
     ]
   },
-  providers: CURATED_PROVIDERS.map(({ id, name, shortName, asns }) => ({
+  providers: CURATED_PROVIDERS.map(({ id, name, shortName, operator, asns }) => ({
     id,
     name,
     shortName,
+    operator,
     asns: [...asns],
     sites: id === "cloudflare" ? "data-centres" : "regions"
   })),
