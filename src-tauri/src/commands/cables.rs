@@ -418,6 +418,10 @@ mod tests {
         assert!(error.message().contains("www.submarinecablemap.com"));
         assert_eq!(failing.get(true).await.unwrap_err(), error, "no retry yet");
         assert_eq!(failing.fetcher.calls(), 1);
+        // Once the backoff is over, the next call downloads again.
+        failing.state.lock().await.retry_at = Some((Instant::now(), "HTTP 503".into()));
+        assert_eq!(failing.get(true).await.unwrap().cables.len(), 2);
+        assert_eq!(failing.fetcher.calls(), 2);
 
         // An expired saved copy: used, with a note, when the refresh fails.
         let old = SubmarineCables {
