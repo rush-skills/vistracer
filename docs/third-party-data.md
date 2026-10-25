@@ -15,11 +15,16 @@ allows redistribution in it.
 | Airport table for host name hints | `src-tauri/data/airports.csv` | 104 KB | Public domain | OurAirports; see [src-tauri/data/README.md](../src-tauri/data/README.md) |
 | Cloud regions and Cloudflare data centres | `src/renderer/public/infra/cloud-regions.json`, built from `scripts/infra-data/cloud-regions.ts` | 474 sites, 77 KB (13 KB gzip); loaded only while the **Cloud regions** layer is on | Facts from the providers' public documentation (not copyrightable as such); coordinates of the Cloudflare sites from OurAirports (public domain). AWS, Google Cloud, Microsoft Azure and Cloudflare are trademarks of their owners | See [Cloud regions](#cloud-regions) |
 | Network colour palette | `src/renderer/lib/infra/asnColors.ts` | 7 colours | Paul Tol's colour schemes, free to use ("light" qualitative scheme) | <https://personal.sron.nl/~pault/> |
+| satellite.js 7.1 (SGP4 orbit propagation for the satellites layer) | npm `satellite.js`; a lazy chunk (`propagate`) loaded only when the layer has data | 20.7 KB JS | MIT (a derivative of Brandon Rhodes' `sgp4`, MIT) | <https://github.com/shashwatak/satellite-js> |
 
 Not bundled: Cesium imports `meshoptimizer` (MIT) for compressed glTF
 models. The globe never loads glTF, and the package compiles WebAssembly as
 soon as it loads, which the app's CSP blocks. `vite.config.ts` therefore
 replaces it with `src/renderer/modules/app/components/globe/meshoptimizerStub.ts`.
+In the same way, the two WebAssembly builds of satellite.js's optional bulk
+propagator (`#wasm-single-thread`, `#wasm-multi-thread`) are replaced by
+`src/renderer/lib/satellites/satelliteWasmStub.ts`; the app uses only its
+JavaScript SGP4 functions.
 
 ### Imagery tiles
 
@@ -96,6 +101,7 @@ the curated table differ.
 | Blue Marble day tiles, levels 5–8 (EPSG:3857, `GoogleMapsCompatible_Level8`, about 600 m per pixel at level 8) | `gibs.earthdata.nasa.gov` | Only when the globe is zoomed in past the bundled levels; through the Rust tile cache (`$APPCACHE/tiles`, 500 MB) | GIBS: "NASA promotes full and open sharing of data." No API key, no stated rate limit. GIBS asks clients to add: "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS)." |
 | PeeringDB exchange list (exchanges, peering LAN prefixes, facilities) | `www.peeringdb.com` | At most once a day, during traces, while exchange matching (**Internet exchanges** in Integration settings) is on | PeeringDB Acceptable Use Policy. Also the data of the exchange and data centre layers, which add no request. See [src-tauri/data/README.md](../src-tauri/data/README.md) and [architecture.md](./architecture.md) |
 | Submarine cable map (`cable-geo.json`, about 0.75 MB) | `www.submarinecablemap.com` | Only after the user turns on **Submarine cables** and accepts its notice; then at most once a week while the layer is on (saved in `$APPCACHE/submarine-cables.json`) | TeleGeography, CC BY-NC-SA 3.0: non-commercial use, attribution, share-alike. See [Submarine cables](#submarine-cables) |
+| Orbital elements (GP data, CSV) of the satellite groups Starlink, OneWeb, GPS (`gps-ops`), space stations and geostationary (`geo`); Starlink 1.70 MB | `celestrak.org` | Only after the user turns on **Satellites** and accepts its notice, for the groups that are on; each group at most once in 2 hours, reused for 12 hours (saved in `$APPCACHE/satellites/`) | CelesTrak's usage policy; GP data of the US Space Force. See [Satellites](#satellites) |
 
 The tile requests show NASA the approximate areas of the globe you zoom
 into; they carry no addresses. Automatic camera moves (following a trace,
@@ -150,6 +156,45 @@ synthetic.
 - **Privacy.** The request shows TeleGeography the user's IP address; it
   carries nothing about traces.
 
+### Satellites
+
+The satellites layer computes positions from orbital elements (OMM mean
+elements for SGP4) that the backend downloads from CelesTrak:
+`https://celestrak.org/NORAD/elements/gp.php?GROUP=<group>&FORMAT=csv`,
+for the groups `starlink`, `oneweb`, `gps-ops`, `stations` and `geo` only.
+On 2026-10-25 the Starlink group had 11,113 rows (1.70 MB), the space
+stations 20 and the GPS group 32. Nothing is bundled; the test fixture
+`src-tauri/fixtures/satellites/gp-sample.csv` has CelesTrak's column
+layout with made-up rows and Vallado's published SGP4 test case 00005.
+
+- **Terms.** CelesTrak (a non-profit run by Dr. T.S. Kelso) provides the
+  data free of charge and publishes no licence for it; the GP data comes
+  from the US Space Force's 18th Space Defense Squadron through
+  Space-Track.org. CelesTrak's usage policy
+  (<https://celestrak.org/usage-policy.php>, updated 2026-05-22, read on
+  2026-10-25) and its GP documentation
+  (<https://celestrak.org/NORAD/documentation/gp-data-formats.php>) ask
+  apps to "only download the data you need, when you are going to use it,
+  and only download data once per update" (GP data updates every 2
+  hours), to stop querying after any answer that is not HTTP 200, and not
+  to download the Active list and the Starlink list together. VisTracer
+  never asks for the Active list, saves the time of each request before it
+  goes out, asks for a group at most once in 2 hours, reuses a group for
+  12 hours, and stops every request for 2 hours after an error (see
+  [architecture.md](./architecture.md#satellites)). Every installation
+  downloads the data itself; VisTracer does not pass it on.
+- **Attribution.** While the layer is on, the credits list CelesTrak with
+  the origin of the data, the chip names CelesTrak, and exported images
+  and videos carry "Satellite positions computed from CelesTrak GP data
+  (celestrak.org)."
+- **Privacy.** The requests show CelesTrak the user's IP address and the
+  groups shown; they carry nothing about traces.
+- **Satellite internet providers.** The networks that mark a hop as a
+  likely satellite link (Starlink AS14593, OneWeb AS800, Viasat AS7155,
+  HughesNet AS6621, Eutelsat Skylogic AS29286) are listed in
+  `src/renderer/lib/satellites/isp.ts`; their names were checked in
+  PeeringDB's network records on 2026-10-25.
+
 ## Credits shown in the app
 
 A small "NASA, GIBS, CesiumJS" button in the globe's lower right corner opens
@@ -159,9 +204,11 @@ acknowledgement GIBS asks for (see the table above), Natural Earth, MaxMind
 GeoLite2 with MaxMind's notice ("This product includes GeoLite2 data created
 by MaxMind, available from https://www.maxmind.com."), PeeringDB (also for
 the exchange and data centre layers), OurAirports, Team Cymru, RDAP and
-RIPEstat, and the cloud region sources. While the submarine cable layer is
-on, the list also has TeleGeography with its licence and notice, and the
-chip reads "NASA, GIBS, CesiumJS, TeleGeography".
+RIPEstat, the cloud region sources, and satellite.js. While the submarine
+cable layer is on, the list also has TeleGeography with its licence and
+notice; while the satellites layer is on, CelesTrak with the origin of
+its data. Each of them is then named on the chip too, for example "NASA,
+GIBS, CesiumJS, TeleGeography, CelesTrak".
 
 GIBS served the bundled day and night tiles (the build script asks the GIBS
 WMS for them, see above) as well as the online tiles. So the GIBS credit and
