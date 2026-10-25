@@ -97,6 +97,26 @@ describe("clusterSites", () => {
     ]);
   });
 
+  it("finds every seed within a cell at high latitude, also with large cells", () => {
+    // Level 11 (2,048 km) at 70° N: 3.7 columns of longitude are within
+    // reach, more than 1 / cos(70°) ≈ 2.9 columns.
+    const points = [point("seed", 70, 0, 10), point("far-east", 72, 44)];
+    expect(greatCircleKm(points[0], points[1])).toBeLessThan(2048);
+    expect(clusterSites(points, 2048)).toHaveLength(1);
+    // Around a pole every column is near.
+    expect(clusterSites([point("a", 89, 0, 2), point("b", 89, 180)], 300)).toHaveLength(1);
+    // Seeds stay a cell apart everywhere, poles included.
+    const many = Array.from({ length: 300 }, (_, i) =>
+      point(`p${i}`, 90 - (i % 40) * 4.4, ((i * 53) % 360) - 180, (i * 7) % 11)
+    );
+    const clusters = clusterSites(many, 1024);
+    for (let i = 0; i < clusters.length; i += 1) {
+      for (let j = i + 1; j < clusters.length; j += 1) {
+        expect(greatCircleKm(clusters[i], clusters[j])).toBeGreaterThan(1024);
+      }
+    }
+  });
+
   it("joins sites across the antimeridian and near the poles", () => {
     expect(clusterSites([point("fiji", -17, 179.95, 2), point("east", -17, -179.95)], 32)).toHaveLength(1);
     // At 70° N a degree of longitude is 38 km: 3° apart is about 114 km.

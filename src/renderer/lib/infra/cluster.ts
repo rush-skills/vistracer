@@ -59,6 +59,28 @@ export interface Cluster {
 }
 
 const KM_PER_DEGREE = 111.195;
+const EARTH_RADIUS_KM = 6371;
+
+/**
+ * How many columns to each side can hold a site within `cellKm` of a site
+ * at `latitude`. From the haversine formula, hav(d) ≥ cos φ1 · cos φ2 ·
+ * hav(Δλ), and both latitudes are at most one cell further from the
+ * equator, so sin(Δλ / 2) ≤ sin(d / 2R) / cos(|φ| + cell). Near a pole
+ * every column can.
+ */
+function columnReach(latitude: number, cellKm: number, cellDeg: number, columns: number): number {
+  const all = Math.ceil(columns / 2);
+  const extreme = Math.abs(latitude) + cellDeg;
+  if (extreme >= 90) {
+    return all;
+  }
+  const bound = Math.sin(cellKm / (2 * EARTH_RADIUS_KM)) / Math.cos((extreme * Math.PI) / 180);
+  if (bound >= 1) {
+    return all;
+  }
+  const spanDeg = (2 * Math.asin(bound) * 180) / Math.PI;
+  return Math.min(all, Math.ceil(spanDeg / cellDeg) + 1);
+}
 
 /**
  * Greedy clustering: pinned sites first, then by weight (then key, so the
@@ -86,10 +108,7 @@ export function clusterSites(points: readonly ClusterPoint[], cellKm: number): C
     let nearest: Cluster | undefined;
     if (!point.pinned) {
       let best = cellKm;
-      // A degree of longitude shrinks towards the poles, so more columns
-      // can lie within `cellKm` there.
-      const cos = Math.max(Math.cos((point.latitude * Math.PI) / 180), 0.01);
-      const reach = Math.min(Math.ceil(1 / cos), Math.ceil(columns / 2));
+      const reach = columnReach(point.latitude, cellKm, cellDeg, columns);
       for (let r = row - 1; r <= row + 1; r += 1) {
         for (let c = column - reach; c <= column + reach; c += 1) {
           const wrapped = ((c % columns) + columns) % columns;
