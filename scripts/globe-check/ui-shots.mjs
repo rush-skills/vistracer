@@ -4,8 +4,9 @@
 // cards from the timeline and the globe, the command bar, the credits, the
 // settings dialog, the infrastructure layers (exchanges and data centres,
 // a site card, cloud regions, network colours, the cable notice and cables),
-// and the smallest window (960 x 640) with a framed flight. For review only;
-// it checks nothing.
+// the satellites (a Starlink hop, the notice, the layer on, a satellite
+// card), and the smallest window (960 x 640) with a framed flight. For
+// review only; it checks nothing.
 //
 //   npm run build
 //   node scripts/globe-check/ui-shots.mjs [output dir]
@@ -157,6 +158,45 @@ async function shoot({ width, height, theme, prefix, full }) {
       }
     }
     await screenshot(`${prefix}-14-site-card${found ? "" : "-not-found"}`);
+
+    // Satellites: a route through Starlink's network, then the layer.
+    await setLayers(["exchanges", "data-centres"], false);
+    await mouse("mouseMoved", 5, 300);
+    await evaluate(`(() => {
+      const input = document.querySelector('input[aria-label="Traceroute target"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'starlink.example');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.form.requestSubmit();
+    })()`);
+    await sleep(5 * 400 + 3000);
+    await selectHop("203.0.113.25");
+    await screenshot(`${prefix}-15-starlink-hop`);
+    await evaluate(
+      `[...document.querySelectorAll('button')].find((b) => b.textContent === 'Show Starlink satellites').click()`
+    );
+    await sleep(400);
+    await screenshot(`${prefix}-16-satellites-notice`);
+    await evaluate(
+      `[...document.querySelectorAll('.consent-dialog button')].find((b) => b.textContent.startsWith('Show')).click()`
+    );
+    await sleep(1500);
+    // Zoom out (the user's own move; far out the globe uses bundled imagery).
+    const globeCentre = await centreOf(".globe-viewport canvas");
+    for (let i = 0; i < 8; i += 1) {
+      await mouse("mouseWheel", globeCentre.x - 200, globeCentre.y, { deltaX: 0, deltaY: 400 });
+      await sleep(150);
+    }
+    await sleep(3000);
+    await screenshot(`${prefix}-17-satellites`);
+    let satellite = false;
+    for (let y = area.top; y < area.bottom && !satellite; y += 9) {
+      for (let x = area.left; x < area.right && !satellite; x += 9) {
+        await mouse("mouseMoved", x, y);
+        await sleep(60);
+        satellite = await evaluate(`/NORAD/.test(document.querySelector('[role=tooltip]')?.textContent ?? '')`);
+      }
+    }
+    await screenshot(`${prefix}-18-satellite-card${satellite ? "" : "-not-found"}`);
   } finally {
     await app.close();
   }

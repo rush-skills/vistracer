@@ -18,6 +18,11 @@
 //   still draws nothing, and nothing loads online tiles
 // - the submarine cables ask first; no cable map request before consent or
 //   after the layer is off again, and never a request to TeleGeography's host
+// - the satellites ask first; while they are off the session makes no
+//   satellite request and loads no SGP4 code; on, each shown group is asked
+//   for once, they move at most once a second, load no online tile, and
+//   draw nothing while the page is hidden; off again, the idle globe draws
+//   nothing; the renderer never contacts CelesTrak's host
 // - exports write files, no page errors, no request leaves the machine
 //
 //   npm run build
@@ -513,6 +518,105 @@ try {
   );
   await setLayers(["exchanges", "data-centres", "cloud-regions", "asn-colors", "submarine-cables"], false);
   await settle();
+
+  // Satellites. Everything above ran with them off (the default).
+  const sgp4Chunk = () => requestsTo("/assets/propagate-");
+  const satellitesOff = {
+    calls: await ipcCalls("get_satellites"),
+    chunk: sgp4Chunk(),
+    host: requestsTo("celestrak.org")
+  };
+  check(
+    "with the satellites off, the session made no satellite request and loaded no SGP4 code",
+    satellitesOff.calls === 0 && satellitesOff.chunk === 0 && satellitesOff.host === 0,
+    `${satellitesOff.calls} get_satellites calls, ${satellitesOff.chunk} SGP4 chunk requests, ${satellitesOff.host} requests to celestrak.org`
+  );
+
+  // An app move first: the gate holds the online layer, so any online tile
+  // request below would come from the moving satellites.
+  await runTrace("starlink.example", 5);
+  await settle();
+  await evaluate(`document.querySelector('#layers-toggle').click()`);
+  await sleep(300);
+  await evaluate(`${layerSwitch("satellites")}.click()`);
+  await sleep(300);
+  const satelliteNotice = await evaluate(
+    `document.querySelector('[role=dialog][aria-labelledby="consent-dialog-title"]')?.textContent ?? ""`
+  );
+  await screenshot("09-satellites-notice");
+  await evaluate(`[...document.querySelectorAll('.consent-dialog button')].find((b) => b.textContent === 'Cancel').click()`);
+  await sleep(500);
+  const satellitesDeclined = await ipcCalls("get_satellites");
+  check(
+    "the satellite notice names CelesTrak's host and limits, and no request is made before consent",
+    satelliteNotice.includes("celestrak.org") && satelliteNotice.includes("2 hours") && satellitesDeclined === 0,
+    `${satellitesDeclined} get_satellites calls after Cancel`
+  );
+  const tilesBeforeSatellites = (await counters()).onlineTiles;
+  await evaluate(`${layerSwitch("satellites")}.click()`);
+  await sleep(300);
+  await evaluate(`[...document.querySelectorAll('.consent-dialog button')].find((b) => b.textContent.startsWith('Show')).click()`);
+  await sleep(300);
+  await evaluate(`document.querySelector('#layers-toggle').click()`);
+  await settle();
+  const satellitesAccepted = await ipcCalls("get_satellites");
+  const satelliteChip = await evaluate(`document.querySelector('.attribution__toggle').textContent`);
+  check(
+    "after consent each default group is asked for once, the SGP4 code loads once, and CelesTrak is credited",
+    satellitesAccepted === 3 && sgp4Chunk() === 1 && satelliteChip.includes("CelesTrak"),
+    `${satellitesAccepted} get_satellites calls, ${sgp4Chunk()} SGP4 chunk requests, credits chip "${satelliteChip}"`
+  );
+  await screenshot("10-satellites-on");
+
+  await noticeGone();
+  const movingBefore = await counters();
+  await sleep(10000);
+  const movingAfter = await counters();
+  const movedFrames = movingAfter.drawnFrames - movingBefore.drawnFrames;
+  const movedRafs = movingAfter.raf - movingBefore.raf;
+  check(
+    "satellites on: they move at most once a second",
+    movedFrames >= 5 && movedFrames <= 11,
+    `${movedFrames} frames drawn (${(movedFrames / 10).toFixed(1)} per second) and ${movedRafs} animation frames in 10 s`
+  );
+  const satelliteTiles = movingAfter.onlineTiles - tilesBeforeSatellites;
+  check("the moving satellites load no online tile", satelliteTiles === 0, `${satelliteTiles} requests`);
+
+  // check.mjs cannot hide headless Chrome; the mock makes the page report hidden.
+  const setPageHidden = (hidden) =>
+    evaluate(`(() => { window.__pageHidden = ${hidden}; document.dispatchEvent(new Event('visibilitychange')); })()`);
+  await setPageHidden(true);
+  const hiddenBefore = await counters();
+  await sleep(5000);
+  const hiddenAfter = await counters();
+  await setPageHidden(false);
+  check(
+    "satellites on, page hidden: no frames",
+    hiddenAfter.raf - hiddenBefore.raf === 0 && hiddenAfter.draws - hiddenBefore.draws === 0,
+    `${hiddenAfter.raf - hiddenBefore.raf} animation frames, ${hiddenAfter.draws - hiddenBefore.draws} WebGL draws in 5 s`
+  );
+  await sleep(1500);
+  const shownAgain = (await counters()).drawnFrames - hiddenAfter.drawnFrames;
+  check("shown again, the satellites move again", shownAgain > 0, `${shownAgain} frames drawn in 1.5 s`);
+
+  await setLayers(["satellites"], false);
+  await settle();
+  await idleWindow("satellites off again");
+  await setLayers(["satellites"], true);
+  await settle();
+  await setLayers(["satellites"], false);
+  await settle();
+  const satellitesLater = await ipcCalls("get_satellites");
+  check(
+    "off and on again, the satellites make no further request",
+    satellitesLater === 3,
+    `${satellitesLater} get_satellites calls in total`
+  );
+  check(
+    "no request to CelesTrak's host from the renderer",
+    requestsTo("celestrak.org") === 0,
+    `${requestsTo("celestrak.org")} requests`
+  );
 
   // Control: the trace does see frames when something on the page animates.
   const { count: animated } = await compositorFrames(async () => {
