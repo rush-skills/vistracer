@@ -1,15 +1,16 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { hoverCardContent, placeCard } from "@renderer/lib/hoverCard";
 import { useRouteInfra } from "@renderer/hooks/useInfra";
+import { satelliteData, useSatelliteLinks } from "@renderer/hooks/useSatellites";
 import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
 import "./HoverCard.css";
 
 /**
- * A compact card for the hop, site or cable under the pointer on the globe,
- * or the hop in the timeline. It reads the stores only, so hovering sends
- * nothing anywhere. The card ignores the pointer so it never steals the
- * hover. A hop wins over a site.
+ * A compact card for the hop, site, cable or satellite under the pointer on
+ * the globe, or the hop in the timeline. It reads the stores only, so
+ * hovering sends nothing anywhere. The card ignores the pointer so it never
+ * steals the hover. A hop wins over a site.
  */
 export const HoverCard: React.FC = () => {
   const hopIndex = useTracerouteStore((state) => state.hoveredHopIndex);
@@ -20,20 +21,30 @@ export const HoverCard: React.FC = () => {
   const sources = useInfraStore((state) => state.sources);
   const code = useInfraStore((state) => state.code);
   const route = useRouteInfra();
+  const satelliteLinks = useSatelliteLinks();
   const hop = run?.hops.find((candidate) => candidate.hopIndex === hopIndex);
   const cloud = hop ? route.cloudMatches.get(hop.hopIndex) : undefined;
+  const satellite = hop ? satelliteLinks.get(hop.hopIndex) : undefined;
   const content = useMemo(() => (hop ? hoverCardContent(hop) : null), [hop]);
   const site = useMemo(() => {
     if (content || !hoveredSite || !code) {
       return null;
+    }
+    if (hoveredSite.layer === "satellites") {
+      return code.satelliteCardContent(
+        hoveredSite,
+        satelliteData(sources),
+        satelliteLinks,
+        Date.now()
+      );
     }
     const input = {
       peeringdb: readySource(sources, "peeringdb-sites"),
       cloud: readySource(sources, "cloud-regions"),
       cables: readySource(sources, "submarine-cables")
     };
-    return code.siteCardContent(hoveredSite, input, route);
-  }, [content, hoveredSite, code, sources, route]);
+    return code.siteCardContent({ ...hoveredSite, layer: hoveredSite.layer }, input, route);
+  }, [content, hoveredSite, code, sources, route, satelliteLinks]);
   const anchor = content ? hopAnchor : site ? hoveredSite?.anchor : undefined;
   const cardRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ left: number; top: number }>();
@@ -92,6 +103,11 @@ export const HoverCard: React.FC = () => {
               {cloud.region
                 ? `Cloud: ${cloud.provider.shortName} ${cloud.region.code}, ${cloud.confidence} confidence`
                 : `Cloud: ${cloud.provider.name}'s network, ${cloud.confidence} confidence`}
+            </div>
+          )}
+          {satellite && (
+            <div className="hover-card__satellite">
+              {`Likely satellite link: ${satellite.isp.name}, ${satellite.confidence} confidence`}
             </div>
           )}
           {content.note && <p className="hover-card__note">{content.note}</p>}

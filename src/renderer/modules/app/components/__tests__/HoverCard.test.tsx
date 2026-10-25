@@ -6,6 +6,7 @@ import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
 import { INFRA_CODE, PEERINGDB } from "@renderer/test/infraFixtures";
+import { groupData, starlinkRow } from "@renderer/test/satelliteFixtures";
 import { HoverCard } from "../HoverCard";
 
 let bridge: Record<string, ReturnType<typeof vi.fn>>;
@@ -35,6 +36,49 @@ afterEach(() => {
 });
 
 describe("HoverCard", () => {
+  it("shows a hovered satellite: name, NORAD id, altitude and the age of its elements", () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-25T02:00:00Z"));
+    useInfraStore.setState({
+      code: INFRA_CODE,
+      sources: {
+        ...useInfraStore.getState().sources,
+        "celestrak-starlink": { status: "ready", data: groupData("starlink", [starlinkRow(99902, 10)]) }
+      }
+    });
+    render(<HoverCard />);
+    act(() =>
+      useInfraStore.getState().setHoveredSite({
+        specKey: "sat|starlink|99902",
+        layer: "satellites",
+        keys: ["sat|starlink|99902"],
+        heightKm: 551.2,
+        anchor: { kind: "point", x: 100, y: 100 }
+      })
+    );
+    const card = screen.getByRole("tooltip");
+    expect(card.textContent).toContain("EXAMPLE STARLINK-99902");
+    expect(card.textContent).toContain("Starlink · NORAD 99902 · 2098-001A");
+    expect(card.textContent).toContain("Altitude 551 km");
+    expect(card.textContent).toContain("Orbital elements from 14 hours ago (CelesTrak)");
+    for (const call of Object.values(bridge)) {
+      expect(call).not.toHaveBeenCalled();
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    act(() => useInfraStore.getState().setHoveredSite(undefined));
+    vi.restoreAllMocks();
+  });
+
+  it("says when a hop is likely a satellite link", () => {
+    const run = makeRun(ROUTE);
+    run.hops[1] = { ...run.hops[1], asn: { asn: 14593, name: "SPACEX-STARLINK" } };
+    useTracerouteStore.setState({ runs: { r1: run } });
+    render(<HoverCard />);
+    act(() => useTracerouteStore.getState().setHoveredHop(run.hops[1].hopIndex, { kind: "point", x: 50, y: 50 }));
+    expect(screen.getByRole("tooltip").textContent).toContain(
+      "Likely satellite link: Starlink, medium confidence"
+    );
+  });
+
   it("shows the hovered hop from the store and makes no request", () => {
     render(<HoverCard />);
     expect(screen.queryByRole("tooltip")).toBeNull();

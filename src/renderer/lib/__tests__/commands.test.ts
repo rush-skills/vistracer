@@ -100,6 +100,19 @@ describe("buildCommands", () => {
     expect(byId(ctx, "layer.asn-colors").title).toBe("Show network colours");
   });
 
+  it("offers the satellite groups, with the satellites layer and its notice", () => {
+    const ctx = context({ layers: layerVisibility({}) });
+    const starlink = byId(ctx, "layer.satellites-starlink");
+    expect(starlink.title).toBe("Show Starlink satellites");
+    expect(starlink.detail).toBe("Also shows satellites");
+    starlink.run();
+    // The parent first: its notice opens before anything is downloaded.
+    expect(ctx.actions.setLayerVisible).toHaveBeenCalledTimes(1);
+    expect(ctx.actions.setLayerVisible).toHaveBeenCalledWith("satellites", true);
+    expect(byId(ctx, "layer.satellites-geo").title).toBe("Show geostationary satellites");
+    expect(searchCommands(buildCommands(ctx), "starlink")[0].id).toBe("layer.satellites-starlink");
+  });
+
   it("offers to show a child switch whose parent is off, as the README example does", () => {
     // The default state: Cloud regions off, every provider switch on.
     const ctx = context({ layers: layerVisibility({}) });

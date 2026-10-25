@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FiInfo, FiX } from "react-icons/fi";
-import { ONLINE_IMAGERY_LAYER_ID, SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
-import { CREDITS, type CreditGroup } from "@renderer/lib/attribution";
+import { ONLINE_IMAGERY_LAYER_ID } from "@common/ipc";
+import { CREDITS, creditsChip, type CreditGroup } from "@renderer/lib/attribution";
 import { layerVisibility } from "@renderer/lib/layers";
 import { useUiStore } from "@renderer/state/uiStore";
 import "./Attribution.css";
 
-const GROUPS: CreditGroup[] = ["Globe", "Hop data", "Infrastructure"];
+const GROUPS: CreditGroup[] = ["Globe", "Hop data", "Infrastructure", "Space"];
 const PANEL_ID = "attribution-panel";
 
 /**
@@ -19,10 +19,7 @@ export const Attribution: React.FC = () => {
   const visibility = useMemo(() => layerVisibility(savedLayers), [savedLayers]);
   const online = visibility[ONLINE_IMAGERY_LAYER_ID];
   const credits = CREDITS.filter((credit) => credit.layer == null || visibility[credit.layer]);
-  // CC BY asks for attribution in the medium: name TeleGeography on the chip too.
-  const chip = visibility[SUBMARINE_CABLES_LAYER_ID]
-    ? "NASA, GIBS, CesiumJS, TeleGeography"
-    : "NASA, GIBS, CesiumJS";
+  const chip = creditsChip(visibility);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 

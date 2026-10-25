@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { ONLINE_IMAGERY_LAYER_ID, SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
+import {
+  ONLINE_IMAGERY_LAYER_ID,
+  SATELLITES_LAYER_ID,
+  SUBMARINE_CABLES_LAYER_ID
+} from "@common/ipc";
 import type { GlobeScene } from "@renderer/lib/globe";
 import {
   LAYERS,
@@ -12,6 +16,7 @@ import {
   layerActive,
   layerById,
   layerVisibility,
+  satelliteGroupsForLayers,
   sceneForLayers,
   sourcesForLayers,
   styleForLayers
@@ -84,8 +89,48 @@ describe("layer registry", () => {
     expect(text).toContain("non-commercial");
     expect(text).toContain("attribution");
     expect(text).toContain("www.submarinecablemap.com");
-    // No other layer asks for consent.
-    expect(LAYER_LIST.filter((layer) => layer.consent)).toHaveLength(1);
+    // Only the two layers that download from a new host ask for consent.
+    expect(LAYER_LIST.filter((layer) => layer.consent).map((layer) => layer.id)).toEqual([
+      SUBMARINE_CABLES_LAYER_ID,
+      SATELLITES_LAYER_ID
+    ]);
+  });
+
+  it("puts the satellites behind a notice that names CelesTrak, its limits and the host", () => {
+    const satellites = layerById(SATELLITES_LAYER_ID);
+    expect(satellites).toMatchObject({ defaultVisible: false, group: "space" });
+    expect(satellites?.data).toBeUndefined();
+    const text = satellites?.consent?.paragraphs.join(" ") ?? "";
+    for (const part of ["celestrak.org", "CelesTrak", "usage policy", "IP address", "12 hours", "2 hours", "sends nothing"]) {
+      expect(text).toContain(part);
+    }
+  });
+
+  it("has one switch under the satellites per group, with the backend's defaults", () => {
+    const groups = LAYER_LIST.filter(
+      (layer) => layer.target.kind === "satellites" && layer.target.group
+    );
+    expect(groups.map((layer) => layer.id)).toEqual([
+      "satellites-starlink",
+      "satellites-oneweb",
+      "satellites-gps",
+      "satellites-stations",
+      "satellites-geo"
+    ]);
+    for (const layer of groups) {
+      expect(layer.parent).toBe(SATELLITES_LAYER_ID);
+      expect(layer.data).toBe(`celestrak-${layer.target.kind === "satellites" ? layer.target.group : ""}`);
+    }
+    // The backend decides from the same ids and defaults (commands/satellites.rs).
+    const rust = fs.readFileSync(
+      path.resolve(__dirname, "../../../../src-tauri/src/commands/satellites.rs"),
+      "utf8"
+    );
+    const table = [...rust.matchAll(/layer: "([a-z-]+)",\s*group: "([a-z-]+)",\s*default_on: (true|false)/g)];
+    expect(table.map(([, layer, , on]) => [layer, on === "true"])).toEqual(
+      groups.map((layer) => [layer.id, layer.defaultVisible])
+    );
+    expect(table.map(([, , group]) => group)).toEqual(["starlink", "oneweb", "gps-ops", "stations", "geo"]);
   });
 
   it("has one provider switch under cloud regions per provider of the snapshot", () => {
@@ -133,6 +178,21 @@ describe("data sources, filters and styles", () => {
     const parentOff = layerVisibility({ "cloud-aws": true });
     expect(layerActive(parentOff, "cloud-aws")).toBe(false);
     expect(layerActive(layerVisibility({ "cloud-regions": true }), "cloud-aws")).toBe(true);
+  });
+
+  it("shows the satellite groups only with the satellites layer on", () => {
+    expect(satelliteGroupsForLayers(layerVisibility({}))).toEqual([]);
+    expect(sourcesForLayers(layerVisibility({ "satellites-geo": true }))).toEqual(new Set());
+    const on = layerVisibility({ [SATELLITES_LAYER_ID]: true });
+    expect(satelliteGroupsForLayers(on)).toEqual(["starlink", "gps", "stations"]);
+    expect(sourcesForLayers(on)).toEqual(
+      new Set(["celestrak-starlink", "celestrak-gps", "celestrak-stations"])
+    );
+    expect(
+      satelliteGroupsForLayers(
+        layerVisibility({ [SATELLITES_LAYER_ID]: true, "satellites-starlink": false, "satellites-geo": true })
+      )
+    ).toEqual(["gps", "stations", "geo"]);
   });
 
   it("lists the provider filters that are switched off", () => {

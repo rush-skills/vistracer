@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RendererApi } from "@common/bridge";
 import { NO_EXCHANGE_LIST, OLD_EXCHANGE_LIST, readySource, useInfraStore } from "../infraStore";
 import { useUiStore } from "../uiStore";
+import { VANGUARD_ROW, starlinkRow } from "@renderer/test/satelliteFixtures";
 
 const initialInfra = useInfraStore.getState();
 const initialUi = useUiStore.getState();
@@ -28,13 +29,25 @@ const sites = {
 let api: {
   getPeeringDbSites: ReturnType<typeof vi.fn>;
   getSubmarineCables: ReturnType<typeof vi.fn>;
+  getSatellites: ReturnType<typeof vi.fn>;
   setSettings: ReturnType<typeof vi.fn>;
 };
+
+const satellitesAnswer = (group: string, fetchedAt: number, rows: unknown[]) => ({
+  group,
+  fetchedAt,
+  source: `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=csv`,
+  note: null,
+  satellites: rows
+});
 
 beforeEach(() => {
   api = {
     getPeeringDbSites: vi.fn().mockResolvedValue(sites),
     getSubmarineCables: vi.fn().mockResolvedValue({ fetchedAt: 1, note: null, cables: [] }),
+    getSatellites: vi.fn(async (group: string) =>
+      satellitesAnswer(group, Date.now(), [starlinkRow(99902, 10), VANGUARD_ROW])
+    ),
     setSettings: vi.fn().mockResolvedValue(undefined)
   };
   window.visTracer = api as unknown as RendererApi;
@@ -130,6 +143,78 @@ describe("infraStore", () => {
     finishWrite();
     await loading;
     expect(order).toEqual(["write started", "write done", "cables asked"]);
+  });
+
+  it("asks for a satellite group by its CelesTrak name, after the switches are written", async () => {
+    const order: string[] = [];
+    let finishWrite: () => void = () => undefined;
+    api.setSettings.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWrite = () => {
+            order.push("write done");
+            resolve();
+          };
+        })
+    );
+    api.getSatellites.mockImplementation(async (group: string) => {
+      order.push(`asked ${group}`);
+      return satellitesAnswer(group, Date.now(), [VANGUARD_ROW]);
+    });
+    useUiStore.setState({ loaded: true, consents: { satellites: true } });
+    useUiStore.getState().setLayerVisible("satellites", true);
+    const loading = useInfraStore.getState().ensure("celestrak-gps");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(api.getSatellites).not.toHaveBeenCalled();
+    finishWrite();
+    await loading;
+    expect(order).toEqual(["write done", "asked gps-ops"]);
+    expect(useInfraStore.getState().sources["celestrak-gps"]).toMatchObject({
+      status: "ready",
+      note: "1 satellite."
+    });
+  });
+
+  it("loads a satellite group again after 12 hours and keeps the old one shown meanwhile", async () => {
+    const start = Date.parse("2026-10-25T00:00:00Z");
+    vi.spyOn(Date, "now").mockReturnValue(start);
+    api.getSatellites.mockResolvedValueOnce(
+      satellitesAnswer("starlink", start, [starlinkRow(99902, 10), starlinkRow(99903, 20)])
+    );
+    await useInfraStore.getState().ensure("celestrak-starlink");
+    const first = readySource(useInfraStore.getState().sources, "celestrak-starlink");
+    expect(first?.satellites).toHaveLength(2);
+    expect(useInfraStore.getState().sources["celestrak-starlink"]).toMatchObject({
+      note: "2 satellites.",
+      staleAt: start + 12 * 3_600_000
+    });
+
+    // Within 12 hours: shown again with no request.
+    vi.spyOn(Date, "now").mockReturnValue(start + 11 * 3_600_000);
+    await useInfraStore.getState().ensure("celestrak-starlink");
+    expect(api.getSatellites).toHaveBeenCalledTimes(1);
+
+    // Later: asked again; the old satellites stay while it loads and when it fails.
+    vi.spyOn(Date, "now").mockReturnValue(start + 13 * 3_600_000);
+    api.getSatellites.mockRejectedValueOnce("CelesTrak asks to wait.");
+    const loading = useInfraStore.getState().ensure("celestrak-starlink");
+    expect(useInfraStore.getState().sources["celestrak-starlink"].status).toBe("ready");
+    await loading;
+    expect(api.getSatellites).toHaveBeenCalledTimes(2);
+    expect(useInfraStore.getState().sources["celestrak-starlink"]).toMatchObject({
+      status: "ready",
+      data: first,
+      note: "Could not load a newer copy: CelesTrak asks to wait."
+    });
+  });
+
+  it("says when a group is thinned to the drawing limit", async () => {
+    const rows = Array.from({ length: 12_003 }, (_, i) => starlinkRow(i + 1, i % 360));
+    api.getSatellites.mockResolvedValueOnce(satellitesAnswer("starlink", Date.now(), rows));
+    await useInfraStore.getState().ensure("celestrak-starlink");
+    expect(useInfraStore.getState().sources["celestrak-starlink"]).toMatchObject({
+      note: "Showing 12,000 satellites of 12,003, evenly chosen, to keep the globe fast."
+    });
   });
 
   it("loads the bundled cloud regions from the app, and refuses a malformed file", async () => {

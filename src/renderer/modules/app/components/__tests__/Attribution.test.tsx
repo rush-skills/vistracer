@@ -74,4 +74,23 @@ describe("Attribution", () => {
     expect(screen.queryByText("TeleGeography Submarine Cable Map")).toBeNull();
     expect(toggle.textContent).toBe("NASA, GIBS, CesiumJS");
   });
+
+  it("credits CelesTrak while the satellites are on, and satellite.js always", () => {
+    render(<Attribution />);
+    const toggle = screen.getByRole("button", { name: "Data sources and credits" });
+    fireEvent.click(toggle);
+    expect(screen.queryByText("CelesTrak")).toBeNull();
+    const space = screen.getByRole("region", { name: "Space" });
+    expect(within(space).getByText("satellite.js").closest("li")?.textContent).toContain("MIT");
+
+    act(() => useUiStore.setState({ layers: { satellites: true } }));
+    expect(toggle.textContent).toBe("NASA, GIBS, CesiumJS, CelesTrak");
+    const entry = screen.getByText("CelesTrak").closest("li");
+    expect(entry?.textContent).toContain("usage policy");
+    expect(entry?.textContent).toContain("18th Space Defense Squadron");
+    act(() => useUiStore.setState({ layers: { satellites: true, "submarine-cables": true } }));
+    expect(toggle.textContent).toBe("NASA, GIBS, CesiumJS, TeleGeography, CelesTrak");
+    act(() => useUiStore.setState({ layers: {} }));
+    expect(screen.queryByText("CelesTrak")).toBeNull();
+  });
 });

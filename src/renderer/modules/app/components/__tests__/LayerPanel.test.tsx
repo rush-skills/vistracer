@@ -147,4 +147,44 @@ describe("LayerPanel", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(cables().checked).toBe(true);
   });
+
+  it("puts the satellite groups under Satellites, behind a notice that names celestrak.org", async () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "Layers" }));
+    const space = screen.getByRole("group", { name: "Space" });
+    const satellites = () =>
+      within(space).getByRole("switch", { name: "Satellites" }) as HTMLInputElement;
+    const starlink = within(space).getByRole("switch", { name: "Starlink" }) as HTMLInputElement;
+    expect(satellites().checked).toBe(false);
+    // Group switches show their own default and need the parent.
+    expect(starlink.checked).toBe(true);
+    expect(within(space).getAllByText(/Turn on Satellites to see it/)).toHaveLength(5);
+    expect((within(space).getByRole("switch", { name: "Geostationary" }) as HTMLInputElement).checked).toBe(false);
+
+    fireEvent.click(satellites());
+    const notice = screen.getByRole("dialog", { name: "Show satellites?" });
+    expect(notice.textContent).toContain("celestrak.org");
+    expect(notice.textContent).toContain("usage policy");
+    expect(satellites().checked).toBe(false);
+    fireEvent.click(within(notice).getByRole("button", { name: "Show and download" }));
+    await flush();
+    expect(satellites().checked).toBe(true);
+    expect(setSettings).toHaveBeenLastCalledWith(
+      "preferences.ui",
+      expect.objectContaining({ layers: { satellites: true }, consents: { satellites: true } })
+    );
+
+    // The group's data status shows under its switch.
+    act(() =>
+      useInfraStore.setState({
+        sources: {
+          ...useInfraStore.getState().sources,
+          "celestrak-starlink": { status: "loading" }
+        }
+      })
+    );
+    expect(within(space).getAllByRole("status").map((status) => status.textContent)).toContain(
+      "Loading…"
+    );
+  });
 });

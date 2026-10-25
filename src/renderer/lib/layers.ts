@@ -1,6 +1,11 @@
-import { ONLINE_IMAGERY_LAYER_ID, SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
+import {
+  ONLINE_IMAGERY_LAYER_ID,
+  SATELLITES_LAYER_ID,
+  SUBMARINE_CABLES_LAYER_ID
+} from "@common/ipc";
 import type { GlobeScene } from "./globe";
 import type { InfraSourceId } from "./infra/sources";
+import { SATELLITE_GROUPS, type SatelliteGroupId } from "./satellites/groups";
 
 /**
  * The globe layers the user can show or hide. The layer panel, the command
@@ -8,12 +13,13 @@ import type { InfraSourceId } from "./infra/sources";
  * the code that draws it, with no change to the panel.
  */
 
-export type LayerGroupId = "route" | "infrastructure" | "cloud" | "globe";
+export type LayerGroupId = "route" | "infrastructure" | "cloud" | "space" | "globe";
 
 export const LAYER_GROUPS: ReadonlyArray<{ id: LayerGroupId; label: string }> = [
   { id: "route", label: "Route" },
   { id: "infrastructure", label: "Infrastructure" },
   { id: "cloud", label: "Cloud" },
+  { id: "space", label: "Space" },
   { id: "globe", label: "Globe" }
 ];
 
@@ -37,13 +43,15 @@ export type FilterableItems = "cloudRegions";
 /**
  * What a layer switch changes: items of the scene, a part of those items
  * (by their filter key, applied before clustering), a style of the route,
- * or an imagery option.
+ * an imagery option, or the satellites the globe moves (all of them, or one
+ * group; lib/satellites/).
  */
 export type LayerTarget =
   | { readonly kind: "scene"; readonly items: keyof GlobeScene }
   | { readonly kind: "filter"; readonly items: FilterableItems; readonly key: string }
   | { readonly kind: "style"; readonly option: keyof SceneStyle }
-  | { readonly kind: "imagery"; readonly option: keyof ImageryOptions };
+  | { readonly kind: "imagery"; readonly option: keyof ImageryOptions }
+  | { readonly kind: "satellites"; readonly group?: SatelliteGroupId };
 
 /**
  * A notice the user must accept before a layer is shown the first time:
@@ -104,6 +112,26 @@ function defineLayers<const L extends readonly LayerDefinition<Extract<L[number]
 ): L {
   return layers;
 }
+
+export const SATELLITE_CONSENT: LayerConsent = {
+  title: "Show satellites?",
+  paragraphs: [
+    "VisTracer computes where satellites are now from their orbital elements (GP data), with the SGP4 model. CelesTrak (celestrak.org) provides the elements free of charge under its usage policy; they come from the US Space Force's 18th Space Defense Squadron. The credits list CelesTrak while the layer is on.",
+    "Turning the layer on downloads the elements of each group you show from celestrak.org (Starlink, GPS and space stations at first; the Starlink group is about 1.7 MB). The requests show CelesTrak your IP address and nothing about your traces. VisTracer keeps a copy for 12 hours, asks for a group at most once in 2 hours, and stops asking for 2 hours after an error, as CelesTrak's usage policy asks.",
+    "While the layer is off, VisTracer sends nothing to CelesTrak. A position is an estimate: within a few kilometres near the date of its elements, and it drifts by kilometres a day after it. The hover card shows how old the elements are."
+  ],
+  accept: "Show and download"
+};
+
+/** The fields every satellite group switch shares. */
+const satelliteGroup = <G extends SatelliteGroupId>(group: G) =>
+  ({
+    group: "space",
+    parent: SATELLITES_LAYER_ID,
+    target: { kind: "satellites", group },
+    data: `celestrak-${group}`,
+    swatch: { fill: SATELLITE_GROUPS[group].color, outline: SATELLITE_GROUPS[group].color }
+  }) as const;
 
 export const LAYERS = defineLayers([
   {
@@ -243,6 +271,57 @@ export const LAYERS = defineLayers([
     swatch: SITE_COLORS.cloudflare
   },
   {
+    id: SATELLITES_LAYER_ID,
+    label: "Satellites",
+    description:
+      "Satellites of the groups below where they are now, moved once a second (SGP4 from CelesTrak data). Opt-in: downloads from celestrak.org.",
+    group: "space",
+    defaultVisible: false,
+    target: { kind: "satellites" },
+    consent: SATELLITE_CONSENT
+  },
+  {
+    id: "satellites-starlink",
+    label: "Starlink",
+    commandName: "Starlink satellites",
+    description: "SpaceX's internet constellation in low Earth orbit, about 11,000 satellites.",
+    defaultVisible: true,
+    ...satelliteGroup("starlink")
+  },
+  {
+    id: "satellites-oneweb",
+    label: "OneWeb",
+    commandName: "OneWeb satellites",
+    description: "Eutelsat's OneWeb internet constellation in low Earth orbit.",
+    defaultVisible: false,
+    ...satelliteGroup("oneweb")
+  },
+  {
+    id: "satellites-gps",
+    label: "GPS",
+    commandName: "GPS satellites",
+    description: "The operational GPS navigation satellites, about 20,000 km up.",
+    defaultVisible: true,
+    ...satelliteGroup("gps")
+  },
+  {
+    id: "satellites-stations",
+    label: "Space stations",
+    commandName: "space stations",
+    description: "The ISS and China's Tiangong station, their modules, the vehicles docked to them and objects near them.",
+    defaultVisible: true,
+    ...satelliteGroup("stations")
+  },
+  {
+    id: "satellites-geo",
+    label: "Geostationary",
+    commandName: "geostationary satellites",
+    description:
+      "Active satellites in geostationary orbit, 35,786 km above the equator (communications, weather, satellite internet).",
+    defaultVisible: false,
+    ...satelliteGroup("geo")
+  },
+  {
     id: "day-night",
     label: "Day and night",
     description: "Sunlight for the current time, city lights on the dark side.",
@@ -321,6 +400,18 @@ export function sceneForLayers(scene: GlobeScene, visibility: LayerVisibility): 
     }
   }
   return shown;
+}
+
+/** The satellite groups the globe shows: their switch and the satellites layer are on. */
+export function satelliteGroupsForLayers(visibility: LayerVisibility): SatelliteGroupId[] {
+  const groups: SatelliteGroupId[] = [];
+  for (const layer of LAYER_LIST) {
+    const { target } = layer;
+    if (target.kind === "satellites" && target.group && layerActive(visibility, layer.id)) {
+      groups.push(target.group);
+    }
+  }
+  return groups;
 }
 
 export function styleForLayers(visibility: LayerVisibility): SceneStyle {

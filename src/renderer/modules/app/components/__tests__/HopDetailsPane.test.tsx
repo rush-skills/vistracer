@@ -562,6 +562,7 @@ describe("HopDetailsPane", () => {
     useInfraStore.setState({
       code: INFRA_CODE,
       sources: {
+        ...useInfraStore.getState().sources,
         "peeringdb-sites": { status: "ready", data: PEERINGDB },
         "cloud-regions": { status: "ready", data: CLOUD },
         "submarine-cables": { status: "idle" }
@@ -579,6 +580,34 @@ describe("HopDetailsPane", () => {
     expect(section.textContent).toContain("high");
     expect(section.textContent).toContain("AS16509 is Amazon's network");
     expect(section.textContent).toContain("Digital Realty Frankfurt FRA1-27");
+  });
+
+  it("marks a hop in a satellite provider's network and offers to show its constellation", () => {
+    const starlinkHop: HopResolution = { ...multipathHop, asn: { asn: 14593, name: "SPACEX-STARLINK" } };
+    const run: TracerouteRun = { ...baseRun, hops: [starlinkHop] };
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    act(() => useUiStore.setState({ layers: {}, consents: {}, loaded: true, pendingConsent: undefined }));
+    const { rerender } = render(
+      <HopDetailsPane run={run} selectedHopIndex={starlinkHop.hopIndex} status="success" />
+    );
+    // From the network alone: no layer needs to be on.
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(section.textContent).toContain("Likely Starlink link");
+    expect(section.textContent).toContain("medium");
+    expect(section.textContent).toContain("AS14593 is SpaceX's Starlink network");
+    fireEvent.click(within(section).getByRole("button", { name: "Show Starlink satellites" }));
+    // The satellites layer asks for its notice before anything is downloaded.
+    expect(useUiStore.getState().pendingConsent).toBe("satellites");
+    expect(useUiStore.getState().layers.satellites).toBeUndefined();
+
+    act(() => {
+      useUiStore.getState().acceptConsent();
+    });
+    rerender(<HopDetailsPane run={run} selectedHopIndex={starlinkHop.hopIndex} status="success" />);
+    expect(screen.getByRole("region", { name: "Infrastructure" }).textContent).toContain(
+      "Starlink satellites are highlighted on the globe."
+    );
+    expect(screen.queryByRole("button", { name: "Show Starlink satellites" })).toBeNull();
   });
 
   it("colours each hop's dot like its marker: by network while network colours are on", () => {

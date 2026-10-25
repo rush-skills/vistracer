@@ -1,8 +1,12 @@
 import React from "react";
 import type { HopResolution, LocationEstimate, PeeringDbDetails } from "@common/ipc";
 import { useRouteInfra } from "@renderer/hooks/useInfra";
+import { useSatelliteLinks } from "@renderer/hooks/useSatellites";
 import { formatKm, regionTitle } from "@renderer/lib/infra/format";
+import { layerActive, layerVisibility, type LayerId } from "@renderer/lib/layers";
+import { SATELLITE_GROUPS } from "@renderer/lib/satellites/groups";
 import { readySource, useInfraStore } from "@renderer/state/infraStore";
+import { useUiStore } from "@renderer/state/uiStore";
 import { PROVIDER_LABELS, findProvider } from "../lib/providers";
 import { HINT_RULE_LABELS, SOURCE_LABELS, describeRtt, formatRadius } from "../lib/location";
 
@@ -240,10 +244,13 @@ const km = (value: number | null) => (value == null ? "" : ` (${formatKm(value)}
 /**
  * What the shown infrastructure layers say about this hop: the cloud
  * region it is likely in, the exchange and data centre near it, and
- * cables that may carry the link to it. Nothing while those layers are off.
+ * cables that may carry the link to it; and, from its network alone, a
+ * likely satellite link. Nothing else while those layers are off.
  */
 const InfraSection: React.FC<HopInspectorProps> = ({ hop }) => {
   const route = useRouteInfra();
+  const satellite = useSatelliteLinks().get(hop.hopIndex);
+  const saved = useUiStore((state) => state.layers);
   const sites = useInfraStore((state) => readySource(state.sources, "peeringdb-sites"));
   const cloud = route.cloudMatches.get(hop.hopIndex);
   const linked = (links: typeof route.exchangeLinks, names: Map<string, string>) =>
@@ -261,9 +268,21 @@ const InfraSection: React.FC<HopInspectorProps> = ({ hop }) => {
     new Map(sites?.facilities.map((site) => [site.key, site.name]))
   );
   const cables = route.cableGuesses.filter((guess) => guess.toHopIndex === hop.hopIndex);
-  if (!cloud && exchanges.length === 0 && facilities.length === 0 && cables.length === 0) {
+  if (
+    !cloud &&
+    !satellite &&
+    exchanges.length === 0 &&
+    facilities.length === 0 &&
+    cables.length === 0
+  ) {
     return null;
   }
+  const constellation = satellite ? SATELLITE_GROUPS[satellite.isp.group] : undefined;
+  const constellationLayer = constellation
+    ? (`satellites-${constellation.id}` satisfies LayerId)
+    : undefined;
+  const constellationShown =
+    constellationLayer != null && layerActive(layerVisibility(saved), constellationLayer);
   return (
     <section className="hop-inspector__section" aria-label="Infrastructure">
       <h4>Infrastructure</h4>
@@ -304,6 +323,37 @@ const InfraSection: React.FC<HopInspectorProps> = ({ hop }) => {
             </dd>
           </React.Fragment>
         ))}
+        {satellite && constellation && constellationLayer && (
+          <>
+            <dt>Satellite</dt>
+            <dd>
+              Likely {satellite.isp.name} link{" "}
+              <span
+                className={`hop-details__confidence hop-details__confidence--${satellite.confidence}`}
+              >
+                {satellite.confidence}
+              </span>
+              <small>{satellite.reason}</small>
+              {satellite.confidence !== "low" &&
+                (constellationShown ? (
+                  <small>{constellation.label} satellites are highlighted on the globe.</small>
+                ) : (
+                  <button
+                    type="button"
+                    className="button hop-inspector__action"
+                    onClick={() => {
+                      const ui = useUiStore.getState();
+                      // The satellites layer asks for its notice first.
+                      ui.setLayerVisible("satellites", true);
+                      ui.setLayerVisible(constellationLayer, true);
+                    }}
+                  >
+                    Show {constellation.label} satellites
+                  </button>
+                ))}
+            </dd>
+          </>
+        )}
         {cables.length > 0 && (
           <>
             <dt>Cable</dt>

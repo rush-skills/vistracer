@@ -1,4 +1,4 @@
-import { SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
+import { SATELLITES_LAYER_ID, SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
 import type { LayerId, LayerVisibility } from "./layers";
 
 /**
@@ -6,7 +6,7 @@ import type { LayerId, LayerVisibility } from "./layers";
  * docs/third-party-data.md and src-tauri/data/README.md.
  */
 
-export type CreditGroup = "Globe" | "Hop data" | "Infrastructure";
+export type CreditGroup = "Globe" | "Hop data" | "Infrastructure" | "Space";
 
 export interface Credit {
   name: string;
@@ -25,6 +25,18 @@ export interface Credit {
   servesOnlineTiles?: true;
   /** Listed only while this layer is on (data the user opted in to). */
   layer?: LayerId;
+  /** Named on the credits chip too while the layer is on. */
+  chip?: string;
+}
+
+/** The credits chip: the always-shown sources, then the opt-in data that is on. */
+export function creditsChip(visibility: LayerVisibility): string {
+  return [
+    "NASA, GIBS, CesiumJS",
+    ...CREDITS.flatMap((credit) =>
+      credit.layer && credit.chip && visibility[credit.layer] ? [credit.chip] : []
+    )
+  ].join(", ");
 }
 
 /**
@@ -122,6 +134,26 @@ export const CREDITS: readonly Credit[] = [
     licence: "CC BY-NC-SA 3.0: non-commercial use, with attribution, adaptations under the same licence",
     source: "submarinecablemap.com",
     notice: "Submarine cable data © TeleGeography, www.submarinecablemap.com, licensed CC BY-NC-SA 3.0.",
-    layer: SUBMARINE_CABLES_LAYER_ID
+    layer: SUBMARINE_CABLES_LAYER_ID,
+    // CC BY asks for attribution in the medium.
+    chip: "TeleGeography"
+  },
+  {
+    name: "CelesTrak",
+    group: "Space",
+    use: "Orbital elements (GP data) of the satellite groups (opt-in layer)",
+    licence:
+      "Free of charge under CelesTrak's usage policy; GP data of the US Space Force (18th Space Defense Squadron)",
+    source: "celestrak.org",
+    notice: "Satellite positions computed from CelesTrak GP data (celestrak.org).",
+    layer: SATELLITES_LAYER_ID,
+    chip: "CelesTrak"
+  },
+  {
+    name: "satellite.js",
+    group: "Space",
+    use: "SGP4 orbit propagation for the satellites layer",
+    licence: "MIT",
+    source: "github.com/shashwatak/satellite-js"
   }
 ];

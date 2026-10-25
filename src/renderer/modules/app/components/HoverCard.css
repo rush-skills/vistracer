@@ -59,6 +59,7 @@
 }
 
 .hover-card__cloud,
+.hover-card__satellite,
 .hover-card__route {
   margin-top: var(--space-1);
   color: var(--color-accent-text);

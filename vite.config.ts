@@ -96,6 +96,8 @@ export default defineConfig({
         __dirname,
         "src/renderer/modules/app/components/globe/meshoptimizerStub.ts"
       ),
+      "#wasm-single-thread": path.resolve(__dirname, "src/renderer/lib/satellites/satelliteWasmStub.ts"),
+      "#wasm-multi-thread": path.resolve(__dirname, "src/renderer/lib/satellites/satelliteWasmStub.ts"),
       "@common": path.resolve(__dirname, "src", "common"),
       "@renderer": path.resolve(__dirname, "src", "renderer"),
       "@assets": path.resolve(__dirname, "assets")
