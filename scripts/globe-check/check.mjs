@@ -4,7 +4,8 @@
 //
 // - an idle globe runs no animation frames and no WebGL draws
 // - camera moves the app makes (start view, following a trace, selecting a
-//   hop, exports) request no online tile; a zoom the user makes does
+//   hop, exports) request no online tile, also when the window grows later;
+//   a zoom the user makes does
 // - a drag during a WebM export does not move the globe
 // - exports write files, no page errors, no request leaves the machine
 //
@@ -365,6 +366,36 @@ try {
     ),
     files.map(([file, size]) => `${file} ${size} B`).join(", ")
   );
+
+  // The export left the camera where the app put it. A larger window raises
+  // Cesium's screen-space error; the view must still load no online tile
+  // until the user moves the camera.
+  const largerWindow = await tilesDuring(() =>
+    send("Emulation.setDeviceMetricsOverride", {
+      width: 3840,
+      height: 2160,
+      deviceScaleFactor: 1,
+      mobile: false
+    })
+  );
+  check(
+    "a larger window after app moves requests no online tile",
+    largerWindow === 0,
+    `${largerWindow} requests`
+  );
+  const zoomAfterResize = await tilesDuring(userZoom);
+  check(
+    "the next user zoom requests online tiles again",
+    zoomAfterResize > 0,
+    `${zoomAfterResize} requests`
+  );
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 1280,
+    height: 713,
+    deviceScaleFactor: 2,
+    mobile: false
+  });
+  await settle();
 
   const { x, y } = await centre();
   const beforeDrag = await counters();

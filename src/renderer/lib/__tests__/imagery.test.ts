@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUNDLED_IMAGERY,
   ONLINE_IMAGERY,
+  OnlineImageryGate,
   bundledOnlyHeight,
   nightImageryShare,
   onlineTileTemplate
@@ -60,5 +61,48 @@ describe("bundledOnlyHeight", () => {
     const threshold = (4_892 * 1000) / (2 * 2 * Math.tan(Math.PI / 6));
     expect(bundledOnlyHeight(view)).toBeGreaterThan(threshold);
     expect(bundledOnlyHeight(view)).toBeLessThan(threshold * 1.2);
+  });
+});
+
+describe("OnlineImageryGate", () => {
+  it("lets the user's own view load online tiles before any app move", () => {
+    const gate = new OnlineImageryGate();
+    expect(gate.visible).toBe(true);
+    expect(gate.userMovedCamera()).toBe(false);
+    expect(gate.visible).toBe(true);
+  });
+
+  it("keeps online tiles off after an app move until the user moves the camera", () => {
+    const gate = new OnlineImageryGate();
+    gate.appFlightStarted();
+    expect(gate.visible).toBe(false);
+    gate.appFlightEnded();
+    // The view the app chose stays on bundled tiles, also when the window
+    // grows later (a larger monitor raises the screen-space error).
+    expect(gate.visible).toBe(false);
+    expect(gate.userMovedCamera()).toBe(true);
+    expect(gate.visible).toBe(true);
+  });
+
+  it("ignores input that Cesium ignores: during a flight and while input is locked", () => {
+    const gate = new OnlineImageryGate();
+    gate.appFlightStarted();
+    expect(gate.userMovedCamera()).toBe(false);
+    gate.appFlightEnded();
+    gate.setInputLocked(true);
+    expect(gate.userMovedCamera()).toBe(false);
+    expect(gate.visible).toBe(false);
+    gate.setInputLocked(false);
+    expect(gate.userMovedCamera()).toBe(true);
+    expect(gate.visible).toBe(true);
+  });
+
+  it("hides the layer again for the next app move", () => {
+    const gate = new OnlineImageryGate();
+    gate.appFlightStarted();
+    gate.appFlightEnded();
+    gate.userMovedCamera();
+    gate.appFlightStarted();
+    expect(gate.visible).toBe(false);
   });
 });

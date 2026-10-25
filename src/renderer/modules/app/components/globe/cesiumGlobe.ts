@@ -38,6 +38,7 @@ import {
   BUNDLED_IMAGERY,
   NIGHT_BRIGHTNESS,
   ONLINE_IMAGERY,
+  OnlineImageryGate,
   bundledOnlyHeight,
   nightImageryShare,
   onlineTileTemplate
@@ -186,6 +187,12 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     dayLayers.push(onlineLayer);
     scene.imageryLayers.add(onlineLayer);
   }
+  const onlineGate = new OnlineImageryGate();
+  const syncOnlineLayer = () => {
+    if (onlineLayer) {
+      onlineLayer.show = onlineGate.visible;
+    }
+  };
   // Runs only for frames that are drawn anyway, so it adds no frames.
   const removePreRender = scene.preRender.addEventListener(() => {
     const share = nightImageryShare(
@@ -302,10 +309,16 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     setHovered(hoverPosition ? pickHop(hoverPosition) : undefined);
   };
   const wake = () => governor.wake();
+  const userMovedCamera = () => {
+    if (onlineGate.userMovedCamera()) {
+      syncOnlineLayer();
+    }
+    governor.wake();
+  };
   const onPointerMove = (event: PointerEvent) => {
     if (event.buttons !== 0) {
-      // Dragging moves the camera; picking would only slow it down.
-      governor.wake();
+      // A drag rotates, zooms or tilts the camera; picking would only slow it down.
+      userMovedCamera();
       return;
     }
     const rect = canvas.getBoundingClientRect();
@@ -320,7 +333,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   };
   canvas.addEventListener("pointerdown", wake);
   canvas.addEventListener("pointerup", wake);
-  canvas.addEventListener("wheel", wake, { passive: true });
+  canvas.addEventListener("wheel", userMovedCamera, { passive: true });
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerleave", onPointerLeave);
   const resizeObserver = new ResizeObserver(wake);
@@ -479,13 +492,10 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
         floor
       );
       // App-made moves load no online tiles, not even the wider view while
-      // the camera rises; at the end the floor keeps the view on bundled levels.
-      const showOnline = (show: boolean) => {
-        if (onlineLayer) {
-          onlineLayer.show = show;
-        }
-      };
-      showOnline(false);
+      // the camera rises. The layer stays hidden after the move until the
+      // user zooms, drags or tilts (OnlineImageryGate).
+      onlineGate.appFlightStarted();
+      syncOnlineLayer();
       const fly = (step: FlightStep, next: FlightStep[]) => {
         camera.flyTo({
           destination: Cartesian3.fromDegrees(step.longitude, step.latitude, step.height),
@@ -494,8 +504,9 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           // A flat path: without it, Cesium arcs the camera out towards space.
           maximumHeight: Math.max(step.height, camera.positionCartographic.height),
           easingFunction: EasingFunction.QUADRATIC_IN_OUT,
-          complete: () => (next.length > 0 ? fly(next[0], next.slice(1)) : showOnline(true)),
-          cancel: () => showOnline(true)
+          complete: () =>
+            next.length > 0 ? fly(next[0], next.slice(1)) : onlineGate.appFlightEnded(),
+          cancel: () => onlineGate.appFlightEnded()
         });
         scene.requestRender();
       };
@@ -510,6 +521,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       controls.enableZoom = enabled;
       controls.enableTilt = enabled;
       controls.enableTranslate = enabled;
+      onlineGate.setInputLocked(!enabled);
     },
 
     destroy() {
@@ -526,7 +538,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       canvas.removeEventListener("pointerdown", wake);
       canvas.removeEventListener("pointerup", wake);
-      canvas.removeEventListener("wheel", wake);
+      canvas.removeEventListener("wheel", userMovedCamera);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       clickHandler.destroy();

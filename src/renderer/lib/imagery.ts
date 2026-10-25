@@ -63,6 +63,46 @@ export function bundledOnlyHeight(inputs: RefinementInputs): number {
 }
 
 /**
+ * Whether the online imagery layer may load tiles. A camera move the app
+ * makes hides it, and it stays hidden after the move until the user zooms,
+ * drags or tilts the globe; from then on only the user's own view loads
+ * online tiles. So a view the app chose never loads them, whatever the
+ * window size does later. Input during a flight or while input is locked
+ * (exports) does not count: Cesium ignores it.
+ */
+export class OnlineImageryGate {
+  private flying = false;
+  private locked = false;
+  private heldByApp = false;
+
+  get visible(): boolean {
+    return !this.heldByApp;
+  }
+
+  appFlightStarted(): void {
+    this.flying = true;
+    this.heldByApp = true;
+  }
+
+  appFlightEnded(): void {
+    this.flying = false;
+  }
+
+  setInputLocked(locked: boolean): void {
+    this.locked = locked;
+  }
+
+  /** A zoom, drag or tilt from the user. Returns true when it shows the layer again. */
+  userMovedCamera(): boolean {
+    if (this.flying || this.locked || !this.heldByApp) {
+      return false;
+    }
+    this.heldByApp = false;
+    return true;
+  }
+}
+
+/**
  * Cesium darkens the night side to 30 % of the imagery colour; the city
  * lights are brightened to make up for it.
  */
