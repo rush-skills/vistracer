@@ -19,149 +19,12 @@
 // browser with WebGL.
 
 import fs from "node:fs";
-import http from "node:http";
-import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { openApp, outputDir, sleep } from "./browser.mjs";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, "..", "..");
-const dist = path.join(repo, "dist", "renderer");
-const chromePath =
-  process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const outDir = outputDir("vistracer-globe-check");
+const { send, evaluate, screenshot, mouse, events, close } = await openApp({ outDir });
 
-function exitWith(message) {
-  console.error(message);
-  process.exit(2);
-}
-
-if (!fs.existsSync(path.join(dist, "index.html"))) {
-  exitWith("dist/renderer is missing: run `npm run build` first.");
-}
-if (typeof WebSocket !== "function") {
-  exitWith("This check needs Node.js 22.4 or later (global WebSocket).");
-}
-if (!fs.existsSync(chromePath)) {
-  exitWith(`No browser at ${chromePath}. Set CHROME to a Chrome or Chromium binary.`);
-}
-const outDir = process.argv[2]
-  ? path.resolve(process.argv[2])
-  : fs.mkdtempSync(path.join(os.tmpdir(), "vistracer-globe-check-"));
-fs.mkdirSync(outDir, { recursive: true });
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// The production CSP from tauri.conf.json, sent with the page.
-const conf = JSON.parse(fs.readFileSync(path.join(repo, "src-tauri", "tauri.conf.json"), "utf8"));
-const csp = Object.entries(conf.app.security.csp)
-  .map(([directive, value]) => `${directive} ${value}`)
-  .join("; ");
-const types = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".json": "application/json",
-  ".geojson": "application/json"
-};
-const server = http.createServer((request, response) => {
-  const url = new URL(request.url, "http://localhost");
-  const file = path.join(
-    dist,
-    url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname)
-  );
-  if (
-    !file.startsWith(dist + path.sep) ||
-    !fs.existsSync(file) ||
-    fs.statSync(file).isDirectory()
-  ) {
-    response.writeHead(404);
-    response.end();
-    return;
-  }
-  const headers = { "Content-Type": types[path.extname(file)] ?? "application/octet-stream" };
-  if (path.extname(file) === ".html") {
-    headers["Content-Security-Policy"] = csp;
-  }
-  response.writeHead(200, headers);
-  fs.createReadStream(file).pipe(response);
-});
-await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-const appUrl = `http://127.0.0.1:${server.address().port}/`;
-
-const profile = path.join(outDir, "chrome-profile");
-fs.rmSync(profile, { recursive: true, force: true });
-const chrome = spawn(
-  chromePath,
-  [
-    "--headless=new",
-    "--remote-debugging-port=0",
-    `--user-data-dir=${profile}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--enable-unsafe-swiftshader",
-    "--hide-scrollbars",
-    "about:blank"
-  ],
-  { stdio: "ignore" }
-);
-let debuggerUrl;
-for (let i = 0; i < 100 && !debuggerUrl; i += 1) {
-  await sleep(100);
-  const portFile = path.join(profile, "DevToolsActivePort");
-  if (fs.existsSync(portFile)) {
-    const [port] = fs.readFileSync(portFile, "utf8").split("\n");
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-    debuggerUrl = targets.find((target) => target.type === "page")?.webSocketDebuggerUrl;
-  }
-}
-if (!debuggerUrl) {
-  chrome.kill();
-  server.close();
-  exitWith("Chrome did not start with remote debugging.");
-}
-
-const socket = new WebSocket(debuggerUrl);
-await new Promise((resolve) => socket.addEventListener("open", resolve));
-let sequence = 0;
-const pending = new Map();
-const events = [];
-socket.addEventListener("message", (message) => {
-  const data = JSON.parse(message.data);
-  if (data.id && pending.has(data.id)) {
-    pending.get(data.id)(data);
-    pending.delete(data.id);
-  } else if (data.method) {
-    events.push(data);
-  }
-});
-const send = (method, params = {}) =>
-  new Promise((resolve, reject) => {
-    const id = ++sequence;
-    pending.set(id, (data) =>
-      data.error ? reject(new Error(`${method}: ${data.error.message}`)) : resolve(data.result)
-    );
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-const evaluate = async (expression) => {
-  const result = await send("Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue: true
-  });
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text);
-  }
-  return result.result.value;
-};
-const screenshot = async (name) => {
-  const { data } = await send("Page.captureScreenshot", { format: "png" });
-  fs.writeFileSync(path.join(outDir, `${name}.png`), Buffer.from(data, "base64"));
-};
-const mouse = (type, x, y, extra = {}) =>
-  send("Input.dispatchMouseEvent", { type, x, y, ...extra });
 const counters = () =>
   evaluate("({ ...window.__globeCheck, onlineTiles: window.__globeCheck.onlineTiles.length })");
 const centre = () =>
@@ -219,19 +82,6 @@ const userZoom = async () => {
 };
 
 try {
-  await send("Page.enable");
-  await send("Runtime.enable");
-  await send("Network.enable");
-  await send("Emulation.setDeviceMetricsOverride", {
-    width: 1280,
-    height: 713,
-    deviceScaleFactor: 2,
-    mobile: false
-  });
-  await send("Page.addScriptToEvaluateOnNewDocument", {
-    source: fs.readFileSync(path.join(here, "mock-ipc.js"), "utf8")
-  });
-  await send("Page.navigate", { url: appUrl });
   await sleep(6000);
 
   check(
@@ -281,11 +131,11 @@ try {
   await tilesDuring(userZoom);
   const exportButton = () =>
     evaluate(
-      `[...document.querySelectorAll('button')].find((b) => /Download export|Exporting/.test(b.textContent))?.textContent ?? ""`
+      `[...document.querySelectorAll('button')].find((b) => /Export route|Exporting/.test(b.textContent))?.textContent ?? ""`
     );
   const startExport = async (format, dwellSeconds) => {
     await evaluate(
-      `[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Download export')).click()`
+      `[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Export route')).click()`
     );
     await sleep(500);
     await evaluate(`document.querySelector('input[type=radio][value="${format}"]').click()`);
@@ -438,9 +288,7 @@ try {
     [...hosts].join(", ")
   );
 } finally {
-  socket.close();
-  chrome.kill();
-  server.close();
+  await close();
 }
 
 console.log(`Screenshots and downloads: ${outDir}`);
