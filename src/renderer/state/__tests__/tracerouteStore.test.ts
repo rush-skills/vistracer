@@ -185,6 +185,21 @@ describe("tracerouteStore", () => {
       expect(useTracerouteStore.getState().selectedHopIndex).toBe(5);
     });
 
+    it("ignores selections by the user while an animated export records", () => {
+      const store = useTracerouteStore.getState();
+      store.selectHopByUser(4);
+      expect(useTracerouteStore.getState().selectedHopIndex).toBe(4);
+      store.setCaptureActive(true);
+      store.selectHopByUser(6);
+      expect(useTracerouteStore.getState().selectedHopIndex).toBe(4);
+      // The export itself still moves the selection.
+      store.setSelectedHop(2);
+      expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
+      store.setCaptureActive(false);
+      store.selectHopByUser(6);
+      expect(useTracerouteStore.getState().selectedHopIndex).toBe(6);
+    });
+
     it("clears selection when set to undefined", () => {
       useTracerouteStore.getState().setSelectedHop(5);
       useTracerouteStore.getState().setSelectedHop(undefined);

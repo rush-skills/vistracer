@@ -144,6 +144,19 @@ describe("GlobeViewport", () => {
     expect(useTracerouteStore.getState().hoveredHopIndex).toBeUndefined();
   });
 
+  it("does not fly to a hop clicked on the globe while an export records", async () => {
+    const run = runWith([located(1, 50.1, 8.7), located(2, 52.4, 4.9)]);
+    render(<GlobeViewport run={run} selectedHopIndex={1} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => useTracerouteStore.setState({ selectedHopIndex: 1 }));
+    const flights = fake.controller.flyTo.mock.calls.length;
+    act(() => useTracerouteStore.getState().setCaptureActive(true));
+
+    act(() => fake.callbacks?.onSelectHop(2));
+    expect(useTracerouteStore.getState().selectedHopIndex).toBe(1);
+    expect(fake.controller.flyTo).toHaveBeenCalledTimes(flights);
+  });
+
   it("locks the camera during an export and destroys the globe on unmount", async () => {
     const { unmount } = render(<GlobeViewport run={runWith([located(1, 0, 0)])} />);
     await waitFor(() => expect(fake.controller.setInputEnabled).toHaveBeenLastCalledWith(true));

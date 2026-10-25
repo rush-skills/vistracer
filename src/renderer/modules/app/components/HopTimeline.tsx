@@ -98,7 +98,7 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
     }
   }, [selectedHopIndex, collapsed]);
 
-  const { setSelectedHop, setHoveredHop } = useTracerouteStore.getState();
+  const { selectHopByUser, setHoveredHop } = useTracerouteStore.getState();
   /** The hover card points at the hop's column. */
   const hover = (hopIndex: number, element: HTMLElement) => {
     const { left, top, width, height } = element.getBoundingClientRect();
@@ -109,7 +109,8 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
     : hops[0]?.hopIndex;
 
   const moveSelection = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (hops.length === 0) {
+    // An animated export moves the selection itself (selectHopByUser).
+    if (hops.length === 0 || useTracerouteStore.getState().captureActive) {
       return;
     }
     const current = hops.findIndex((hop) => hop.hopIndex === focusIndex);
@@ -128,7 +129,7 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
     }
     event.preventDefault();
     const hopIndex = hops[target].hopIndex;
-    setSelectedHop(hopIndex);
+    selectHopByUser(hopIndex);
     optionRefs.current.get(hopIndex)?.focus();
   };
 
@@ -194,7 +195,7 @@ export const HopTimeline: React.FC<HopTimelineProps> = ({ run, selectedHopIndex 
                   aria-label={describeTimelineHop(hop)}
                   tabIndex={hop.hopIndex === focusIndex ? 0 : -1}
                   className={className}
-                  onClick={() => setSelectedHop(hop.hopIndex)}
+                  onClick={() => selectHopByUser(hop.hopIndex)}
                   onMouseEnter={(event) => hover(hop.hopIndex, event.currentTarget)}
                   onMouseLeave={() => setHoveredHop(undefined)}
                   onFocus={(event) => hover(hop.hopIndex, event.currentTarget)}

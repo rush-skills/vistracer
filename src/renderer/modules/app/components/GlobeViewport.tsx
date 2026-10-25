@@ -41,14 +41,14 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
     let created: GlobeController | null = null;
     let disposed = false;
     let noticeTimer: number | undefined;
-    const { setSelectedHop, setHoveredHop } = useTracerouteStore.getState();
+    const { selectHopByUser, setHoveredHop } = useTracerouteStore.getState();
     import("./globe/cesiumGlobe")
       .then(({ createCesiumGlobe }) => {
         if (disposed) {
           return;
         }
         created = createCesiumGlobe(container, {
-          onSelectHop: setSelectedHop,
+          onSelectHop: selectHopByUser,
           onHoverHop: (hopIndex, at) =>
             setHoveredHop(hopIndex, at && { kind: "point", x: at.x, y: at.y }),
           onImageryError: () => {

@@ -417,6 +417,10 @@ would not fit (`flyHeight`). With `prefers-reduced-motion` the camera jumps.
 
 During a GIF or WebM export the camera does not take user input
 (`setInputEnabled(false)`), so a drag or zoom cannot get into the video.
+Hop selections from the globe, the timeline, the hop table and the command
+bar are ignored too (`selectHopByUser`; "Go to hop" says "An export is
+running."): the export moves the selection itself, and a flight to another
+hop would be recorded.
 The lock uses `enableRotate`, `enableZoom`, `enableTilt` and
 `enableTranslate` of the camera controller, not `enableInputs`: every
 Cesium flight sets `enableInputs` to false when it starts and back to true

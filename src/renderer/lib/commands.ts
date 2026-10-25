@@ -99,6 +99,8 @@ export function buildCommands(ctx: CommandContext): Command[] {
       keywords: [hop.hostName, hop.asn?.asn != null ? `AS${hop.asn.asn}` : null, hop.asn?.name]
         .filter(Boolean)
         .join(" "),
+      // A flight to the hop would end up in the recording.
+      disabledReason: ctx.exporting ? EXPORTING : undefined,
       run: () => actions.selectHop(hop.hopIndex)
     });
   }

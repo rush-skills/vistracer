@@ -21,7 +21,7 @@ const ACTIONS: CommandActions = {
   startTrace: requestTrace,
   rerun: (request) => void useTracerouteStore.getState().startRun(request),
   cancelTrace: () => void useTracerouteStore.getState().cancelRun(),
-  selectHop: (hopIndex) => useTracerouteStore.getState().setSelectedHop(hopIndex),
+  selectHop: (hopIndex) => useTracerouteStore.getState().selectHopByUser(hopIndex),
   setLayerVisible: (id, visible) => useUiStore.getState().setLayerVisible(id, visible),
   setTheme: (theme) => useUiStore.getState().setTheme(theme),
   setPanelCollapsed: (id, collapsed) => useUiStore.getState().setPanelCollapsed(id, collapsed),

@@ -23,7 +23,7 @@ const statusLabelMap: Record<HopDetailsPaneProps["status"], string> = {
 };
 
 export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, selectedHopIndex, status }) => {
-  const setSelectedHop = useTracerouteStore((state) => state.setSelectedHop);
+  const selectHopByUser = useTracerouteStore((state) => state.selectHopByUser);
   const hoveredHopIndex = useTracerouteStore((state) => state.hoveredHopIndex);
   const setHoveredHop = useTracerouteStore((state) => state.setHoveredHop);
   const rowRefs = useRef(new Map<number, HTMLTableRowElement>());
@@ -161,7 +161,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                         }
                       }}
                       className={rowClass}
-                      onClick={() => setSelectedHop(hop.hopIndex)}
+                      onClick={() => selectHopByUser(hop.hopIndex)}
                       onMouseEnter={() => setHoveredHop(hop.hopIndex)}
                       onMouseLeave={() => setHoveredHop(undefined)}
                       onFocus={() => setHoveredHop(hop.hopIndex)}
@@ -169,7 +169,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          setSelectedHop(hop.hopIndex);
+                          selectHopByUser(hop.hopIndex);
                         }
                       }}
                       tabIndex={0}

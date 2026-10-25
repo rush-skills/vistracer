@@ -35,6 +35,13 @@ export interface TracerouteStore {
   handleProgress: (event: TracerouteProgressEvent) => void;
   completeRun: (result: TracerouteExecutionResult) => void;
   setSelectedHop: (hopIndex: number | undefined) => void;
+  /**
+   * A selection the user makes (globe, timeline, hop table, command bar).
+   * Ignored while an animated export records: the export moves the
+   * selection and the camera itself, and a flight to another hop would end
+   * up in the recording.
+   */
+  selectHopByUser: (hopIndex: number) => void;
   setHoveredHop: (hopIndex: number | undefined, anchor?: HoverAnchor) => void;
   setCaptureActive: (active: boolean) => void;
   resetError: () => void;
@@ -178,6 +185,11 @@ export const useTracerouteStore = create<TracerouteStore>((set, get) => ({
     });
   },
   setSelectedHop: (hopIndex) => set({ selectedHopIndex: hopIndex }),
+  selectHopByUser: (hopIndex) => {
+    if (!get().captureActive) {
+      set({ selectedHopIndex: hopIndex });
+    }
+  },
   setHoveredHop: (hopIndex, anchor) =>
     set({ hoveredHopIndex: hopIndex, hoverAnchor: hopIndex == null ? undefined : anchor }),
   setCaptureActive: (active) => set({ captureActive: active }),

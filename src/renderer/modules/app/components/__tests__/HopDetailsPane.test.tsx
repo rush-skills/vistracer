@@ -481,6 +481,19 @@ describe("HopDetailsPane", () => {
     expect(row).toBeTruthy();
     fireEvent.click(row as HTMLElement);
     expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
+
+    // Not while an animated export records: its flight would be recorded.
+    const other = screen
+      .getAllByRole("button")
+      .find((el) => el.textContent?.includes("80.81.192.96")) as HTMLElement;
+    act(() => useTracerouteStore.getState().setCaptureActive(true));
+    try {
+      fireEvent.click(other);
+      fireEvent.keyDown(other, { key: "Enter" });
+      expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
+    } finally {
+      act(() => useTracerouteStore.getState().setCaptureActive(false));
+    }
   });
 
   it("shares the hovered hop with the globe in both directions", () => {

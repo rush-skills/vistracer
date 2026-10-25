@@ -84,6 +84,21 @@ describe("HopTimeline", () => {
     expect(useTracerouteStore.getState().selectedHopIndex).toBe(1);
   });
 
+  it("leaves the selection to an animated export while it records", () => {
+    render(<Connected />);
+    fireEvent.click(option(2));
+    act(() => useTracerouteStore.getState().setCaptureActive(true));
+    try {
+      fireEvent.click(option(5));
+      option(2).focus();
+      fireEvent.keyDown(option(2), { key: "ArrowRight" });
+      expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
+      expect(document.activeElement).toBe(option(2));
+    } finally {
+      act(() => useTracerouteStore.getState().setCaptureActive(false));
+    }
+  });
+
   it("shares the hovered hop with the globe and the hop pane", () => {
     render(<Connected />);
     fireEvent.mouseEnter(option(3));

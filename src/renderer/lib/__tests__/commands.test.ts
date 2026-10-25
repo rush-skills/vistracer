@@ -112,6 +112,8 @@ describe("buildCommands", () => {
     const exporting = context({ exporting: true });
     expect(byId(exporting, "export.gif").disabledReason).toBe("An export is running.");
     expect(byId(exporting, "trace.rerun").disabledReason).toBe("An export is running.");
+    expect(byId(exporting, "hop.3").disabledReason).toBe("An export is running.");
+    expect(byId(context(), "hop.3").disabledReason).toBeUndefined();
     expect(traceCommand("example.org", exporting)?.disabledReason).toBe("An export is running.");
 
     const ctx = context();
