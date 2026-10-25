@@ -351,18 +351,23 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
         }
       });
     }
-    scene.requestRender();
+    // One frame for the move; the loop sleeps right after it.
+    requestRender();
+    governor.wakeForFrame();
   };
   const satelliteTicker = new PeriodicTicker(moveSatellites, SATELLITE_UPDATE_MS);
   let propagation: Promise<typeof import("@renderer/lib/satellites/propagate")> | undefined;
   let satelliteRequest = 0;
+  // A thin dark outline keeps the small points visible over bright day imagery.
+  const SATELLITE_OUTLINE = { color: MARKER_OUTLINE, width: 1 };
   const styleSatellites = (group: DrawnGroup) => {
     const { drawing } = group;
     const color = Color.fromCssColorString(drawing.color).withAlpha(drawing.opacity);
     for (const point of group.points) {
       point.color = color;
       point.pixelSize = drawing.pixelSize;
-      point.outlineWidth = 0;
+      point.outlineColor = SATELLITE_OUTLINE.color;
+      point.outlineWidth = SATELLITE_OUTLINE.width;
     }
   };
   const styleSatellite = (key: string | undefined, hovered: boolean) => {
@@ -370,12 +375,11 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     if (!entry) {
       return false;
     }
-    const style = hovered
-      ? hoveredSatelliteStyle(entry.group.drawing)
-      : { pixelSize: entry.group.drawing.pixelSize, outlineWidth: 0 };
+    const { drawing } = entry.group;
+    const style = hovered ? hoveredSatelliteStyle(drawing) : drawing;
     entry.point.pixelSize = style.pixelSize;
-    entry.point.outlineWidth = style.outlineWidth;
-    entry.point.outlineColor = Color.WHITE;
+    entry.point.outlineColor = hovered ? Color.WHITE : SATELLITE_OUTLINE.color;
+    entry.point.outlineWidth = hovered ? hoveredSatelliteStyle(drawing).outlineWidth : SATELLITE_OUTLINE.width;
     return true;
   };
   const removeSatelliteGroup = (group: DrawnGroup) => {
