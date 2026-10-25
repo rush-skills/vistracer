@@ -7,6 +7,8 @@
 // - camera moves the app makes (start view, following a trace, selecting a
 //   hop, exports) request no online tile, also when the window grows later;
 //   a zoom the user makes does
+// - a 7680 px wide start view, whose bundled levels Cesium would refine,
+//   requests no online tile before the user moves the camera
 // - a drag during a WebM export does not move the globe
 // - with "Online imagery" off in the layer panel, a user zoom requests no
 //   online tile; switched on again, it does
@@ -26,6 +28,32 @@ import path from "node:path";
 import { openApp, outputDir, sleep } from "./browser.mjs";
 
 const outDir = outputDir("vistracer-globe-check");
+
+const results = [];
+const check = (name, ok, detail) => {
+  results.push(ok);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail}` : ""}`);
+};
+
+// Cesium refines the 14,000 km start view past the bundled level 4 in a view
+// wider than about 6,600 px, so this window would load online tiles without
+// any input if OnlineImageryGate did not start held (a copy with the gate
+// starting open made 161 requests here).
+{
+  const wide = await openApp({ outDir, width: 7680, height: 2160, deviceScaleFactor: 1 });
+  try {
+    await sleep(12000);
+    const tiles = await wide.evaluate("window.__globeCheck.onlineTiles.length");
+    check(
+      "a 7680 px wide start view requests no online tile before user input",
+      tiles === 0,
+      `${tiles} requests`
+    );
+  } finally {
+    await wide.close();
+  }
+}
+
 const { send, evaluate, screenshot, mouse, events, close } = await openApp({ outDir });
 
 const counters = () =>
@@ -35,12 +63,6 @@ const centre = () =>
     const rect = document.querySelector('.globe-viewport canvas').getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
   })()`);
-
-const results = [];
-const check = (name, ok, detail) => {
-  results.push(ok);
-  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `: ${detail}` : ""}`);
-};
 
 /** Waits for flights and tile loads to end and the render loop to sleep. */
 const settle = () => sleep(4000);
