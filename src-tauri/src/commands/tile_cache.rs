@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::http::{header, Method, Request, Response, StatusCode, Uri};
@@ -107,6 +108,8 @@ pub enum TileError {
     Upstream(String),
     /// The app has not finished starting.
     NotReady,
+    /// The user switched online imagery off; nothing is downloaded.
+    OnlineOff,
     /// Only GET and HEAD read tiles.
     MethodNotAllowed,
     /// The upstream URL built from the layer table is not on the allowlist:
@@ -117,7 +120,7 @@ pub enum TileError {
 impl TileError {
     fn status(&self) -> StatusCode {
         match self {
-            TileError::BadHost => StatusCode::FORBIDDEN,
+            TileError::BadHost | TileError::OnlineOff => StatusCode::FORBIDDEN,
             TileError::BadPath => StatusCode::BAD_REQUEST,
             TileError::UnknownLayer | TileError::OutOfRange | TileError::NotFound => {
                 StatusCode::NOT_FOUND
@@ -142,6 +145,9 @@ impl TileError {
             ),
             TileError::Upstream(message) => format!("Imagery server error: {message}"),
             TileError::NotReady => "The tile cache is starting.".into(),
+            TileError::OnlineOff => {
+                "Online imagery is off in the layer panel; nothing was downloaded.".into()
+            }
             TileError::MethodNotAllowed => "Tile requests must use GET or HEAD.".into(),
             TileError::UpstreamNotAllowed => {
                 "The layer's upstream host is not on the allowlist; nothing was fetched.".into()
@@ -540,6 +546,10 @@ pub struct TileService<F> {
     /// One fetch per tile at a time; later requests wait and read the cache.
     in_flight: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     breaker: Mutex<Breaker>,
+    /// The user's "Online imagery" layer switch. Off: no upstream request at
+    /// all, also when the renderer asks for a tile; tiles already on disk are
+    /// still served, which sends nothing anywhere.
+    online: AtomicBool,
 }
 
 impl<F: TileFetcher> TileService<F> {
@@ -549,7 +559,12 @@ impl<F: TileFetcher> TileService<F> {
             fetcher,
             in_flight: Mutex::new(HashMap::new()),
             breaker: Mutex::new(Breaker::default()),
+            online: AtomicBool::new(true),
         }
+    }
+
+    pub fn set_online_enabled(&self, enabled: bool) {
+        self.online.store(enabled, Ordering::SeqCst);
     }
 
     fn breaker(&self) -> MutexGuard<'_, Breaker> {
@@ -619,6 +634,9 @@ impl<F: TileFetcher> TileService<F> {
         address: &TileAddress,
         key: &str,
     ) -> Result<Vec<u8>, TileError> {
+        if !self.online.load(Ordering::SeqCst) {
+            return Err(TileError::OnlineOff);
+        }
         if self.breaker().is_paused(Instant::now()) {
             return Err(TileError::Paused);
         }
@@ -718,7 +736,7 @@ pub fn into_response(result: Result<Tile, TileError>) -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
 
     const JPEG: &[u8] = &[0xff, 0xd8, 0xff, 0xe0, 0, 0x10, b'J', b'F', b'I', b'F'];
 
@@ -969,6 +987,41 @@ mod tests {
                 cap_bytes: DEFAULT_CAP_BYTES
             }
         );
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn online_imagery_off_downloads_nothing_and_serves_the_disk() {
+        let root = temp_root("tiles-online-off");
+        let body = jpeg(1000, 3);
+        let service = TileService::new(
+            TileStore::new(root.clone(), DEFAULT_CAP_BYTES),
+            FakeFetcher::image(body.clone()),
+        );
+        let cached = uri("vistiles://localhost/blue-marble/5/1/2.jpg");
+        service.serve(&cached).await.unwrap();
+        assert_eq!(service.fetcher.calls(), 1);
+
+        service.set_online_enabled(false);
+        let missing = uri("vistiles://localhost/blue-marble/6/10/20.jpg");
+        assert_eq!(
+            service.serve(&missing).await.err(),
+            Some(TileError::OnlineOff)
+        );
+        let response = service
+            .respond(&Request::get(missing.clone()).body(Vec::new()).unwrap())
+            .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(service.serve(&cached).await.unwrap().bytes, body);
+        assert_eq!(
+            service.fetcher.calls(),
+            1,
+            "nothing is downloaded while online imagery is off"
+        );
+        // Refused requests are not upstream failures: no pause afterwards.
+        service.set_online_enabled(true);
+        assert!(service.serve(&missing).await.is_ok());
+        assert_eq!(service.fetcher.calls(), 2);
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 

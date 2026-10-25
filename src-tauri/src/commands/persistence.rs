@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -32,6 +32,90 @@ pub struct Preferences {
     #[serde(rename = "highContrast")]
     pub high_contrast: Option<bool>,
     pub onboarding: Option<OnboardingPreferences>,
+    #[serde(default, deserialize_with = "lenient_ui")]
+    pub ui: UiPreferences,
+}
+
+/// Colours of the panels around the globe. The globe looks the same in both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+}
+
+/// The layer id of the online NASA GIBS tiles. Mirrors
+/// `ONLINE_IMAGERY_LAYER_ID` in src/common/ipc.ts.
+pub const ONLINE_IMAGERY_LAYER: &str = "online-imagery";
+/// More entries than any registry will have; bounds what a settings file can hold.
+const MAX_UI_ENTRIES: usize = 64;
+const MAX_UI_ID_LEN: usize = 40;
+
+/// Theme, globe layers and collapsed panels (`preferences.ui`). Layer and
+/// panel ids come from the renderer's registries. Ids that this version does
+/// not know are kept, so the choices of a newer version survive a downgrade.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UiPreferences {
+    pub theme: Theme,
+    /// Layer id → shown. A missing id uses the layer's default.
+    pub layers: BTreeMap<String, bool>,
+    /// Panel id → collapsed. A missing id uses the panel's default.
+    pub collapsed: BTreeMap<String, bool>,
+}
+
+impl UiPreferences {
+    /// Whether the tile cache may download NASA GIBS tiles. On unless the
+    /// user switched the online imagery layer off.
+    pub fn online_imagery(&self) -> bool {
+        self.layers
+            .get(ONLINE_IMAGERY_LAYER)
+            .copied()
+            .unwrap_or(true)
+    }
+
+    /// Checks UI preferences that arrive from the renderer before they are stored.
+    pub fn validated(self) -> Result<Self, String> {
+        for (what, entries) in [("layer", &self.layers), ("panel", &self.collapsed)] {
+            if entries.len() > MAX_UI_ENTRIES {
+                return Err(format!(
+                    "Too many {what} entries in the UI preferences: {} (at most {MAX_UI_ENTRIES}).",
+                    entries.len()
+                ));
+            }
+            if !entries.keys().all(|id| is_registry_id(id)) {
+                return Err(format!(
+                    "Invalid {what} id in the UI preferences: use 1 to {MAX_UI_ID_LEN} lowercase letters, digits and dashes."
+                ));
+            }
+        }
+        Ok(self)
+    }
+}
+
+fn is_registry_id(id: &str) -> bool {
+    (1..=MAX_UI_ID_LEN).contains(&id.len())
+        && !id.starts_with('-')
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A damaged `ui` section in settings.json falls back to the defaults. A
+/// strict parse would fail the whole file and also drop the database paths
+/// and provider settings.
+fn lenient_ui<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<UiPreferences, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let parsed = serde_json::from_value::<UiPreferences>(value)
+        .map_err(|e| e.to_string())
+        .and_then(UiPreferences::validated);
+    Ok(parsed.unwrap_or_else(|error| {
+        log::warn!("Ignoring invalid UI preferences in settings.json: {error}");
+        UiPreferences::default()
+    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +290,7 @@ impl Default for AppStore {
                     last_completed_at: None,
                     last_dismissed_at: None,
                 }),
+                ui: UiPreferences::default(),
             },
             cache_settings: CacheSettings::default(),
             integrations: IntegrationSettings::default(),
@@ -462,6 +547,72 @@ mod tests {
         assert!(!off.ix_matching.enabled);
         let saved = serde_json::to_value(off.validated().unwrap()).unwrap();
         assert_eq!(saved["ixMatching"]["enabled"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn ui_preferences_default_to_dark_with_online_imagery_on() {
+        let ui = UiPreferences::default();
+        assert_eq!(ui.theme, Theme::Dark);
+        assert!(ui.online_imagery());
+
+        // A settings.json saved before the section existed.
+        let old: PersistedSettings =
+            serde_json::from_str(r#"{"preferences":{"onboarding":{"skipOnLaunch":true}}}"#)
+                .unwrap();
+        assert_eq!(old.preferences.ui, UiPreferences::default());
+
+        let saved: UiPreferences = serde_json::from_value(serde_json::json!({
+            "theme": "light",
+            "layers": { "online-imagery": false, "rings": true },
+            "collapsed": { "hops": true }
+        }))
+        .unwrap();
+        assert_eq!(saved.theme, Theme::Light);
+        assert!(!saved.online_imagery());
+        assert_eq!(saved.collapsed.get("hops"), Some(&true));
+        assert_eq!(
+            serde_json::to_value(&saved).unwrap()["theme"],
+            serde_json::json!("light")
+        );
+    }
+
+    #[test]
+    fn ui_preferences_reject_bad_ids_and_unbounded_maps() {
+        let with_layer = |id: &str| UiPreferences {
+            layers: BTreeMap::from([(id.to_string(), true)]),
+            ..UiPreferences::default()
+        };
+        assert!(with_layer("anycast-reach").validated().is_ok());
+        // A phase 5 layer this version does not know is kept.
+        assert!(with_layer("ixp-sites").validated().is_ok());
+        for bad in ["", "Arcs", "-arcs", "arcs/../x", "a b", &"x".repeat(41)] {
+            assert!(with_layer(bad).validated().is_err(), "{bad:?}");
+        }
+        let many = UiPreferences {
+            collapsed: (0..65).map(|i| (format!("panel-{i}"), true)).collect(),
+            ..UiPreferences::default()
+        };
+        assert!(many.validated().is_err());
+        assert!(
+            serde_json::from_value::<UiPreferences>(serde_json::json!({ "theme": "neon" }))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_damaged_ui_section_keeps_the_rest_of_the_settings_file() {
+        let file = r#"{
+            "geo": { "cityDbPath": "/data/GeoLite2-City.mmdb" },
+            "preferences": { "ui": { "theme": "neon", "layers": { "BAD ID": false } } },
+            "integrations": { "peeringDb": { "enabled": true, "apiKey": null } }
+        }"#;
+        let parsed: PersistedSettings = serde_json::from_str(file).unwrap();
+        assert_eq!(parsed.preferences.ui, UiPreferences::default());
+        assert_eq!(
+            parsed.geo.city_db_path.as_deref(),
+            Some("/data/GeoLite2-City.mmdb")
+        );
+        assert!(parsed.integrations.peering_db.enabled);
     }
 
     #[test]
