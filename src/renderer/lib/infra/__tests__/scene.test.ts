@@ -7,6 +7,7 @@ import {
   cableLines,
   cableSpecs,
   infraScene,
+  keepUnchanged,
   routeInfra,
   siteSpecKey,
   siteSpecs
@@ -102,14 +103,58 @@ describe("infrastructure scene", () => {
     expect(hovered?.pixelSize).toBe((frankfurt?.pixelSize ?? 0) + 2);
   });
 
-  it("highlights and names the guessed cables, once each", () => {
-    const route = routeInfra(HOPS, ALL_ON, INPUT);
+  it("highlights every line of a guessed cable and names it once", () => {
+    // The guessed cable has a second line (a branch).
+    const cables = CABLES.cables.map((cable) =>
+      cable.key === "cable:indian-ocean"
+        ? {
+            ...cable,
+            segments: [
+              ...cable.segments,
+              [
+                [43, 12.6],
+                [45.0, 11.6]
+              ] as Array<[number, number]>
+            ]
+          }
+        : cable
+    );
+    const route = routeInfra(HOPS, ALL_ON, { ...INPUT, cables: { ...CABLES, cables } });
     expect(route.cableGuesses.map((guess) => guess.name)).toEqual(["Example Indian Ocean Cable"]);
-    const specs = cableSpecs(cableLines(CABLES.cables), route.cableGuesses);
+    const specs = cableSpecs(cableLines(cables), route.cableGuesses);
     const guessed = specs.filter((spec) => spec.color === GUESSED_CABLE_COLOR);
-    expect(guessed).toHaveLength(1);
-    expect(guessed[0].label?.text).toBe("Example Indian Ocean Cable? (a guess)");
-    expect(specs.at(-1)).toBe(guessed[0]);
+    expect(guessed).toHaveLength(2);
+    expect(guessed.filter((spec) => spec.label).map((spec) => spec.label?.text)).toEqual([
+      "Example Indian Ocean Cable? (a guess)"
+    ]);
+    expect(specs.slice(-2)).toEqual(guessed);
+  });
+
+  it("keeps the previous route results when a new hop list changes nothing", () => {
+    const first = routeInfra(HOPS, ALL_ON, INPUT);
+    // An enrichment update: a new list and new hop objects, same places.
+    const again = routeInfra(
+      HOPS.map((hop) => ({ ...hop, hostName: "router.example.net" })),
+      ALL_ON,
+      INPUT
+    );
+    expect(again.cableGuesses).not.toBe(first.cableGuesses);
+    expect(keepUnchanged(first, again)).toBe(first);
+    // A hop that moves changes the links; the guesses stay the same object.
+    const moved = routeInfra(
+      HOPS.map((hop) =>
+        hop.hopIndex === 6
+          ? { ...hop, location: { ...hop.location, best: estimate("Kassel", 51.3, 9.5) } }
+          : hop
+      ),
+      ALL_ON,
+      INPUT
+    );
+    const kept = keepUnchanged(first, moved);
+    expect(kept).not.toBe(first);
+    expect(kept.facilityLinks).not.toBe(first.facilityLinks);
+    expect(kept.cableGuesses).toBe(first.cableGuesses);
+    expect(keepUnchanged(undefined, first)).toBe(first);
   });
 
   it("keeps the site marker colours visible on the dark globe (3:1)", () => {

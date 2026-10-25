@@ -255,6 +255,48 @@ describe("GlobeViewport", () => {
     act(() => fake.callbacks?.onHoverSite(undefined));
     expect(useInfraStore.getState().hoveredSite).toBeUndefined();
   });
+
+  it("does not rebuild site markers or cables for a hop update that changes nothing", async () => {
+    const cableMap = {
+      fetchedAt: 1,
+      note: null,
+      cables: [
+        {
+          key: "cable:x",
+          id: "x",
+          name: "Example",
+          segments: [
+            [
+              [8.7, 50.1],
+              [4.9, 52.4]
+            ] as Array<[number, number]>
+          ]
+        }
+      ],
+      rejected: 0
+    };
+    useInfraStore.setState({
+      sources: {
+        ...useInfraStore.getState().sources,
+        "submarine-cables": { status: "ready", data: cableMap }
+      }
+    });
+    useUiStore.setState({ layers: { "data-centres": true, "submarine-cables": true } });
+    // The route infra reads the run from the store, as in the app.
+    const run = runWith([located(1, 50.1, 8.7), located(2, 52.4, 4.9)]);
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    const { rerender } = render(<GlobeViewport run={run} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => fake.callbacks?.onClusterLevel(6));
+    const before = lastScene();
+    expect(before?.cables.length).toBe(1);
+    // An enrichment update: new hop objects, same places.
+    const updated = runWith(run.hops.map((hop) => ({ ...hop, hostName: "router.example.net" })));
+    act(() => useTracerouteStore.setState({ runs: { r: updated } }));
+    rerender(<GlobeViewport run={updated} />);
+    expect(lastScene()?.facilities).toBe(before?.facilities);
+    expect(lastScene()?.cables).toBe(before?.cables);
+  });
 });
 
 describe("measureInsets", () => {

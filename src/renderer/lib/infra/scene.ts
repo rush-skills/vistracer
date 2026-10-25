@@ -81,6 +81,45 @@ export function routeInfra(
   };
 }
 
+/**
+ * `next` with every part whose content equals `previous` replaced by the
+ * previous object, and `previous` itself when nothing changed. A trace
+ * emits a hop event per line and per finished lookup, each with a new hop
+ * list; most change no link, match or guess, and then the clusters, the
+ * site markers and the cable lines are not built again.
+ */
+export function keepUnchanged(previous: RouteInfra | undefined, next: RouteInfra): RouteInfra {
+  if (!previous) {
+    return next;
+  }
+  const keep = <T>(old: T, fresh: T, signature: (value: T) => string): T =>
+    signature(old) === signature(fresh) ? old : fresh;
+  const links = (value: SiteLinks) => JSON.stringify([...value.entries()]);
+  const kept: RouteInfra = {
+    exchangeLinks: keep(previous.exchangeLinks, next.exchangeLinks, links),
+    facilityLinks: keep(previous.facilityLinks, next.facilityLinks, links),
+    cloudMatches: keep(previous.cloudMatches, next.cloudMatches, (matches) =>
+      JSON.stringify(
+        [...matches.values()].map((match) => [
+          match.hopIndex,
+          match.provider.id,
+          match.region?.key ?? null,
+          match.confidence,
+          match.reason
+        ])
+      )
+    ),
+    cableGuesses: keep(previous.cableGuesses, next.cableGuesses, (guesses) =>
+      JSON.stringify(guesses)
+    ),
+    shownProviders: keep(previous.shownProviders, next.shownProviders, (providers) =>
+      providers.map((provider) => provider.id).join()
+    )
+  };
+  const parts = Object.keys(kept) as Array<keyof RouteInfra>;
+  return parts.every((part) => kept[part] === previous[part]) ? previous : kept;
+}
+
 /** A cluster with what its marker needs; built once per data, zoom and route. */
 export interface SiteCluster {
   layer: SiteLayer;

@@ -7,6 +7,7 @@ import {
   cableLines,
   cableSpecs,
   infraScene,
+  keepUnchanged,
   routeInfra,
   siteSpecKey,
   type InfraInput,
@@ -78,7 +79,10 @@ function memoRouteInfra(
       hops,
       saved,
       sources,
-      value: routeInfra(hops, layerVisibility(saved), infraInput(sources))
+      value: keepUnchanged(
+        lastRoute?.value,
+        routeInfra(hops, layerVisibility(saved), infraInput(sources))
+      )
     };
   }
   return lastRoute.value;
@@ -141,8 +145,11 @@ export function useInfraScene(level: number, hoveredKey: string | undefined): In
       if (site) {
         return site;
       }
-      const cable = /^(cable:[^#]+)#\d+$/.exec(specKey);
-      return cable ? { layer: "cables" as const, keys: [cable[1]] } : undefined;
+      // Cable line keys are "<cable key>#<line>"; the cable id may contain "#".
+      const hash = specKey.lastIndexOf("#");
+      return specKey.startsWith("cable:") && hash > 0
+        ? { layer: "cables" as const, keys: [specKey.slice(0, hash)] }
+        : undefined;
     };
   }, [clusters]);
   return { scene, members };
