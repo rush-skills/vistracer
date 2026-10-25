@@ -15,9 +15,18 @@ import { openApp, outputDir, sleep } from "./browser.mjs";
 
 const outDir = outputDir("vistracer-ui-shots");
 
-async function shoot({ width, height, theme, prefix, full }) {
+async function shoot({ width, height, theme, prefix, full, reduced = false }) {
   const app = await openApp({ outDir, width, height, deviceScaleFactor: 2 });
   const { evaluate, mouse, key } = app;
+  if (reduced) {
+    // The system settings "reduce motion" and "reduce transparency".
+    await app.send("Emulation.setEmulatedMedia", {
+      features: [
+        { name: "prefers-reduced-motion", value: "reduce" },
+        { name: "prefers-reduced-transparency", value: "reduce" }
+      ]
+    });
+  }
   const screenshot = async (name) => {
     await app.screenshot(name);
     console.log(name);
@@ -202,8 +211,8 @@ async function shoot({ width, height, theme, prefix, full }) {
   }
 }
 
-// SHOTS=dark,light,small picks some of the sets (default: all).
-const sets = (process.env.SHOTS ?? "dark,light,small").split(",");
+// SHOTS=dark,light,small,reduced picks some of the sets (default: all).
+const sets = (process.env.SHOTS ?? "dark,light,small,reduced").split(",");
 if (sets.includes("dark")) {
   await shoot({ width: 1440, height: 900, theme: "dark", prefix: "dark", full: true });
 }
@@ -212,6 +221,9 @@ if (sets.includes("light")) {
 }
 if (sets.includes("small")) {
   await shoot({ width: 960, height: 640, theme: "dark", prefix: "small", full: false });
+}
+if (sets.includes("reduced")) {
+  await shoot({ width: 1440, height: 900, theme: "light", prefix: "reduced", full: false, reduced: true });
 }
 console.log(`Screenshots: ${outDir}`);
 process.exit(0);
