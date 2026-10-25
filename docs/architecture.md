@@ -446,7 +446,16 @@ stays hidden after the flight until the user zooms, drags or tilts the globe
 (wheel, or pointer move with a button pressed; not during a flight, not
 while input is locked). So a view the app chose never loads online tiles,
 even when the window is moved to a larger monitor later and the floor no
-longer holds. Only the user's own camera moves load online tiles.
+longer holds. The layer is hidden at start-up too: Cesium refines the
+14,000 km start view past level 4 in a view wider than about 6,600 px, so
+the start view loads nothing until the user first moves the camera. Only the
+user's own camera moves load online tiles.
+
+During the move step of a two-step flight, Cesium can apply user input: the
+rise step's completion turns `enableInputs` back on after the move step has
+started (`CameraFlightPath` wraps the `complete` callback). The flight sets
+the camera again on every frame, and the gate does not count that input, so
+the layer stays hidden.
 `scripts/globe-check/check.mjs` (below) counts the tile requests to show it.
 
 Picking: the arcs end at the markers and are drawn after them, so a pick that

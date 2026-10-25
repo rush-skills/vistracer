@@ -193,6 +193,8 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       onlineLayer.show = onlineGate.visible;
     }
   };
+  // Hidden from the start, until the user moves the camera.
+  syncOnlineLayer();
   // Runs only for frames that are drawn anyway, so it adds no frames.
   const removePreRender = scene.preRender.addEventListener(() => {
     const share = nightImageryShare(
@@ -460,8 +462,9 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     },
 
     flyTo(focus) {
-      // Cancelling a running app flight shows the online layer again; this
-      // flight hides it until it ends.
+      // A new app flight cancels the running one. The cancelled flight only
+      // ends the gate's flight state; OnlineImageryGate keeps the online
+      // layer hidden until the user moves the camera.
       camera.cancelFlight();
       const position = camera.positionCartographic;
       const floor = bundledOnlyHeight({
