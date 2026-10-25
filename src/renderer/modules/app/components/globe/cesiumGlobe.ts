@@ -152,6 +152,10 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     // Credits render as plain text in GlobeViewport: Cesium's credit links
     // would navigate the app window.
     creditContainer: document.createElement("div"),
+    // Cesium's credit lightbox (role="dialog", aria-modal) is hidden by an
+    // inline style that the CSP blocks: in the page it stayed in the
+    // accessibility tree with a focusable close button below the canvas.
+    creditViewport: document.createElement("div"),
     contextOptions: {
       webgl: {
         alpha: false,

@@ -23,6 +23,8 @@
 //   for once, they move at most once a second, load no online tile, and
 //   draw nothing while the page is hidden; off again, the idle globe draws
 //   nothing; the renderer never contacts CelesTrak's host
+// - screen readers: no dialog in the page before one is opened, and every
+//   control (button, switch, field, option) has an accessible name
 // - exports write files, no page errors, no request leaves the machine
 //
 //   npm run build
@@ -157,6 +159,18 @@ const idleWindow = async (name) => {
       (composited ? ` (${names.join(", ")}; DOM changes: ${mutations.join(", ") || "none"})` : "")
   );
 };
+// Controls with no accessible name, from Chrome's accessibility tree.
+const CONTROL_ROLES = new Set(["button", "checkbox", "switch", "textbox", "combobox", "option", "radio", "link", "slider", "spinbutton"]);
+const unnamedControls = async () => {
+  await send("Accessibility.enable");
+  const { nodes } = await send("Accessibility.getFullAXTree");
+  return nodes
+    .filter((node) => !node.ignored && CONTROL_ROLES.has(node.role?.value) && !(node.name?.value ?? "").trim())
+    .map((node) => node.role.value);
+};
+const dialogsInPage = () =>
+  evaluate(`[...document.querySelectorAll('[role=dialog]')].map((d) => d.getAttribute('aria-label') ?? d.getAttribute('aria-labelledby'))`);
+
 /** Online tile requests made while `action` runs and the globe settles. */
 const tilesDuring = async (action) => {
   const before = (await counters()).onlineTiles;
@@ -202,6 +216,12 @@ try {
     await evaluate("Boolean(document.querySelector('.globe-viewport canvas'))")
   );
   check("start view requests no online tile", (await counters()).onlineTiles === 0);
+  // Cesium's credit lightbox was such a dialog, kept visible to screen
+  // readers because the CSP blocks the style that hides it.
+  const startDialogs = await dialogsInPage();
+  check("no dialog in the page before one is opened", startDialogs.length === 0, startDialogs.join(", "));
+  const unnamedAtStart = await unnamedControls();
+  check("every control has an accessible name (start view)", unnamedAtStart.length === 0, unnamedAtStart.join(", "));
   await idleWindow("start view");
   await screenshot("01-start");
 
@@ -465,6 +485,16 @@ try {
   );
   check("the infrastructure layers load no online tile", layerTiles === 0, `${layerTiles} requests`);
   await screenshot("06-infrastructure-layers");
+  await evaluate(`document.querySelector('#layers-toggle').click()`);
+  await sleep(300);
+  const unnamedWithPanel = await unnamedControls();
+  await evaluate(`document.querySelector('#layers-toggle').click()`);
+  await sleep(300);
+  check(
+    "every control has an accessible name (trace, layer panel, hop details)",
+    unnamedWithPanel.length === 0,
+    unnamedWithPanel.join(", ")
+  );
   await idleWindow("infrastructure layers on");
 
   // Submarine cables: the notice first, no request before consent.
