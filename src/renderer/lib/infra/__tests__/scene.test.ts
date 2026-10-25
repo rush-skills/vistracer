@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HopLocation, HopResolution } from "@common/ipc";
+import { hoveredSiteStyle } from "@renderer/lib/globe";
 import { SITE_COLORS, layerVisibility } from "@renderer/lib/layers";
 import {
   GUESSED_CABLE_COLOR,
@@ -63,13 +64,13 @@ describe("infrastructure scene", () => {
   it("lights up and labels the sites on the route", () => {
     const route = routeInfra(HOPS, ALL_ON, INPUT);
     const clusters = buildSiteClusters(ALL_ON, 4, INPUT, route);
-    const scene = infraScene(clusters, [], undefined);
-    const decix = scene.exchanges.find((site) => site.members[0] === "ix:31");
+    const scene = infraScene(clusters, []);
+    const decix = scene.exchanges.find((site) => site.key === siteSpecKey("exchanges", "ix:31"));
     expect(decix?.label).toBe("DE-CIX Frankfurt · hop 5");
     expect(decix?.outline).toBe("#FFFFFF");
     const aws = scene.cloudRegions.find((site) => site.label?.startsWith("AWS eu-central-1"));
     expect(aws?.label).toBe("AWS eu-central-1 · hop 6 (high)");
-    expect(aws?.filterKey).toBe("aws");
+    expect(aws?.key).toBe(siteSpecKey("cloudRegions", "aws:eu-central-1"));
     // Labelled sites draw last, on top.
     expect(scene.cloudRegions.at(-1)?.label).toBeDefined();
     // The nearest data centres to hops 4, 5 and 6 stand out, unlabelled.
@@ -93,14 +94,18 @@ describe("infrastructure scene", () => {
   it("styles markers by layer and grows clusters and the hovered marker", () => {
     const route = routeInfra([], ALL_ON, INPUT);
     const clusters = buildSiteClusters(ALL_ON, 10, INPUT, route);
-    const specs = siteSpecs(clusters.facilities, undefined);
-    const single = siteSpecs(buildSiteClusters(ALL_ON, 0, INPUT, route).facilities, undefined)[0];
-    const frankfurt = specs.find((site) => site.members.length > 1);
+    const specs = siteSpecs(clusters.facilities);
+    const single = siteSpecs(buildSiteClusters(ALL_ON, 0, INPUT, route).facilities)[0];
+    const cluster = clusters.facilities.find((site) => site.cluster.members.length > 1);
+    const key = siteSpecKey("facilities", cluster?.cluster.key ?? "");
+    const frankfurt = specs.find((site) => site.key === key);
     expect(frankfurt?.color).toBe(SITE_COLORS.facility.fill);
     expect(frankfurt?.pixelSize).toBeGreaterThan(single.pixelSize);
-    const key = siteSpecKey("facilities", frankfurt?.members[0] ?? "");
-    const hovered = siteSpecs(clusters.facilities, key).find((site) => site.key === key);
-    expect(hovered?.pixelSize).toBe((frankfurt?.pixelSize ?? 0) + 2);
+    // The hovered marker is restyled in place: larger, with a white outline.
+    expect(frankfurt && hoveredSiteStyle(frankfurt)).toEqual({
+      pixelSize: (frankfurt?.pixelSize ?? 0) + 2,
+      outline: "#FFFFFF"
+    });
   });
 
   it("highlights every line of a guessed cable and names it once", () => {

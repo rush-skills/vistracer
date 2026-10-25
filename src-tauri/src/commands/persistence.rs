@@ -51,13 +51,18 @@ pub const ONLINE_IMAGERY_LAYER: &str = "online-imagery";
 /// The opt-in submarine cable layer, and the id of its licence notice in
 /// `consents`. Mirrors `SUBMARINE_CABLES_LAYER_ID` in src/common/ipc.ts.
 pub const SUBMARINE_CABLES_LAYER: &str = "submarine-cables";
+/// The opt-in satellites layer (the parent of the group switches), and the
+/// id of its notice in `consents`. Mirrors `SATELLITES_LAYER_ID` in
+/// src/common/ipc.ts.
+pub const SATELLITES_LAYER: &str = "satellites";
 /// More entries than any registry will have; bounds what a settings file can hold.
 const MAX_UI_ENTRIES: usize = 64;
 const MAX_UI_ID_LEN: usize = 40;
 
-/// Theme, globe layers and collapsed panels (`preferences.ui`). Layer and
-/// panel ids come from the renderer's registries. Ids that this version does
-/// not know are kept, so the choices of a newer version survive a downgrade.
+/// Theme, globe layers, collapsed panels and accepted layer notices
+/// (`preferences.ui`). Layer and panel ids come from the renderer's
+/// registries. Ids that this version does not know are kept, so the choices
+/// of a newer version survive a downgrade.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiPreferences {
@@ -85,6 +90,15 @@ impl UiPreferences {
     pub fn submarine_cables(&self) -> bool {
         self.layers.get(SUBMARINE_CABLES_LAYER) == Some(&true)
             && self.consents.get(SUBMARINE_CABLES_LAYER) == Some(&true)
+    }
+
+    /// Whether a satellite group may be downloaded: the satellites layer and
+    /// the group's switch are on (a group switch the user never changed has
+    /// its registry default, `default_on`), and the user accepted the notice.
+    pub fn satellite_group(&self, group_layer: &str, default_on: bool) -> bool {
+        self.layers.get(SATELLITES_LAYER) == Some(&true)
+            && self.consents.get(SATELLITES_LAYER) == Some(&true)
+            && self.layers.get(group_layer).copied().unwrap_or(default_on)
     }
 
     /// Checks UI preferences that arrive from the renderer before they are stored.
@@ -760,6 +774,32 @@ mod tests {
             ..UiPreferences::default()
         };
         assert!(bad.validated().unwrap_err().contains("consent id"));
+    }
+
+    #[test]
+    fn satellite_downloads_need_the_layer_the_group_and_the_accepted_notice() {
+        let ui = |layers: &[(&str, bool)], consents: &[(&str, bool)]| UiPreferences {
+            layers: layers.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            consents: consents.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            ..UiPreferences::default()
+        };
+        let on = [(SATELLITES_LAYER, true)];
+        let consent = [(SATELLITES_LAYER, true)];
+        assert!(!UiPreferences::default().satellite_group("satellites-starlink", true));
+        assert!(!ui(&on, &[]).satellite_group("satellites-starlink", true));
+        assert!(!ui(&[], &consent).satellite_group("satellites-starlink", true));
+        assert!(!ui(&[(SATELLITES_LAYER, false)], &consent)
+            .satellite_group("satellites-starlink", true));
+        // A group switch the user never touched has its default.
+        assert!(ui(&on, &consent).satellite_group("satellites-starlink", true));
+        assert!(!ui(&on, &consent).satellite_group("satellites-geo", false));
+        let group_off = [(SATELLITES_LAYER, true), ("satellites-starlink", false)];
+        assert!(!ui(&group_off, &consent).satellite_group("satellites-starlink", true));
+        let group_on = [(SATELLITES_LAYER, true), ("satellites-geo", true)];
+        assert!(ui(&group_on, &consent).satellite_group("satellites-geo", false));
+        // The cable consent is not the satellite consent.
+        assert!(!ui(&on, &[(SUBMARINE_CABLES_LAYER, true)])
+            .satellite_group("satellites-starlink", true));
     }
 
     #[test]

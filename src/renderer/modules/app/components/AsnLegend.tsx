@@ -21,7 +21,11 @@ export const AsnLegend: React.FC = () => {
   }
 
   return (
-    <section className="asn-legend glass" aria-labelledby="asn-legend-title">
+    <section
+      className="asn-legend glass"
+      aria-labelledby="asn-legend-title"
+      data-globe-inset="left"
+    >
       <h2 id="asn-legend-title">Networks on the route</h2>
       <ul>
         {legend.map((entry) => (

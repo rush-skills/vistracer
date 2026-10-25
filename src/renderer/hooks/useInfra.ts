@@ -1,47 +1,63 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { HopResolution } from "@common/ipc";
 import { EMPTY_INFRA_SCENE, type InfraScene, type SiteLayer } from "@renderer/lib/globe";
-import { layerVisibility, sourcesForLayers } from "@renderer/lib/layers";
-import {
-  buildSiteClusters,
-  cableLines,
-  cableSpecs,
-  infraScene,
-  keepUnchanged,
-  routeInfra,
-  siteSpecKey,
-  type InfraInput,
-  type RouteInfra
-} from "@renderer/lib/infra/scene";
-import type { InfraSourceId } from "@renderer/lib/infra/sources";
+import { LAYER_LIST, layerActive, layerVisibility } from "@renderer/lib/layers";
+import type { InfraCode } from "@renderer/lib/infra/code";
+import type { InfraInput, RouteInfra, SiteClusters } from "@renderer/lib/infra/scene";
 import { readySource, useInfraStore, type InfraSources } from "@renderer/state/infraStore";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
 
 const NO_HOPS: HopResolution[] = [];
 
+/** The layers that show the PeeringDB list exchange matching downloads. */
+const EXCHANGE_LIST_LAYERS = LAYER_LIST.filter((layer) => layer.data === "peeringdb-sites").map(
+  (layer) => layer.id
+);
+
+/** What the route has to do with the layers before their code is loaded: nothing. */
+const NO_ROUTE_INFRA: RouteInfra = {
+  exchangeLinks: new Map(),
+  facilityLinks: new Map(),
+  cloudMatches: new Map(),
+  cableGuesses: [],
+  shownProviders: []
+};
+const NO_CLUSTERS: SiteClusters = { exchanges: [], facilities: [], cloudRegions: [] };
+
 /**
- * Loads the data of the infrastructure layers the user shows, the first
- * time each is shown. It runs when the set of needed sources changes (a
- * user action), so a failed load is tried again only when the user turns
- * the layer on again. After a trace, a missing or old PeeringDB list is read
- * again: exchange matching may have downloaded one during the trace.
+ * Loads the data of the infrastructure layers the user shows. Each layer
+ * that is turned on (or shown at start) asks for its source; a source that
+ * failed or had nothing yet is tried again then, so "turn the layer off and
+ * on" works also while another layer with the same source stays on. After a
+ * trace, a missing or old PeeringDB list is read again: exchange matching
+ * may have downloaded one during the trace.
  */
 export function useInfraLoading(): void {
   const saved = useUiStore((state) => state.layers);
-  const needed = useMemo(() => [...sourcesForLayers(layerVisibility(saved))].sort(), [saved]);
-  const neededKey = needed.join(",");
+  const shownKey = useMemo(() => {
+    const visibility = layerVisibility(saved);
+    return LAYER_LIST.filter((layer) => layer.data && layerActive(visibility, layer.id))
+      .map((layer) => layer.id)
+      .join(",");
+  }, [saved]);
+  const shownBefore = useRef<ReadonlySet<string>>(new Set());
   const status = useTracerouteStore((state) => state.status);
 
   useEffect(() => {
+    const shown = new Set(shownKey ? shownKey.split(",") : []);
     const { ensure } = useInfraStore.getState();
-    for (const id of neededKey ? (neededKey.split(",") as InfraSourceId[]) : []) {
-      void ensure(id);
+    for (const layer of LAYER_LIST) {
+      if (layer.data && shown.has(layer.id) && !shownBefore.current.has(layer.id)) {
+        void ensure(layer.data);
+      }
     }
-  }, [neededKey]);
+    shownBefore.current = shown;
+  }, [shownKey]);
 
   useEffect(() => {
-    if (status !== "success" || !neededKey.split(",").includes("peeringdb-sites")) {
+    const shown = shownKey.split(",");
+    if (status !== "success" || !EXCHANGE_LIST_LAYERS.some((id) => shown.includes(id))) {
       return;
     }
     const { sources, reload } = useInfraStore.getState();
@@ -52,7 +68,7 @@ export function useInfraLoading(): void {
     ) {
       void reload("peeringdb-sites");
     }
-  }, [status, neededKey]);
+  }, [status, shownKey]);
 }
 
 function infraInput(sources: InfraSources): InfraInput {
@@ -70,6 +86,7 @@ let lastRoute:
   | undefined;
 
 function memoRouteInfra(
+  { keepUnchanged, routeInfra }: InfraCode,
   hops: HopResolution[],
   saved: Record<string, boolean>,
   sources: InfraSources
@@ -93,7 +110,8 @@ export function useRouteInfra(): RouteInfra {
   const hops = useTracerouteStore((state) => selectCurrentRun(state)?.hops) ?? NO_HOPS;
   const saved = useUiStore((state) => state.layers);
   const sources = useInfraStore((state) => state.sources);
-  return memoRouteInfra(hops, saved, sources);
+  const code = useInfraStore((state) => state.code);
+  return code ? memoRouteInfra(code, hops, saved, sources) : NO_ROUTE_INFRA;
 }
 
 export interface InfraView {
@@ -105,36 +123,46 @@ export interface InfraView {
 /**
  * The infrastructure items of the globe scene at a cluster level. Each
  * step is memoised on its own inputs: clustering runs when the data, the
- * switches, the route or the level change; a hover only restyles markers.
+ * switches, the route or the level change. A hover changes nothing here:
+ * the adapter restyles the hovered marker (`setHoveredSite`).
  */
-export function useInfraScene(level: number, hoveredKey: string | undefined): InfraView {
+export function useInfraScene(level: number): InfraView {
   const saved = useUiStore((state) => state.layers);
   const sources = useInfraStore((state) => state.sources);
+  const code = useInfraStore((state) => state.code);
   const route = useRouteInfra();
   const input = useMemo(() => infraInput(sources), [sources]);
   const visibility = useMemo(() => layerVisibility(saved), [saved]);
   const clusters = useMemo(
-    () => buildSiteClusters(visibility, level, input, route),
-    [visibility, level, input, route]
+    () => code?.buildSiteClusters(visibility, level, input, route) ?? NO_CLUSTERS,
+    [code, visibility, level, input, route]
   );
-  const lines = useMemo(() => (input.cables ? cableLines(input.cables.cables) : []), [input.cables]);
+  const lines = useMemo(
+    () => (code && input.cables ? code.cableLines(input.cables.cables) : []),
+    [code, input.cables]
+  );
   const cables = useMemo(
-    () => (visibility["submarine-cables"] ? cableSpecs(lines, route.cableGuesses) : []),
-    [visibility, lines, route.cableGuesses]
+    () =>
+      code && visibility["submarine-cables"] ? code.cableSpecs(lines, route.cableGuesses) : [],
+    [code, visibility, lines, route.cableGuesses]
   );
   const scene = useMemo(
     () =>
-      clusters.exchanges.length + clusters.facilities.length + clusters.cloudRegions.length > 0 ||
-      cables.length > 0
-        ? infraScene(clusters, cables, hoveredKey)
+      code &&
+      (clusters.exchanges.length + clusters.facilities.length + clusters.cloudRegions.length > 0 ||
+        cables.length > 0)
+        ? code.infraScene(clusters, cables)
         : EMPTY_INFRA_SCENE,
-    [clusters, cables, hoveredKey]
+    [code, clusters, cables]
   );
   const members = useMemo(() => {
     const byKey = new Map<string, { layer: SiteLayer | "cables"; keys: string[] }>();
+    if (!code) {
+      return () => undefined;
+    }
     for (const sites of [clusters.exchanges, clusters.facilities, clusters.cloudRegions]) {
       for (const site of sites) {
-        byKey.set(siteSpecKey(site.layer, site.cluster.key), {
+        byKey.set(code.siteSpecKey(site.layer, site.cluster.key), {
           layer: site.layer,
           keys: site.cluster.members
         });
@@ -151,6 +179,6 @@ export function useInfraScene(level: number, hoveredKey: string | undefined): In
         ? { layer: "cables" as const, keys: [specKey.slice(0, hash)] }
         : undefined;
     };
-  }, [clusters]);
+  }, [code, clusters]);
   return { scene, members };
 }

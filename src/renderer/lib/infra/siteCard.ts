@@ -1,5 +1,5 @@
 import type { SiteLayer } from "../globe";
-import { formatKm as km, regionTitle } from "./cloudMatch";
+import { formatKm as km, regionTitle } from "./format";
 import type { InfraInput, RouteInfra } from "./scene";
 import type { SiteLink } from "./routeLinks";
 
@@ -24,7 +24,6 @@ const place = (city: string | null, country: string | null) =>
 
 const plural = (n: number, one: string, many: string) =>
   `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
-
 
 function linkText(link: SiteLink, what: string): string {
   return link.kind === "on-lan"

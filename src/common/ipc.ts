@@ -313,6 +313,14 @@ export const ONLINE_IMAGERY_LAYER_ID = "online-imagery";
  */
 export const SUBMARINE_CABLES_LAYER_ID = "submarine-cables";
 
+/**
+ * The opt-in satellites layer (the parent of the group switches); also the
+ * id of its notice in `UiPreferences.consents`. Mirrors `SATELLITES_LAYER`
+ * in persistence.rs: the backend downloads a group only while this layer
+ * and the group's switch are on and the notice is accepted.
+ */
+export const SATELLITES_LAYER_ID = "satellites";
+
 export interface AppInfo {
   version: string;
   /** False while tauri.conf.json carries the updater public key placeholder. */

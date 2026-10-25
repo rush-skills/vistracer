@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { HopLocation, HopResolution, TracerouteRun } from "@common/ipc";
 import type { GlobeScene } from "@renderer/lib/globe";
+import type { SatelliteGroupDrawing } from "@renderer/lib/satellites/scene";
 import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
-import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
+import { CLOUD, INFRA_CODE, PEERINGDB } from "@renderer/test/infraFixtures";
+import { VANGUARD_ROW, groupData, starlinkRow } from "@renderer/test/satelliteFixtures";
 import type { GlobeCallbacks, GlobeController } from "../globe/controller";
 import { GlobeViewport, measureInsets } from "../GlobeViewport";
 
@@ -16,6 +18,8 @@ const fake = vi.hoisted(() => ({
     flyTo: vi.fn(),
     setInputEnabled: vi.fn(),
     setImagery: vi.fn(),
+    setHoveredSite: vi.fn(),
+    setSatellites: vi.fn<(groups: readonly SatelliteGroupDrawing[]) => void>(),
     destroy: vi.fn()
   },
   callbacks: undefined as GlobeCallbacks | undefined,
@@ -83,6 +87,7 @@ const runWith = (hops: HopResolution[]): TracerouteRun => ({
 });
 
 const lastScene = () => fake.controller.setScene.mock.calls.at(-1)?.[0];
+const lastSatellites = () => fake.controller.setSatellites.mock.calls.at(-1)?.[0];
 
 describe("GlobeViewport", () => {
   beforeEach(() => {
@@ -96,7 +101,9 @@ describe("GlobeViewport", () => {
     });
     useUiStore.setState({ layers: {} });
     useInfraStore.setState({
+      code: INFRA_CODE,
       sources: {
+        ...useInfraStore.getState().sources,
         "peeringdb-sites": { status: "ready", data: PEERINGDB },
         "cloud-regions": { status: "ready", data: CLOUD },
         "submarine-cables": { status: "idle" }
@@ -218,8 +225,10 @@ describe("GlobeViewport", () => {
     const scene = lastScene();
     expect(scene?.exchanges.length).toBeGreaterThan(0);
     expect(scene?.facilities).toEqual([]);
-    expect(scene?.cloudRegions.some((site) => site.filterKey === "gcp")).toBe(false);
-    expect(scene?.cloudRegions.some((site) => site.filterKey === "aws")).toBe(true);
+    expect(scene?.cloudRegions.some((site) => site.key.startsWith("cloudRegions|gcp:"))).toBe(
+      false
+    );
+    expect(scene?.cloudRegions.some((site) => site.key.startsWith("cloudRegions|aws:"))).toBe(true);
   });
 
   it("clusters again when the adapter reports a new zoom level, and not on a hop hover", async () => {
@@ -240,20 +249,25 @@ describe("GlobeViewport", () => {
     render(<GlobeViewport run={runWith([])} />);
     await waitFor(() => expect(fake.callbacks).toBeDefined());
     act(() => fake.callbacks?.onClusterLevel(10));
-    const frankfurt = lastScene()?.facilities.find((site) => site.members.length > 1);
+    // Far out, the two Frankfurt data centres form one cluster at the larger one.
+    const far = lastScene()?.facilities;
+    const frankfurt = far?.find((site) => site.key === "facilities|fac:58");
     act(() => fake.callbacks?.onHoverSite(frankfurt?.key, { x: 5, y: 6 }));
-    expect(useInfraStore.getState().hoveredSite).toEqual({
+    const hovered = useInfraStore.getState().hoveredSite;
+    expect(hovered).toMatchObject({
       specKey: frankfurt?.key,
       layer: "facilities",
-      keys: frankfurt?.members,
       anchor: { kind: "point", x: 5, y: 6 }
     });
-    // The hovered marker is drawn larger.
-    expect(lastScene()?.facilities.find((site) => site.key === frankfurt?.key)?.pixelSize).toBe(
-      (frankfurt?.pixelSize ?? 0) + 2
-    );
+    expect(hovered?.keys.length).toBeGreaterThan(1);
+    expect(frankfurt?.key).toBe(`facilities|${hovered?.keys[0]}`);
+    // The adapter restyles the hovered marker; the site markers are not rebuilt.
+    expect(fake.controller.setHoveredSite).toHaveBeenLastCalledWith(frankfurt?.key);
+    expect(lastScene()?.facilities).toBe(far);
     act(() => fake.callbacks?.onHoverSite(undefined));
     expect(useInfraStore.getState().hoveredSite).toBeUndefined();
+    expect(fake.controller.setHoveredSite).toHaveBeenLastCalledWith(undefined);
+    expect(lastScene()?.facilities).toBe(far);
   });
 
   it("frames flights in the whole canvas during an export, which records no panels", async () => {
@@ -290,6 +304,7 @@ describe("GlobeViewport", () => {
       rejected: 0
     };
     useInfraStore.setState({
+      code: INFRA_CODE,
       sources: {
         ...useInfraStore.getState().sources,
         "submarine-cables": { status: "ready", data: cableMap }
@@ -313,6 +328,90 @@ describe("GlobeViewport", () => {
   });
 });
 
+describe("GlobeViewport satellites", () => {
+  const starlink = groupData("starlink", [starlinkRow(99902, 10), starlinkRow(99903, 200)]);
+  const gps = groupData("gps", [VANGUARD_ROW]);
+
+  beforeEach(() => {
+    fake.callbacks = undefined;
+    Object.values(fake.controller).forEach((mock) => mock.mockClear());
+    useTracerouteStore.setState({ selectedHopIndex: undefined, hoveredHopIndex: undefined });
+    useUiStore.setState({ layers: {} });
+    useInfraStore.setState({
+      code: INFRA_CODE,
+      sources: {
+        ...useInfraStore.getState().sources,
+        "celestrak-starlink": { status: "ready", data: starlink },
+        "celestrak-gps": { status: "ready", data: gps }
+      },
+      hoveredSite: undefined
+    });
+  });
+
+  it("draws the shown groups, keeps them across hop events, and none while the layer is off", async () => {
+    const run = runWith([located(1, 50.1, 8.7), located(2, 52.4, 4.9)]);
+    const { rerender } = render(<GlobeViewport run={run} />);
+    await waitFor(() => expect(fake.controller.setSatellites).toHaveBeenCalled());
+    // Off by default: nothing to draw, nothing to move.
+    expect(lastSatellites()).toEqual([]);
+
+    act(() => useUiStore.setState({ layers: { satellites: true } }));
+    const drawn = lastSatellites();
+    // Space stations are on too, but have no data yet.
+    expect(drawn?.map((group) => [group.group, group.satellites.length, group.highlighted])).toEqual([
+      ["starlink", 2, false],
+      ["gps", 1, false]
+    ]);
+    const calls = fake.controller.setSatellites.mock.calls.length;
+    act(() => useTracerouteStore.getState().setHoveredHop(1));
+    rerender(<GlobeViewport run={runWith([...run.hops])} />);
+    expect(fake.controller.setSatellites.mock.calls.length).toBe(calls);
+
+    act(() => useUiStore.setState({ layers: { satellites: true, "satellites-gps": false } }));
+    expect(lastSatellites()?.map((group) => group.group)).toEqual(["starlink"]);
+    expect(lastSatellites()?.[0].satellites).toBe(drawn?.[0].satellites);
+    act(() => useUiStore.setState({ layers: { satellites: false } }));
+    expect(lastSatellites()).toEqual([]);
+  });
+
+  it("highlights the constellation of a satellite provider on the route", async () => {
+    useUiStore.setState({ layers: { satellites: true } });
+    const starlinkHop = { ...located(2, 47.6, -122.3), asn: { asn: 14593, name: "SPACEX-STARLINK" } };
+    const run = runWith([located(1, 47.6, -122.3), starlinkHop]);
+    render(<GlobeViewport run={run} />);
+    await waitFor(() => expect(lastSatellites()?.length).toBe(2));
+    expect(lastSatellites()?.map((group) => group.highlighted)).toEqual([false, false]);
+    const plain = lastSatellites()?.[0].satellites;
+
+    // The route lives in the trace store, as during a trace.
+    act(() => useTracerouteStore.setState({ runs: { r1: run }, currentRunId: "r1" }));
+    expect(lastSatellites()?.map((group) => [group.group, group.highlighted])).toEqual([
+      ["starlink", true],
+      ["gps", false]
+    ]);
+    // Only the style changed: the adapter keeps the points and SGP4 records.
+    expect(lastSatellites()?.[0].satellites).toBe(plain);
+    act(() => useTracerouteStore.setState({ runs: {}, currentRunId: undefined }));
+  });
+
+  it("puts a hovered satellite in the store with its height, for the hover card", async () => {
+    useUiStore.setState({ layers: { satellites: true } });
+    render(<GlobeViewport run={runWith([])} />);
+    await waitFor(() => expect(fake.callbacks).toBeDefined());
+    act(() => fake.callbacks?.onHoverSite("sat|starlink|99902", { x: 5, y: 6 }, 548.4));
+    expect(useInfraStore.getState().hoveredSite).toEqual({
+      specKey: "sat|starlink|99902",
+      layer: "satellites",
+      keys: ["sat|starlink|99902"],
+      heightKm: 548.4,
+      anchor: { kind: "point", x: 5, y: 6 }
+    });
+    expect(fake.controller.setHoveredSite).toHaveBeenLastCalledWith("sat|starlink|99902");
+    act(() => fake.callbacks?.onHoverSite(undefined));
+    expect(useInfraStore.getState().hoveredSite).toBeUndefined();
+  });
+});
+
 describe("measureInsets", () => {
   it("measures how far the marked panels reach into the canvas from each edge", () => {
     const rect = (left: number, top: number, width: number, height: number) =>
@@ -331,10 +430,12 @@ describe("measureInsets", () => {
       panel("bottom", rect(12, 440, 500, 120)),
       panel("bottom", rect(12, 572, 600, 56)),
       panel("top", rect(12, 12, 420, 68)),
+      // The network legend, on the left above the timeline.
+      panel("left", rect(12, 200, 300, 180)),
       // A hidden panel has no size and covers nothing.
       panel("right", rect(0, 0, 0, 0))
     ];
-    expect(measureInsets(canvas)).toEqual({ top: 80, right: 348, bottom: 200, left: 0 });
+    expect(measureInsets(canvas)).toEqual({ top: 80, right: 348, bottom: 200, left: 312 });
     panels.forEach((element) => element.remove());
   });
 });

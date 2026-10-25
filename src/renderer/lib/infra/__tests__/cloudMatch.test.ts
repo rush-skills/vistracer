@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HopResolution, LocationEstimate } from "@common/ipc";
-import { formatKm, matchCloudRegion, matchCloudRegions } from "@renderer/lib/infra/cloudMatch";
+import { matchCloudRegion, matchCloudRegions } from "@renderer/lib/infra/cloudMatch";
+import { formatKm } from "@renderer/lib/infra/format";
 import { shownCloud } from "@renderer/lib/infra/scene";
 import { layerVisibility } from "@renderer/lib/layers";
 import { estimate, makeHop } from "@renderer/test/fixtures";
@@ -70,6 +71,14 @@ describe("matchCloudRegion", () => {
     // GeoLite2 country centroid of Germany, ±1,000 km.
     const result = match(at(16509, estimate("Germany", 51, 10, "low", "geolite-country", 1000)));
     expect(result?.confidence).toBe("medium");
+    // Far from every region, a vague estimate is not called an edge site:
+    // the US country centroid (±2,000 km) is about 1,700 km from Ashburn.
+    const us = match(
+      at(16509, estimate("United States", 39.5, -98.35, "low", "geolite-country", 2000))
+    );
+    expect(us?.confidence).toBe("low");
+    expect(us?.reason).not.toContain("edge site");
+    expect(us?.reason).toContain("(±2,000 km) is too vague to place it at a region");
   });
 
   it("is low with no region for an anycast or unlocated hop of the provider", () => {

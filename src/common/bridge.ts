@@ -45,6 +45,13 @@ export interface RendererApi {
    * its notice is accepted). Untyped: parse with `parseSubmarineCables`.
    */
   getSubmarineCables: () => Promise<unknown>;
+  /**
+   * The orbital elements of one satellite group (CelesTrak `GROUP` name) of
+   * the opt-in satellites layer; downloads only while the layer and the
+   * group are on and the notice is accepted, and at most as often as
+   * CelesTrak allows. Untyped: parse with `parseSatelliteGroup`.
+   */
+  getSatellites: (group: string) => Promise<unknown>;
 }
 
 export interface VisTracerWindow extends Window {
@@ -124,7 +131,9 @@ function createTauriApi(): RendererApi {
 
     getPeeringDbSites: () => invoke<unknown>("get_peeringdb_sites"),
 
-    getSubmarineCables: () => invoke<unknown>("get_submarine_cables")
+    getSubmarineCables: () => invoke<unknown>("get_submarine_cables"),
+
+    getSatellites: (group) => invoke<unknown>("get_satellites", { group })
   };
 }
 

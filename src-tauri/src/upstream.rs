@@ -14,8 +14,23 @@ pub struct Fetched {
     pub body: Vec<u8>,
 }
 
+/// A download that failed. `sent` is false only when no request can have
+/// reached the host (the client could not be built, or the connection
+/// failed), so the attempt cannot count against the host's limits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchError {
+    pub message: String,
+    pub sent: bool,
+}
+
+impl From<FetchError> for String {
+    fn from(error: FetchError) -> Self {
+        error.message
+    }
+}
+
 pub trait Fetcher: Send + Sync + 'static {
-    fn fetch(&self, url: reqwest::Url) -> impl Future<Output = Result<Fetched, String>> + Send;
+    fn fetch(&self, url: reqwest::Url) -> impl Future<Output = Result<Fetched, FetchError>> + Send;
 }
 
 /// HTTPS on the default port, no credentials, and a host in `hosts`.
@@ -70,9 +85,21 @@ impl HttpFetcher {
 }
 
 impl Fetcher for HttpFetcher {
-    async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, String> {
-        let client = self.client.as_ref().map_err(Clone::clone)?;
-        let mut response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    async fn fetch(&self, url: reqwest::Url) -> Result<Fetched, FetchError> {
+        let client = self.client.as_ref().map_err(|message| FetchError {
+            message: message.clone(),
+            sent: false,
+        })?;
+        let mut response = client.get(url).send().await.map_err(|e| FetchError {
+            message: e.to_string(),
+            // A timeout or a broken answer may have reached the host.
+            sent: !e.is_connect(),
+        })?;
+        // From here on the host answered: every failure counts as a request.
+        let answered = |message: String| FetchError {
+            message,
+            sent: true,
+        };
         let status = response.status().as_u16();
         let content_type = response
             .headers()
@@ -80,9 +107,16 @@ impl Fetcher for HttpFetcher {
             .and_then(|value| value.to_str().ok())
             .map(str::to_string);
         let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| answered(e.to_string()))?
+        {
             if body.len() + chunk.len() > self.max_bytes {
-                return Err(format!("response larger than {} bytes", self.max_bytes));
+                return Err(answered(format!(
+                    "response larger than {} bytes",
+                    self.max_bytes
+                )));
             }
             body.extend_from_slice(&chunk);
         }

@@ -31,6 +31,8 @@ All notable changes to VisTracer will be documented in this file.
 - Credits button on the globe with every data source, including the NASA GIBS and MaxMind GeoLite2 acknowledgements
 - Infrastructure layers, all off by default: internet exchanges and data centres from the PeeringDB list exchange matching already downloads (sites on the route stand out; clustered at every zoom), cloud regions of AWS, Google Cloud and Azure and Cloudflare data centres (bundled, with a switch per provider and a "likely inside a region" match per hop with its confidence), network colours (one colour-blind-safe colour per ASN, with a legend), and opt-in submarine cables from TeleGeography (CC BY-NC-SA 3.0; a notice names the licence and the host before the first download, and guessed cables are labelled as a guess)
 - Hover cards for exchange, data centre, cloud region and cable markers
+- Opt-in satellites layer: Starlink, OneWeb, GPS, space station and geostationary satellites where they are now, from CelesTrak's orbital elements with SGP4 (satellite.js), moved once a second and paused while the window is hidden. A notice names celestrak.org before the first download; each group is downloaded at most once in 2 hours and kept for 12 hours, and requests stop for 2 hours after an error, as CelesTrak's usage policy asks. Hover cards for satellites (name, NORAD number, altitude, age of the elements)
+- Hops in the network of a satellite internet provider (Starlink, OneWeb, Viasat, HughesNet, Eutelsat Skylogic) are marked as a likely satellite link (or a possible one, with low confidence) with the reason, and the constellation of a likely link is highlighted while it is shown
 
 ### Changed
 
@@ -42,10 +44,20 @@ All notable changes to VisTracer will be documented in this file.
 - The app bundle shrank from 55 MB to 23 MB (macOS): the 10k textures and README media are no longer shipped
 - Camera flights frame the hop in the part of the globe that the panels leave free
 - The PeeringDB exchange list download includes facility names, operators, places and member counts (no extra request)
+- The infrastructure layer code loads with the first layer data, not at start-up (start-up bundle 14 KB smaller)
+- The command bar offers "Show AWS regions" (and other switches under a hidden layer) as "Show", with the parent layer, instead of "Hide"
+- Hovering a site marker restyles that marker instead of rebuilding every site marker
+- The credits chip names each opt-in data source while its layer is on
 
 ### Fixed
 
 - Online imagery no longer loads at start-up before you move the camera (very wide windows could refine the start view past the bundled levels)
+- Turning an exchange or data centre layer off and on again reads the exchange list again, also when it was not there yet or the other layer stayed on
+- Flight framing and marker clustering use the right field of view in windows taller than wide, and framed hops no longer land under the network legend
+- A cloud match far from every region no longer suggests an edge site when the hop's location is too vague; Google's YouTube networks no longer count as Google Cloud
+- A layer notice accepted while the saved settings were still loading is saved before the layer's data is requested
+- Screen readers no longer meet a hidden "Data attribution" dialog (from the globe engine) with a focusable close button below the globe
+- The cable notice says that TeleGeography published the map under CC BY-NC-SA 3.0, and that its current terms can be different
 - Arrow keys, Home and End no longer scroll the hop timeline while an animated export records
 - A second export started within 3.5 s of the previous one is no longer shown as finished while it still runs
 - Team Cymru lookups could never connect, PeeringDB sent the API key in the wrong header, and RIPEstat/PeeringDB fields that do not exist were read

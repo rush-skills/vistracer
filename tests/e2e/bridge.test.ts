@@ -373,6 +373,17 @@ describe("Tauri Bridge Layer", () => {
       await expect(api.getSubmarineCables()).rejects.toContain("Nothing was downloaded");
       expect(mockInvoke).toHaveBeenCalledWith("get_submarine_cables");
     });
+
+    it("asks for one satellite group by its CelesTrak name and passes the refusal on", async () => {
+      const group = { group: "starlink", fetchedAt: 1, source: "x", note: null, satellites: [] };
+      mockInvoke.mockResolvedValueOnce(group);
+      await expect(api.getSatellites("starlink")).resolves.toEqual(group);
+      expect(mockInvoke).toHaveBeenCalledWith("get_satellites", { group: "starlink" });
+      mockInvoke.mockRejectedValueOnce(
+        "Satellites are off: turn the layer and the group on in Layers and accept the notice. Nothing was downloaded."
+      );
+      await expect(api.getSatellites("geo")).rejects.toContain("Nothing was downloaded");
+    });
   });
 
   describe("exportSnapshot", () => {

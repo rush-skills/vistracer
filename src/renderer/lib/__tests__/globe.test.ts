@@ -13,6 +13,7 @@ import {
   circlePositions,
   flyHeight,
   framedTarget,
+  kmPerPixel,
   greatCircleKm,
   hopIndexToColor,
   latencyToColor,
@@ -543,6 +544,20 @@ describe("flights frame the hop in the area the panels leave free", () => {
     // centre of the free area.
     const expectedKm = Math.hypot(174, 60) * kmPerPx(2_000_000);
     expect(greatCircleKm(FRANKFURT, target)).toBeCloseTo(expectedKm, 0);
+  });
+
+  it("uses the height for the field of view in a window taller than wide", () => {
+    // Cesium's fov spans the larger side: in a 640 × 960 portrait window a
+    // pixel covers 2h tan(30°) / 960, not / 640.
+    const portrait = {
+      insets: { top: 0, right: 200, bottom: 0, left: 0 },
+      widthPx: 640,
+      heightPx: 960,
+      fovRad: Math.PI / 3
+    };
+    const target = framedTarget(FRANKFURT, 2_000_000, portrait);
+    expect(greatCircleKm(FRANKFURT, target)).toBeCloseTo(100 * kmPerPx(2_000_000), 0);
+    expect(kmPerPixel(2_000_000, Math.PI / 3, 960)).toBeCloseTo(kmPerPx(2_000_000), 9);
   });
 
   it("keeps the hop centred with no panels, or when the free area is too small", () => {

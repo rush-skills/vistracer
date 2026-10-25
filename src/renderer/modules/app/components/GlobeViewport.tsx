@@ -16,7 +16,9 @@ import {
   styleForLayers
 } from "@renderer/lib/layers";
 import { useInfraScene } from "@renderer/hooks/useInfra";
+import { useSatelliteDrawing } from "@renderer/hooks/useSatellites";
 import { useInfraStore } from "@renderer/state/infraStore";
+import { useNoticeStore } from "@renderer/state/noticeStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
 import type { GlobeController } from "./globe/controller";
@@ -35,8 +37,8 @@ export const GLOBE_INSET = "data-globe-inset";
 
 /**
  * Pixels of each canvas edge that the panels marked with GLOBE_INSET cover
- * ("top", "right", "bottom"). Collapsed panels are small, so they cost
- * little; a hidden panel has no size.
+ * ("top", "right", "bottom", "left"). Collapsed panels are small, so they
+ * cost little; a hidden panel has no size.
  */
 export function measureInsets(canvas: HTMLElement): ViewInsets {
   const box = canvas.getBoundingClientRect();
@@ -53,6 +55,8 @@ export function measureInsets(canvas: HTMLElement): ViewInsets {
       insets.bottom = Math.max(insets.bottom, box.bottom - rect.top);
     } else if (edge === "top") {
       insets.top = Math.max(insets.top, rect.bottom - box.top);
+    } else if (edge === "left") {
+      insets.left = Math.max(insets.left, rect.right - box.left);
     }
   }
   return insets;
@@ -70,7 +74,8 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
   const trackerRef = useRef<CameraTracker>(INITIAL_CAMERA_TRACKER);
   const [clusterLevel, setClusterLevel] = useState(MAX_CLUSTER_LEVEL);
   const hoveredSiteKey = useInfraStore((state) => state.hoveredSite?.specKey);
-  const infra = useInfraScene(clusterLevel, hoveredSiteKey);
+  const infra = useInfraScene(clusterLevel);
+  const satellites = useSatelliteDrawing();
   // The adapter's callbacks are made once; they read the latest clusters here.
   const membersRef = useRef(infra.members);
   membersRef.current = infra.members;
@@ -94,8 +99,13 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
           onSelectHop: selectHopByUser,
           onHoverHop: (hopIndex, at) =>
             setHoveredHop(hopIndex, at && { kind: "point", x: at.x, y: at.y }),
-          onHoverSite: (key, at) => {
-            const site = key ? membersRef.current(key) : undefined;
+          onHoverSite: (key, at, heightKm) => {
+            // Satellite keys are "sat|<group>|<NORAD id>" (lib/infra/sources.ts).
+            const site = key?.startsWith("sat|")
+              ? { layer: "satellites" as const, keys: [key], heightKm }
+              : key
+                ? membersRef.current(key)
+                : undefined;
             useInfraStore
               .getState()
               .setHoveredSite(
@@ -104,6 +114,10 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
                   : undefined
               );
           },
+          onSatelliteError: (message) =>
+            useNoticeStore
+              .getState()
+              .show(`The satellites could not be drawn: ${message}`, "error"),
           onClusterLevel: setClusterLevel,
           onImageryError: () => {
             setImageryNotice(true);
@@ -146,6 +160,14 @@ export const GlobeViewport: React.FC<GlobeViewportProps> = ({ run, selectedHopIn
   useEffect(() => {
     controller?.setImagery(imagery);
   }, [controller, imagery]);
+
+  useEffect(() => {
+    controller?.setHoveredSite(hoveredSiteKey);
+  }, [controller, hoveredSiteKey]);
+
+  useEffect(() => {
+    controller?.setSatellites(satellites);
+  }, [controller, satellites]);
 
   useEffect(() => {
     if (!controller) {

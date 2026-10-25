@@ -1,6 +1,11 @@
-import { ONLINE_IMAGERY_LAYER_ID, SUBMARINE_CABLES_LAYER_ID } from "@common/ipc";
+import {
+  ONLINE_IMAGERY_LAYER_ID,
+  SATELLITES_LAYER_ID,
+  SUBMARINE_CABLES_LAYER_ID
+} from "@common/ipc";
 import type { GlobeScene } from "./globe";
 import type { InfraSourceId } from "./infra/sources";
+import { SATELLITE_GROUPS, type SatelliteGroupId } from "./satellites/groups";
 
 /**
  * The globe layers the user can show or hide. The layer panel, the command
@@ -8,12 +13,13 @@ import type { InfraSourceId } from "./infra/sources";
  * the code that draws it, with no change to the panel.
  */
 
-export type LayerGroupId = "route" | "infrastructure" | "cloud" | "globe";
+export type LayerGroupId = "route" | "infrastructure" | "cloud" | "space" | "globe";
 
 export const LAYER_GROUPS: ReadonlyArray<{ id: LayerGroupId; label: string }> = [
   { id: "route", label: "Route" },
   { id: "infrastructure", label: "Infrastructure" },
   { id: "cloud", label: "Cloud" },
+  { id: "space", label: "Space" },
   { id: "globe", label: "Globe" }
 ];
 
@@ -31,19 +37,21 @@ export interface SceneStyle {
   asnColors: boolean;
 }
 
-/** Scene items whose entries carry a `filterKey` (lib/globe.ts SiteSpec). */
+/** Scene items that a filter switch thins before clustering (`hiddenFilterKeys`). */
 export type FilterableItems = "cloudRegions";
 
 /**
  * What a layer switch changes: items of the scene, a part of those items
  * (by their filter key, applied before clustering), a style of the route,
- * or an imagery option.
+ * an imagery option, or the satellites the globe moves (all of them, or one
+ * group; lib/satellites/).
  */
 export type LayerTarget =
   | { readonly kind: "scene"; readonly items: keyof GlobeScene }
   | { readonly kind: "filter"; readonly items: FilterableItems; readonly key: string }
   | { readonly kind: "style"; readonly option: keyof SceneStyle }
-  | { readonly kind: "imagery"; readonly option: keyof ImageryOptions };
+  | { readonly kind: "imagery"; readonly option: keyof ImageryOptions }
+  | { readonly kind: "satellites"; readonly group?: SatelliteGroupId };
 
 /**
  * A notice the user must accept before a layer is shown the first time:
@@ -56,8 +64,9 @@ export interface LayerConsent {
   readonly accept: string;
 }
 
-export interface LayerDefinition {
-  readonly id: string;
+/** `Id`: the registry's ids, so a link to another entry is checked (see `defineLayers`). */
+export interface LayerDefinition<Id extends string = string> {
+  readonly id: Id;
   readonly label: string;
   readonly description: string;
   readonly group: LayerGroupId;
@@ -66,7 +75,7 @@ export interface LayerDefinition {
   /** In the command bar ("Show …"); default: the label in lower case. */
   readonly commandName?: string;
   /** A switch under another layer: it only has an effect while that one is on. */
-  readonly parent?: string;
+  readonly parent?: Id;
   /** Data the layer loads (lib/infra/sources.ts) when it is first shown. */
   readonly data?: InfraSourceId;
   readonly consent?: LayerConsent;
@@ -87,14 +96,44 @@ export const SITE_COLORS = {
 export const SUBMARINE_CABLE_CONSENT: LayerConsent = {
   title: "Show submarine cables?",
   paragraphs: [
-    "The cable routes come from TeleGeography's Submarine Cable Map. TeleGeography publishes it under the Creative Commons licence CC BY-NC-SA 3.0: for non-commercial use only, with attribution to TeleGeography, and adaptations under the same licence. The credits list TeleGeography while the layer is on.",
+    "The cable routes come from TeleGeography's Submarine Cable Map. TeleGeography published the map under the Creative Commons licence CC BY-NC-SA 3.0, and VisTracer applies those terms: non-commercial use only, with attribution to TeleGeography, and adaptations under the same licence. TeleGeography's current terms can be different. The credits list TeleGeography while the layer is on.",
     "Turning the layer on downloads the cable map (about 0.75 MB) from TeleGeography's server, www.submarinecablemap.com. The request shows TeleGeography your IP address and nothing about your traces. VisTracer keeps a copy in its cache folder and asks again at most once a week, only while the layer is on.",
     "While the layer is off, VisTracer sends nothing to TeleGeography."
   ],
   accept: "Show and download"
 };
 
-export const LAYERS = [
+/**
+ * Keeps the entries' literal types, and makes a `parent` that is not the id
+ * of an entry a type error.
+ */
+function defineLayers<const L extends readonly LayerDefinition<Extract<L[number]["id"], string>>[]>(
+  layers: L
+): L {
+  return layers;
+}
+
+export const SATELLITE_CONSENT: LayerConsent = {
+  title: "Show satellites?",
+  paragraphs: [
+    "VisTracer computes where satellites are now from their orbital elements (GP data), with the SGP4 model. CelesTrak (celestrak.org) provides the elements free of charge under its usage policy; they come from the US Space Force's 18th Space Defense Squadron. The credits list CelesTrak while the layer is on.",
+    "Turning the layer on downloads the elements of each group you show from celestrak.org (Starlink, GPS and space stations at first; the Starlink group is about 1.7 MB). The requests show CelesTrak your IP address and nothing about your traces. VisTracer keeps a copy for 12 hours, asks for a group at most once in 2 hours, and stops asking for 2 hours after an error, as CelesTrak's usage policy asks.",
+    "While the layer is off, VisTracer sends nothing to CelesTrak. A position is an estimate: within a few kilometres near the date of its elements, and it drifts by kilometres a day after it. The hover card shows how old the elements are."
+  ],
+  accept: "Show and download"
+};
+
+/** The fields every satellite group switch shares. */
+const satelliteGroup = <G extends SatelliteGroupId>(group: G) =>
+  ({
+    group: "space",
+    parent: SATELLITES_LAYER_ID,
+    target: { kind: "satellites", group },
+    data: `celestrak-${group}`,
+    swatch: { fill: SATELLITE_GROUPS[group].color, outline: SATELLITE_GROUPS[group].color }
+  }) as const;
+
+export const LAYERS = defineLayers([
   {
     id: "arcs",
     label: "Route arcs",
@@ -232,6 +271,57 @@ export const LAYERS = [
     swatch: SITE_COLORS.cloudflare
   },
   {
+    id: SATELLITES_LAYER_ID,
+    label: "Satellites",
+    description:
+      "Satellites of the groups below where they are now, moved once a second (SGP4 from CelesTrak data). Opt-in: downloads from celestrak.org.",
+    group: "space",
+    defaultVisible: false,
+    target: { kind: "satellites" },
+    consent: SATELLITE_CONSENT
+  },
+  {
+    id: "satellites-starlink",
+    label: "Starlink",
+    commandName: "Starlink satellites",
+    description: "SpaceX's internet constellation in low Earth orbit, about 11,000 satellites.",
+    defaultVisible: true,
+    ...satelliteGroup("starlink")
+  },
+  {
+    id: "satellites-oneweb",
+    label: "OneWeb",
+    commandName: "OneWeb satellites",
+    description: "Eutelsat's OneWeb internet constellation in low Earth orbit.",
+    defaultVisible: false,
+    ...satelliteGroup("oneweb")
+  },
+  {
+    id: "satellites-gps",
+    label: "GPS",
+    commandName: "GPS satellites",
+    description: "The operational GPS navigation satellites, about 20,000 km up.",
+    defaultVisible: true,
+    ...satelliteGroup("gps")
+  },
+  {
+    id: "satellites-stations",
+    label: "Space stations",
+    commandName: "space stations",
+    description: "The ISS and China's Tiangong station, their modules, the vehicles docked to them and objects near them.",
+    defaultVisible: true,
+    ...satelliteGroup("stations")
+  },
+  {
+    id: "satellites-geo",
+    label: "Geostationary",
+    commandName: "geostationary satellites",
+    description:
+      "Active satellites in geostationary orbit, 35,786 km above the equator (communications, weather, satellite internet).",
+    defaultVisible: false,
+    ...satelliteGroup("geo")
+  },
+  {
     id: "day-night",
     label: "Day and night",
     description: "Sunlight for the current time, city lights on the dark side.",
@@ -248,14 +338,16 @@ export const LAYERS = [
     defaultVisible: true,
     target: { kind: "imagery", option: "online" }
   }
-] as const satisfies readonly LayerDefinition[];
+]);
 
 export type LayerId = (typeof LAYERS)[number]["id"];
 export type LayerVisibility = Record<LayerId, boolean>;
 
-/** The registry entry of `id`, typed as the general definition. */
-export function layerById(id: string): LayerDefinition | undefined {
-  return (LAYERS as readonly LayerDefinition[]).find((layer) => layer.id === id);
+/** The registry with each entry typed as the general definition, ids as `LayerId`. */
+export const LAYER_LIST: readonly LayerDefinition<LayerId>[] = LAYERS;
+
+export function layerById(id: LayerId): LayerDefinition<LayerId> | undefined {
+  return LAYER_LIST.find((layer) => layer.id === id);
 }
 
 /** Saved switches over the registry defaults; unknown saved ids are ignored. */
@@ -267,27 +359,16 @@ export function layerVisibility(saved: Readonly<Record<string, boolean>>): Layer
 
 /** On, and (for a child switch) its parent on too. */
 export function layerActive(visibility: LayerVisibility, id: LayerId): boolean {
-  const parent = layerById(id)?.parent as LayerId | undefined;
+  const parent = layerById(id)?.parent;
   return visibility[id] && (parent == null || visibility[parent]);
-}
-
-/** The data sources that the shown layers need. */
-export function sourcesForLayers(visibility: LayerVisibility): Set<InfraSourceId> {
-  const sources = new Set<InfraSourceId>();
-  for (const layer of LAYERS as readonly LayerDefinition[]) {
-    if (layer.data && layerActive(visibility, layer.id as LayerId)) {
-      sources.add(layer.data);
-    }
-  }
-  return sources;
 }
 
 /** Filter keys switched off for `items` (applied before clustering). */
 export function hiddenFilterKeys(visibility: LayerVisibility, items: FilterableItems): Set<string> {
   const hidden = new Set<string>();
-  for (const layer of LAYERS as readonly LayerDefinition[]) {
+  for (const layer of LAYER_LIST) {
     const { target } = layer;
-    if (target.kind === "filter" && target.items === items && !visibility[layer.id as LayerId]) {
+    if (target.kind === "filter" && target.items === items && !visibility[layer.id]) {
       hidden.add(target.key);
     }
   }
@@ -308,6 +389,18 @@ export function sceneForLayers(scene: GlobeScene, visibility: LayerVisibility): 
     }
   }
   return shown;
+}
+
+/** The satellite groups the globe shows: their switch and the satellites layer are on. */
+export function satelliteGroupsForLayers(visibility: LayerVisibility): SatelliteGroupId[] {
+  const groups: SatelliteGroupId[] = [];
+  for (const layer of LAYER_LIST) {
+    const { target } = layer;
+    if (target.kind === "satellites" && target.group && layerActive(visibility, layer.id)) {
+      groups.push(target.group);
+    }
+  }
+  return groups;
 }
 
 export function styleForLayers(visibility: LayerVisibility): SceneStyle {

@@ -422,10 +422,12 @@ would not fit (`flyHeight`). With `prefers-reduced-motion` the camera jumps.
 
 Flights frame the hop in the area the panels leave free. Panels mark the
 edge they cover with `data-globe-inset` (trace panel: top; hop pane:
-right; timeline and status bar: bottom), and `measureInsets` in
-`GlobeViewport.tsx` measures them when a flight starts. `planFlight` then
-moves the camera target by half the covered pixels times the ground size
-of a pixel at the centre (`framedTarget`), so the hop shows at the centre
+right; timeline and status bar: bottom; network legend: left), and
+`measureInsets` in `GlobeViewport.tsx` measures them when a flight starts.
+`planFlight` then moves the camera target by half the covered pixels times
+the ground size of a pixel at the centre (`framedTarget`, `kmPerPixel`;
+Cesium's `fov` spans the larger side of the canvas, the height in a window
+taller than wide), so the hop shows at the centre
 of the free area, and the ring must fit the free area. That is exact near
 the ground and an estimate far out, where the Earth curves away. A free
 area under 30 % of the canvas is ignored. The flight floor (below) does
@@ -495,6 +497,9 @@ loop that asks Cesium for those frames:
   (tile loads, worker results). It sleeps after 20 ticks that drew nothing.
   While tiles load, Cesium draws every tick, so the loop stays awake until
   they are in.
+- A periodic update that needs one frame (the satellites, at most once a
+  second) uses `wakeForFrame()`: the loop sleeps right after the tick that
+  draws, unless another wake came meanwhile.
 - At most 60 ticks per second; 30 on battery where the webview reports it
   (`navigator.getBattery`, Chromium only).
 - No ticks while the page is hidden (Page Visibility) or the window is
@@ -504,17 +509,21 @@ loop that asks Cesium for those frames:
   fog, FXAA, HDR, shadows, order-independent translucency. The canvas uses
   the screen's pixel density up to 2x, and MSAA only below 1.5x.
 
-An idle globe therefore runs no animation frames at all.
+An idle globe therefore runs no animation frames at all; with the
+satellites on, one per second.
 
 `scripts/globe-check/check.mjs` checks this on the production build in
 headless Chrome, with the app's CSP and a fake Tauri IPC
-(`scripts/globe-check/mock-ipc.js`, two fixture traces and synthetic
-infrastructure data; the browser harness is `browser.mjs`). It counts
-animation frames, WebGL draws, compositor frames (from a Chrome trace),
-online tile requests and the infrastructure layers' IPC calls and file
-requests, and exits 1 when a check fails. It needs a local Chrome (`CHROME=...`), so it is not
-part of CI. `ui-shots.mjs` uses the same harness to take screenshots of
-every UI state (dark, light, 960 x 640) for review; it checks nothing.
+(`scripts/globe-check/mock-ipc.js`, three fixture traces and synthetic
+infrastructure and satellite data; the browser harness is `browser.mjs`).
+It counts animation frames, frames that drew, WebGL draws, compositor
+frames (from a Chrome trace), online tile requests, the layers' IPC calls
+and file requests, and controls with no accessible name (Chrome's
+accessibility tree), and exits 1 when a check fails. It needs a local
+Chrome (`CHROME=...`), so it is not part of CI. `ui-shots.mjs` uses the
+same harness to take screenshots of every UI state (dark, light,
+960 x 640, and reduced motion and transparency) for review; it checks
+nothing.
 
 ```bash
 npm run build
@@ -522,11 +531,16 @@ node scripts/globe-check/check.mjs [output dir]
 node scripts/globe-check/ui-shots.mjs [output dir]
 ```
 
-Result of one run on 2026-10-25, after the phase 5 infrastructure layers
-(36 checks pass). The request counts of user zooms differ from run to run:
-the first user zoom made between 49 and 89 requests and the next user zoom
-between 103 and 240 in the runs of phases 4 and 5. Every count that must be
-0 was 0 in every run.
+Result of the runs on 2026-10-25 and 26, after the phase 6 satellites
+(50 checks pass). The request counts of user zooms differ from run to run
+(for example, the first user zoom made 49 to 89 requests and the next one
+103 to 254 in the runs of phases 4 and 5); the checks only need more than 0.
+Every count that must be 0 was 0 in every run.
+
+Each idle window starts only after the "Detailed imagery is unavailable"
+notice is gone, up to 35 s after the last action (see below). So the check
+finds continuous idle work, but not a short animation that stops within
+that time after an action.
 
 - A 7680 x 2160 window at DPR 1 made 0 online tile requests in 12 s with no
   input. Control: with the gate starting open, the same step made 161.
@@ -557,6 +571,17 @@ between 103 and 240 in the runs of phases 4 and 5. Every count that must be
   consent, still 1 after the layer was off, the camera moved and the layer
   was on again; an idle window with the cables on drew nothing; 0 requests
   to TeleGeography's host (the renderer never contacts it).
+- Satellites: with them off for the whole session up to this point, 0
+  `get_satellites` calls, 0 requests for the SGP4 chunk and 0 to
+  celestrak.org. The notice names celestrak.org and the 2 hour limit; 0
+  calls after Cancel, 3 after consent (the default groups), the SGP4 chunk
+  once. With them on: 10 frames drawn and 10 animation frames in 10 s, 0
+  online tiles; page hidden: 0 frames in 5 s; off again: an idle window
+  with 0 frames and paints; off and on: still 3 calls.
+- Screen readers: no dialog in the page before one is opened (Cesium's
+  credit lightbox was one, see Security), and every control has an
+  accessible name at start and with a trace, the layer panel and the hop
+  details.
 
 Control runs, each with one fix removed: without the floor and the hidden
 layer, the three app moves made 166, 99 and 42 requests; with the online
@@ -709,7 +734,9 @@ flowchart LR
   default and a bad entry is dropped, so the other choices, including
   "Online imagery: off", stay; the rest of `settings.json` is never dropped.
   Choices made while the file loads win, and writes are queued so the last
-  one carries the latest state. When the saved choices cannot be read, the
+  one carries the latest state. `whenSaved()` also waits for a read in
+  flight, so a notice accepted during start-up is written before the
+  backend is asked for the layer's data. When the saved choices cannot be read, the
   app uses the defaults, says so, and writes nothing for the rest of the
   session, so it never replaces the saved choices with defaults.
 - **Design tokens** (`styles/tokens.css`): colours, radii, blur, spacing,
@@ -734,6 +761,8 @@ bar and the globe only read it.
 | Internet exchanges, data centres, submarine cables | Infrastructure | `scene` items `exchanges`, `facilities`, `cables` | off |
 | Cloud regions | Cloud | `scene` item `cloudRegions` | off |
 | AWS, Google Cloud, Azure, Cloudflare | Cloud (under Cloud regions) | `filter`: hides one provider before clustering (`hiddenFilterKeys`) | on |
+| Satellites | Space | `satellites`: the adapter's satellite groups (`setSatellites`), see [Satellites](#satellites) | off, with a notice |
+| Starlink, GPS, space stations; OneWeb, geostationary | Space (under Satellites) | `satellites` with a group: `satelliteGroupsForLayers` | on; off |
 | Day and night | Globe | `imagery`: `setImagery({ dayNight })`, no lighting from the clock, no night layer | on |
 | Online imagery | Globe | `imagery`: `setImagery({ online })`, see below | on |
 
@@ -741,8 +770,11 @@ An entry can also have:
 
 - `parent`: a child switch, shown indented, with an effect only while the
   parent is on. Showing a child from the command bar shows the parent too.
+  `defineLayers` types it: a parent that is not a registry id fails the
+  typecheck.
 - `data`: the source the layer loads when it is first shown
-  (`peeringdb-sites`, `cloud-regions`, `submarine-cables`). The panel shows
+  (`peeringdb-sites`, `cloud-regions`, `submarine-cables`,
+  `celestrak-<group>`). The panel shows
   that source's state under the switch (loading, nothing yet and why, a
   failure, or a note).
 - `consent`: a notice the user must accept before the layer is shown the
@@ -790,8 +822,9 @@ the reason and does nothing. No trace starts during an export (from the bar
 or the trace panel): a new run would end the export's camera lock. The
 toolbar buttons and the footer's Export route button run the same commands
 by id. Layer commands use the registry's `commandName` ("Show AWS
-regions"); showing a child switch shows its parent too, and showing a layer
-with a notice opens the notice first.
+regions"). A child switch reads "Show" while it shows nothing (its parent
+is off), with "Also shows cloud regions", and the command turns on only
+what is off; showing a layer with a notice opens the notice first.
 
 Search: every word of the query must match, and the scores add up. A word
 as one piece of the text scores highest (more at a word start), else its
@@ -836,10 +869,12 @@ sources in `lib/attribution.ts`, consistent with
 acknowledgements that NASA GIBS and MaxMind GeoLite2 ask for. GIBS served
 the bundled tiles too, so its credit and acknowledgement always show; while
 online imagery is off, its entry adds "Online tiles: off". A credit with a
-`layer` shows only while that layer is on: TeleGeography's, with its
-licence and notice, while the submarine cables are on, and the chip then
-reads "NASA, GIBS, CesiumJS, TeleGeography". Sources are plain text: a link
-would open inside the app window.
+`layer` (typed `LayerId`) shows only while that layer is on:
+TeleGeography's, with its licence and notice, while the submarine cables
+are on, and CelesTrak's while the satellites are on. Their `chip` names
+join the chip ("NASA, GIBS, CesiumJS, TeleGeography, CelesTrak"), and
+their notices go into exports. satellite.js is always listed. Sources are
+plain text: a link would open inside the app window.
 
 ### Cost of the glass panels
 
@@ -921,11 +956,20 @@ flowchart LR
   matching off and no saved list, the layers say so and send nothing.
 - **Parsing at the edge** (`lib/infra/sources.ts`): each source is
   `unknown` until parsed. A record with a wrong field is dropped and
-  counted; a wrong outer shape (or another snapshot layout) is an error
-  shown under the switch.
-- **Retry.** `useInfraLoading` runs when the set of needed sources changes,
-  so a failed load is tried again only when the user turns the layer on
-  again. Hiding a layer keeps its data: showing it again makes no request.
+  counted, and the loader logs the count; a wrong outer shape (or another
+  snapshot layout) is an error shown under the switch.
+- **Lazy code.** The parsers, clustering, route matching, site cards and
+  the satellite drawing (`lib/infra/code.ts`, the `code` chunk) load with
+  the first layer data (`infraStore.code`); until then the hooks return
+  empty results. The globe adapter imports none of it (its hover styles
+  are in `lib/globe.ts`), so with every layer off the page loads only the
+  start-up and globe chunks (globe check).
+- **Retry.** `useInfraLoading` asks for a layer's source when that layer is
+  turned on. A source that failed, or had nothing yet (no exchange list),
+  is loaded again then, also while another layer with the same source
+  stays on. Hiding a layer keeps its data: showing it again makes no
+  request (satellite data older than 12 hours is the exception, see
+  [Satellites](#satellites)).
 - **Cable opt-in, enforced twice.** The renderer opens the notice instead of
   turning the layer on, and asks the backend only after the switch and the
   consent are written (`uiStore.whenSaved`). The backend reads
@@ -964,8 +1008,9 @@ flowchart LR
   estimate with a radius up to 200 km, of medium or high confidence and
   not disputed by the RTT check; medium when such a region is within
   500 km (also a close region with a weak or disputed estimate); low when
-  the provider's network has no region near (an edge site) or the hop has
-  no location, and when the hop has no ASN at all but a trusted, precise
+  the provider's network has no region near (an edge site, or an estimate
+  too vague to tell, which the reason says) or the hop has no location,
+  and when the hop has no ASN at all but a trusted, precise
   estimate lies within 50 km of a region. Another network's router never
   matches. The ASNs are the operators' networks (Amazon, Google,
   Microsoft, Cloudflare), which also carry their other services and edge
@@ -1002,6 +1047,156 @@ flowchart LR
   "Submarine cable data © TeleGeography, …, licensed CC BY-NC-SA 3.0." in
   the lower right corner.
 
+## Satellites
+
+The opt-in **Satellites** layer draws a few groups of satellites where
+they are now: Starlink, OneWeb, GPS, space stations and geostationary
+satellites. The orbital elements come from CelesTrak; the positions are
+computed in the renderer with SGP4. A hop in the network of a satellite
+internet provider is marked as a likely (or, with low confidence,
+possible) satellite link, from its ASN alone, with or without the layer.
+
+```mermaid
+flowchart LR
+    subgraph renderer["Renderer"]
+        registry["lib/layers.ts<br/>Satellites (consent) +<br/>5 group switches (data: celestrak-*)"]
+        panel["LayerPanel, command bar,<br/>hop details button"]
+        consent["LayerConsentDialog<br/>celestrak.org, limits"]
+        ui[("uiStore<br/>layers, consents,<br/>whenSaved")]
+        loading["useInfraLoading<br/>a group turned on"]
+        store[("infraStore<br/>celestrak-* sources,<br/>staleAt 12 h")]
+        parse["parseSatelliteGroup<br/>(lazy infra code)"]
+        drawing["useSatelliteDrawing<br/>satelliteDrawing: thin to 12,000,<br/>highlight route's constellation"]
+        isp["lib/satellites/isp.ts<br/>hop ASN → likely or possible<br/>satellite link"]
+        adapter["globe/cesiumGlobe.ts<br/>point collection per group"]
+        sgp4["lib/satellites/propagate.ts<br/>satellite.js SGP4<br/>(lazy chunk)"]
+        ticker["PeriodicTicker<br/>≤ 1 move per second,<br/>none while hidden"]
+        governor["RenderGovernor<br/>wakeForFrame: one frame"]
+    end
+    subgraph rust["Rust backend"]
+        command["get_satellites(group)<br/>known group only"]
+        gate["UiPreferences::satellite_group<br/>saved layer + group + consent"]
+        service["SatelliteService<br/>single flight, request log,<br/>2 h limits, 12 h reuse"]
+        csv["parse_gp_csv<br/>checks each row"]
+        cache[("$APPCACHE/satellites/<br/>group.json, requests.json")]
+    end
+    celestrak["celestrak.org<br/>gp.php?GROUP=…&FORMAT=csv"]
+
+    registry --> panel
+    panel -->|setLayerVisible| ui
+    ui -->|notice not accepted yet| consent
+    consent -->|accept| ui
+    ui --> loading --> store
+    store -->|"after whenSaved()"| command
+    command --> gate
+    gate -->|allowed| service
+    service --> cache
+    service -->|"no fresh copy,<br/>no pause"| celestrak
+    celestrak --> csv --> service
+    store --> parse --> drawing
+    isp --> drawing
+    drawing -->|setSatellites| adapter
+    adapter -->|"import() with first data"| sgp4
+    ticker -->|"each tick"| sgp4
+    sgp4 -->|"positions"| adapter
+    adapter --> governor
+```
+
+### Data and the request limits
+
+CelesTrak's usage policy (<https://celestrak.org/usage-policy.php> and the
+GP documentation, read on 2026-10-25) asks apps to download a data set at
+most once per update (every 2 hours; a second download of Active or
+Starlink gets HTTP 403), only when it is needed, and to stop querying
+after any answer that is not HTTP 200 (more than 50 errors in 2 hours put
+the address in its firewall). `commands/satellites.rs` follows it:
+
+| Rule | Value |
+| --- | --- |
+| Groups | `starlink`, `oneweb`, `gps-ops`, `stations`, `geo` only (`SATELLITE_GROUPS`); never `active` |
+| Format | CSV (CelesTrak's recommended format; Starlink was 1.70 MB, 11,113 rows) |
+| Gate | Saved `preferences.ui`: layer `satellites` on, the group's switch on (or its default), consent `satellites` accepted; read when a call starts, again after it waited for another request, and right before its request goes out |
+| Reuse | A saved group for 12 hours (`SATELLITE_TTL_MS`) |
+| One request per group | At most once in 2 hours; the time is saved in `requests.json` before the request goes out, so a restart does not ask again; when that file cannot be saved, no request goes out |
+| After an HTTP error or unusable data | No request to CelesTrak for 2 hours, for every group, also after a restart |
+| After a failure that may have reached CelesTrak (a timeout, a broken answer) | It counts as the group's download: the group waits 2 hours |
+| After a failed connection (no request sent, `FetchError.sent` false) | That group again after 15 minutes |
+| At a time | One request, for all groups |
+| A time in the future (the clock was ahead, more than 5 minutes, `CLOCK_TOLERANCE_MS`) | A saved copy counts as stale (its note gives the date and time, UTC); a saved request or pause time is moved to now plus its own length (2 hours, 15 minutes) and saved once, so a wrong clock never waits longer than the rule itself |
+| Answer | HTTPS to `celestrak.org` only, no redirect elsewhere, 8 MB cap |
+
+When no new copy may or can be had, an older saved copy is shown with a
+note under the switch. When the user turns the group on after the 12
+hours, the renderer loads it again: `staleAt` makes `ensure` load the
+source again, and the old satellites stay on the globe meanwhile.
+
+**Parsing at the edge.** Rust reads the CSV by its header names and drops
+a row with a missing or out-of-range value (eccentricity 0–1, mean motion
+0–20 revolutions a day, angles 0–360°, a valid UTC epoch), an ephemeris
+type other than SGP4, or a NORAD id seen before. The renderer checks the
+records again (`parseSatelliteGroup`) and logs how many it dropped.
+
+**Online imagery.** The satellites switch and the **Online imagery**
+switch are independent: each opt-in network source has its own switch
+and notice, and neither turns the other on. A satellite move asks for a
+frame but is not a camera move, so `OnlineImageryGate` still holds the
+online layer after app moves, and with **Online imagery** off the online
+layer is not in Cesium's collection at all. The globe check measures 0
+online tiles with the satellites moving.
+
+### Propagation and drawing
+
+- **SGP4 in the renderer** (satellite.js 7.1, MIT), not the Rust `sgp4`
+  crate: the positions are needed where the globe draws them, and Rust
+  would send thousands of positions over IPC every second. One position
+  costs about 0.35 µs (3.5 ms for 10,000 in Node 24). TEME is turned to
+  Earth-fixed by the sidereal angle (no polar motion, under a kilometre).
+  The module is a lazy chunk (`propagate`, 20.7 KB) that the adapter
+  imports with the first satellite data; its WebAssembly bulk propagator
+  is aliased to a stub (`satelliteWasmStub.ts`), as the CSP has no
+  `'wasm-unsafe-eval'`.
+- **Points**: one `PointPrimitiveCollection` per group, so a group on or
+  off adds or removes one collection, and a group whose data is the same
+  keeps its points and SGP4 records (`planSatelliteGroups` decides;
+  `useSatelliteDrawing` keeps its result while the shown groups' data and
+  the highlight are the same, and the store keeps the data object when a
+  refresh returns the same download). The SGP4 records of Starlink's
+  11,113 satellites take about 17.5 MB and 18 ms to build (Node 24). Small
+  points (Starlink 2 px) with a thin dark outline; the depth test hides
+  satellites behind the Earth. No labels: the hover card names them.
+- **Limit**: at most 12,000 points per group (`MAX_SATELLITES_PER_GROUP`);
+  a larger group is thinned evenly and the panel says so. Starlink, the
+  largest group, had 11,113 satellites on 2026-10-25.
+- **Moves**: `PeriodicTicker` (`lib/satellites/clock.ts`) computes new
+  positions at most once a second while a group is drawn and the window is
+  visible; new data moves at once only when the last move is a second old,
+  else with the next move (the same visibility as the governor: Page Visibility and the
+  Tauri minimized state). Each move asks the governor for one frame
+  (`wakeForFrame`), and the loop sleeps right after it. With the layer off
+  the ticker does not run at all.
+- **Hover card**: name, group, NORAD id, international designator, the
+  height at the moment the pointer reached the point, and the age of the
+  elements. Hovering restyles one point.
+- **Route relevance** (`lib/satellites/isp.ts`): a hop whose ASN is a
+  satellite internet provider's (Starlink AS14593, OneWeb AS800, Viasat
+  AS7155, HughesNet AS6621, Eutelsat Skylogic AS29286; names checked in
+  PeeringDB) is a likely satellite link: medium for the low-orbit
+  networks (traceroute cannot show which link is in space); for the
+  geostationary ones high when the hop's RTT is at least 470 ms (a round
+  trip through a GEO satellite covers four times 35,786 km, 477 ms), low
+  when it is shorter (the link, if any, is after that hop). The hop
+  details and the hover card say "Likely Viasat link" for medium and high,
+  and "Possible Viasat satellite link" with the reason for low
+  (`satelliteLinkTitle`, `satelliteLinkSummary`); while the provider's group is shown,
+  its satellites are drawn opaque and larger, and the hop details offer
+  to show the group (through the notice).
+
+Measured in the globe check (headless Chrome, synthetic data of 1,611
+satellites in the three default groups): with the satellites on, 10 frames drawn and 10 animation
+frames in 10 s; with the page hidden, 0; with the layer off again, an
+idle window of 0 frames. Before `wakeForFrame`, the same 10 moves ran
+208 animation frames (each wake settled for 20 empty ticks).
+
 ## Settings and storage
 
 | What | Where |
@@ -1011,6 +1206,7 @@ flowchart LR
 | Provider cache, including the PeeringDB IX list (exchanges, prefixes and facilities) | `$APPCACHE/enrichment-cache.json` |
 | Globe tiles downloaded from NASA GIBS (500 MB, least recently used first out) | `$APPCACHE/tiles/` |
 | Submarine cable map from TeleGeography (only after the user opted in; about 0.3 MB, used for 7 days) | `$APPCACHE/submarine-cables.json` |
+| Satellite groups from CelesTrak (only after the user opted in; Starlink about 3.4 MB, used for 12 hours) and the request log | `$APPCACHE/satellites/<group>.json`, `$APPCACHE/satellites/requests.json` |
 | Cloud regions | bundled (`src/renderer/public/infra/cloud-regions.json`) |
 | Airport table for host name hints | compiled in (`src-tauri/data/airports.csv`, see `src-tauri/data/README.md`) |
 | Reverse DNS cache, recent runs | memory only |
@@ -1025,14 +1221,17 @@ UI preferences are validated too (`UiPreferences::validated`), see
 - **CSP** (`tauri.conf.json` → `app.security.csp`): scripts, styles, images and
   fonts from the app only, `connect-src` for the Tauri IPC, `blob:` workers for
   the GIF encoder (Cesium's workers load from the app). The renderer does not
-  call any remote host; providers, map tiles and the cable map are fetched
-  in Rust. Phase 5 adds no CSP entry: the cloud region file loads from the
-  app, and the exchange list and cable map come over IPC.
+  call any remote host; providers, map tiles, the cable map and the
+  satellite elements are fetched in Rust. Phases 5 and 6 add no CSP entry:
+  the cloud region file loads from the app, and the exchange list, cable
+  map and satellite groups come over IPC.
 - **Upstream hosts** (`src-tauri/src/upstream.rs`): a download goes over
   HTTPS to a fixed host list, follows redirects only within that list, and
-  has a size cap: `gibs.earthdata.nasa.gov` (tiles, 2 MB) and
-  `www.submarinecablemap.com` (cable map, 8 MB). The URLs are built in Rust
-  from constants.
+  has a size cap: `gibs.earthdata.nasa.gov` (tiles, 2 MB),
+  `www.submarinecablemap.com` (cable map, 8 MB) and `celestrak.org`
+  (satellite groups, 8 MB). The URLs are built in Rust from constants. A
+  failure says whether a request can have reached the host
+  (`FetchError.sent`), for the satellites' request limits.
   `devCsp` adds `'unsafe-inline'` and the Vite dev server for HMR. Additions
   for the globe:
   - `img-src` and `connect-src`: `vistiles:` and `http://vistiles.localhost`,
@@ -1042,11 +1241,15 @@ UI preferences are validated too (`UiPreferences::validated`), see
     fetching a 1-pixel `data:` PNG; without it, tile decoding falls back to
     the main thread.
   - Not added: `'wasm-unsafe-eval'` (the only WebAssembly Cesium would load
-    at start is `meshoptimizer`, which is replaced by a stub) and
+    at start is `meshoptimizer`, and satellite.js has an optional
+    WebAssembly propagator; both are replaced by stubs) and
     `'unsafe-inline'` for styles. Cesium still tries three inline styles (an
     `image-rendering` support probe, the credit display's `<style>` element
     and the hidden default credit's HTML); the CSP blocks them and the
-    console shows four violations, with no visible effect.
+    console shows four violations. The credit display's style also hid its
+    "Data attribution" lightbox (an `aria-modal` dialog with a focusable
+    close button), so the widget gets a detached `creditViewport` and the
+    lightbox is never in the page.
 - **Capabilities** (`capabilities/default.json`): file system access only under
   `$APPDATA`, `$APPCACHE` and `$DOWNLOAD` (read, write, exists, mkdir; no
   remove or rename). Paths picked in a dialog are added at run time by the

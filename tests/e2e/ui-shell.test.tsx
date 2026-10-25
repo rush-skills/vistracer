@@ -37,6 +37,8 @@ const globe = vi.hoisted(() => ({
     flyTo: vi.fn(),
     setInputEnabled: vi.fn(),
     setImagery: vi.fn(),
+    setHoveredSite: vi.fn(),
+    setSatellites: vi.fn(),
     destroy: vi.fn()
   }
 }));
@@ -107,6 +109,41 @@ function fakeBackend(command: string, args?: Record<string, unknown>): unknown {
         throw "Submarine cables are off: turn the layer on in Layers and accept its notice. Nothing was downloaded.";
       }
       return CABLE_MAP;
+    }
+    case "get_satellites": {
+      // Like the backend: the satellites layer and the group on, the notice accepted.
+      const ui = backend.settings["preferences.ui"] as
+        | { layers?: Record<string, boolean>; consents?: Record<string, boolean> }
+        | undefined;
+      const group = String(args?.group);
+      const layer = { "gps-ops": "satellites-gps" }[group] ?? `satellites-${group}`;
+      const groupOn = ui?.layers?.[layer] ?? ["satellites-starlink", "satellites-gps", "satellites-stations"].includes(layer);
+      if (!ui?.layers?.satellites || !ui.consents?.satellites || !groupOn) {
+        throw "Satellites are off: turn the layer and the group on in Layers and accept the notice. Nothing was downloaded.";
+      }
+      return {
+        group,
+        fetchedAt: Date.now(),
+        source: `https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=csv`,
+        note: null,
+        satellites: [
+          {
+            noradId: group === "stations" ? 99901 : group === "gps-ops" ? 99801 : 99701,
+            name: `EXAMPLE ${group.toUpperCase()}`,
+            objectId: "2098-001A",
+            epoch: "2026-10-24T12:00:00.000000",
+            meanMotion: group === "gps-ops" ? 2.005 : 15.06,
+            eccentricity: 0.0001,
+            inclination: 53,
+            raan: 120,
+            argOfPericenter: 90,
+            meanAnomaly: 10,
+            bstar: 0.0002,
+            meanMotionDot: 0.00001,
+            meanMotionDdot: 0
+          }
+        ]
+      };
     }
     case "traceroute_run": {
       const request = args?.request as TracerouteRequest;
@@ -300,6 +337,7 @@ describe("UI shell", () => {
     await trace("example.com");
     expect(invoked("get_peeringdb_sites")).toBe(0);
     expect(invoked("get_submarine_cables")).toBe(0);
+    expect(invoked("get_satellites")).toBe(0);
     expect(fetchSpy.mock.calls.filter(([url]) => String(url).includes("infra/"))).toEqual([]);
 
     // Turned on from the command bar: exchanges and cloud regions load once.
@@ -359,5 +397,56 @@ describe("UI shell", () => {
     expect(screen.queryByRole("dialog", { name: "Show submarine cables?" })).toBeNull();
     await waitFor(() => expect(globe.controller.setScene.mock.calls.at(-1)?.[0].cables.length).toBe(1));
     expect(invoked("get_submarine_cables")).toBe(1);
+  });
+
+  it("asks before the satellites, downloads each shown group once after consent, and none while off", async () => {
+    renderApp();
+    await waitFor(() => expect(useUiStore.getState().loaded).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Layers" }));
+    const satellites = () => screen.getByRole("switch", { name: "Satellites" }) as HTMLInputElement;
+    const starlink = () => screen.getByRole("switch", { name: "Starlink" }) as HTMLInputElement;
+
+    // A group switch alone sends nothing: the satellites layer is off.
+    fireEvent.click(screen.getByRole("switch", { name: "Geostationary" }));
+    await act(async () => undefined);
+    expect(invoked("get_satellites")).toBe(0);
+
+    fireEvent.click(satellites());
+    const notice = screen.getByRole("dialog", { name: "Show satellites?" });
+    expect(notice.textContent).toContain("celestrak.org");
+    fireEvent.click(within(notice).getByRole("button", { name: "Cancel" }));
+    await act(async () => undefined);
+    expect(invoked("get_satellites")).toBe(0);
+    expect(satellites().checked).toBe(false);
+
+    // Accepted: saved first, then one request per shown group (Starlink,
+    // GPS and space stations by default, geostationary switched on above).
+    fireEvent.click(satellites());
+    fireEvent.click(screen.getByRole("button", { name: "Show and download" }));
+    await waitFor(() => expect(globe.controller.setSatellites.mock.calls.at(-1)?.[0].length).toBe(4));
+    const asked = backend.invoke.mock.calls
+      .filter(([name]) => name === "get_satellites")
+      .map(([, args]) => args?.group)
+      .sort();
+    expect(asked).toEqual(["geo", "gps-ops", "starlink", "stations"]);
+    const order = backend.invoke.mock.calls.map(([name, args]) =>
+      name === "set_settings" ? `set_settings ${String(args?.key)}` : name
+    );
+    expect(order.lastIndexOf("set_settings preferences.ui")).toBeLessThan(order.indexOf("get_satellites"));
+    expect(screen.getByRole("button", { name: "Data sources and credits" }).textContent).toBe(
+      "NASA, GIBS, CesiumJS, CelesTrak"
+    );
+
+    // A group off and on, and the layer off and on: no notice, no new request.
+    fireEvent.click(starlink());
+    await waitFor(() => expect(globe.controller.setSatellites.mock.calls.at(-1)?.[0].length).toBe(3));
+    fireEvent.click(starlink());
+    fireEvent.click(satellites());
+    await waitFor(() => expect(globe.controller.setSatellites.mock.calls.at(-1)?.[0]).toEqual([]));
+    fireEvent.click(satellites());
+    expect(screen.queryByRole("dialog", { name: "Show satellites?" })).toBeNull();
+    await waitFor(() => expect(globe.controller.setSatellites.mock.calls.at(-1)?.[0].length).toBe(4));
+    expect(invoked("get_satellites")).toBe(4);
   });
 });

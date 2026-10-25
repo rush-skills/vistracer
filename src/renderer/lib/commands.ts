@@ -1,12 +1,6 @@
 import type { ThemeName, TracerouteRequest, TracerouteRun } from "@common/ipc";
 import { hopPosition } from "./globe";
-import {
-  LAYERS,
-  layerById,
-  type LayerDefinition,
-  type LayerId,
-  type LayerVisibility
-} from "./layers";
+import { LAYER_LIST, layerActive, layerById, type LayerId, type LayerVisibility } from "./layers";
 import { PANELS, type PanelId } from "./uiPreferences";
 
 /**
@@ -111,23 +105,29 @@ export function buildCommands(ctx: CommandContext): Command[] {
     });
   }
 
-  for (const layer of LAYERS as readonly LayerDefinition[]) {
-    const id = layer.id as LayerId;
-    const visible = ctx.layers[id];
-    const parent = layer.parent as LayerId | undefined;
-    // Showing a switch under a hidden layer shows that layer too.
-    const showParent = !visible && parent != null && !ctx.layers[parent];
+  for (const layer of LAYER_LIST) {
+    const { id, parent } = layer;
+    // A switch under a hidden layer shows nothing, so its command offers to
+    // show it, with its parent.
+    const shown = layerActive(ctx.layers, id);
+    const showParent = !shown && parent != null && !ctx.layers[parent];
     commands.push({
-      id: `layer.${layer.id}`,
-      title: `${visible ? "Hide" : "Show"} ${layer.commandName ?? layer.label.toLowerCase()}`,
+      id: `layer.${id}`,
+      title: `${shown ? "Hide" : "Show"} ${layer.commandName ?? layer.label.toLowerCase()}`,
       group: "Layers",
       detail: showParent ? `Also shows ${layerById(parent)?.label.toLowerCase()}` : undefined,
       keywords: `layer toggle ${layer.description}`,
       run: () => {
+        if (shown) {
+          actions.setLayerVisible(id, false);
+          return;
+        }
         if (showParent) {
           actions.setLayerVisible(parent, true);
         }
-        actions.setLayerVisible(id, !visible);
+        if (!ctx.layers[id]) {
+          actions.setLayerVisible(id, true);
+        }
       }
     });
   }

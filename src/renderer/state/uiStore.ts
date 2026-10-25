@@ -33,7 +33,10 @@ export interface UiStore {
   declineConsent: () => void;
   setPanelCollapsed: (id: PanelId, collapsed: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
-  /** Resolves when every change so far is written (the backend reads them). */
+  /**
+   * Resolves when every change so far is written (the backend reads them),
+   * also one made while the saved choices were still being read.
+   */
   whenSaved: () => Promise<void>;
 }
 
@@ -43,6 +46,10 @@ const errorText = (error: unknown) =>
 // Writes run one after another, each with the state at the time it runs,
 // so the last write always carries the latest choices.
 let saving: Promise<void> = Promise.resolve();
+// The read of the saved choices, while it runs. Nothing is written before
+// it ends; then a choice made meanwhile (such as an accepted layer notice)
+// is written.
+let reading: Promise<unknown> | undefined;
 
 function persist(): void {
   saving = saving.then(async () => {
@@ -71,7 +78,9 @@ export const useUiStore = create<UiStore>((set, get) => ({
   load: async () => {
     let saved;
     try {
-      saved = normalizeUiPreferences(await window.visTracer.getSettings("preferences.ui"));
+      const read = window.visTracer.getSettings("preferences.ui");
+      reading = read;
+      saved = normalizeUiPreferences(await read);
     } catch (error) {
       // Writing now would replace the saved choices with the defaults.
       console.warn("Could not read the UI preferences; changes are not saved.", error);
@@ -82,6 +91,8 @@ export const useUiStore = create<UiStore>((set, get) => ({
           "error"
         );
       return;
+    } finally {
+      reading = undefined;
     }
     // Choices made while the file loaded win over the saved ones.
     const early = get();
@@ -131,7 +142,11 @@ export const useUiStore = create<UiStore>((set, get) => ({
     persist();
   },
   setPaletteOpen: (open) => set({ paletteOpen: open }),
-  whenSaved: () => saving
+  whenSaved: async () => {
+    // A choice made while the saved file is read is written when the read ends.
+    await reading?.catch(() => undefined);
+    await saving;
+  }
 }));
 
 export const selectTheme = (state: UiStore): ThemeName => state.theme ?? DEFAULT_THEME;

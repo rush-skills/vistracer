@@ -69,6 +69,36 @@ describe("RenderGovernor", () => {
     expect(governor.running).toBe(false);
   });
 
+  it("runs one tick for a periodic update and sleeps right after it", () => {
+    const display = new FakeDisplay();
+    const { scene, tick } = fakeScene();
+    const governor = new RenderGovernor(tick, display);
+    for (let second = 0; second < 10; second += 1) {
+      scene.dirtyFrames = 1; // the satellites moved
+      governor.wakeForFrame();
+      display.advance(1_000);
+    }
+    expect(scene.drawn).toBe(10);
+    expect(scene.ticks).toBe(10);
+    expect(display.requests).toBe(10);
+    expect(governor.running).toBe(false);
+
+    // A render request during that frame (a tile, a flight) settles as usual.
+    scene.dirtyFrames = 3;
+    governor.wakeForFrame();
+    governor.wake();
+    display.advance(1_000);
+    expect(scene.drawn).toBe(13);
+    expect(scene.ticks).toBe(13 + GOVERNOR_RULES.idleTicksBeforeSleep);
+    // While the loop runs, a periodic update changes nothing.
+    scene.dirtyFrames = 2;
+    governor.wake();
+    governor.wakeForFrame();
+    display.advance(1_000);
+    expect(scene.drawn).toBe(15);
+    expect(governor.running).toBe(false);
+  });
+
   it("draws while the scene changes, then sleeps and stays idle", () => {
     const display = new FakeDisplay();
     const { scene, tick } = fakeScene();

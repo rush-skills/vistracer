@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { HopLocation, HopResolution, LocationEstimate, TracerouteRun } from "@common/ipc";
 import { useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
-import { CLOUD, PEERINGDB } from "@renderer/test/infraFixtures";
+import { CLOUD, INFRA_CODE, PEERINGDB } from "@renderer/test/infraFixtures";
 import { HopDetailsPane } from "../HopDetailsPane";
+import { LayerConsentDialog } from "../LayerConsentDialog";
 
 const latency = { minRttMs: 11.9, maxRttMs: 12.2, avgRttMs: 12.05, jitterMs: 0.3 };
 
@@ -560,7 +561,9 @@ describe("HopDetailsPane", () => {
     };
     const run: TracerouteRun = { ...baseRun, hops: [awsHop] };
     useInfraStore.setState({
+      code: INFRA_CODE,
       sources: {
+        ...useInfraStore.getState().sources,
         "peeringdb-sites": { status: "ready", data: PEERINGDB },
         "cloud-regions": { status: "ready", data: CLOUD },
         "submarine-cables": { status: "idle" }
@@ -578,6 +581,71 @@ describe("HopDetailsPane", () => {
     expect(section.textContent).toContain("high");
     expect(section.textContent).toContain("AS16509 is Amazon's network");
     expect(section.textContent).toContain("Digital Realty Frankfurt FRA1-27");
+  });
+
+  it("marks a hop in a satellite provider's network and offers to show its constellation", () => {
+    const starlinkHop: HopResolution = { ...multipathHop, asn: { asn: 14593, name: "SPACEX-STARLINK" } };
+    const run: TracerouteRun = { ...baseRun, hops: [starlinkHop] };
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    act(() => useUiStore.setState({ layers: {}, consents: {}, loaded: true, pendingConsent: undefined }));
+    const { rerender } = render(
+      <HopDetailsPane run={run} selectedHopIndex={starlinkHop.hopIndex} status="success" />
+    );
+    // From the network alone: no layer needs to be on.
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(section.textContent).toContain("Likely Starlink link");
+    expect(section.textContent).toContain("medium");
+    expect(section.textContent).toContain("AS14593 is SpaceX's Starlink network");
+    fireEvent.click(within(section).getByRole("button", { name: "Show Starlink satellites" }));
+    // The satellites layer asks for its notice before anything is downloaded.
+    expect(useUiStore.getState().pendingConsent).toBe("satellites");
+    expect(useUiStore.getState().layers.satellites).toBeUndefined();
+
+    act(() => {
+      useUiStore.getState().acceptConsent();
+    });
+    rerender(<HopDetailsPane run={run} selectedHopIndex={starlinkHop.hopIndex} status="success" />);
+    expect(screen.getByRole("region", { name: "Infrastructure" }).textContent).toContain(
+      "Starlink satellites are highlighted on the globe."
+    );
+    expect(screen.queryByRole("button", { name: "Show Starlink satellites" })).toBeNull();
+  });
+
+  it("calls a low-confidence satellite link possible and offers no constellation", () => {
+    // Viasat's network, but 12 ms away: too close for a geostationary link before this hop.
+    const viasatHop: HopResolution = { ...multipathHop, asn: { asn: 7155, name: "VIASAT" } };
+    const run: TracerouteRun = { ...baseRun, hops: [viasatHop] };
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    act(() => useUiStore.setState({ layers: {}, consents: {}, loaded: true, pendingConsent: undefined }));
+    render(<HopDetailsPane run={run} selectedHopIndex={viasatHop.hopIndex} status="success" />);
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(section.textContent).toContain("Possible Viasat satellite link");
+    expect(section.textContent).toContain("low");
+    expect(section.textContent).toContain("too short for one between you and this hop");
+    expect(section.textContent).not.toContain("Likely");
+    expect(within(section).queryByRole("button")).toBeNull();
+  });
+
+  it("moves the focus into the satellites notice and back to the button with Escape", async () => {
+    const starlinkHop: HopResolution = { ...multipathHop, asn: { asn: 14593, name: "SPACEX-STARLINK" } };
+    const run: TracerouteRun = { ...baseRun, hops: [starlinkHop] };
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    act(() => useUiStore.setState({ layers: {}, consents: {}, loaded: true, pendingConsent: undefined }));
+    render(
+      <>
+        <HopDetailsPane run={run} selectedHopIndex={starlinkHop.hopIndex} status="success" />
+        <LayerConsentDialog />
+      </>
+    );
+    const show = screen.getByRole("button", { name: "Show Starlink satellites" });
+    show.focus();
+    fireEvent.click(show);
+    const notice = screen.getByRole("dialog", { name: "Show satellites?" });
+    await waitFor(() => expect(notice.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement ?? notice, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(show);
+    expect(useUiStore.getState().layers.satellites).toBeUndefined();
   });
 
   it("colours each hop's dot like its marker: by network while network colours are on", () => {

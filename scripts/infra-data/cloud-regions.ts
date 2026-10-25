@@ -45,7 +45,11 @@ export interface CuratedRegion {
 
 export const CURATED_PROVIDERS = [
   { id: "aws", name: "Amazon Web Services", shortName: "AWS", operator: "Amazon", asns: [16509, 14618, 7224], sources: ["https://docs.aws.amazon.com/global-infrastructure/latest/regions/aws-regions.html", "https://aws.amazon.com/about-aws/global-infrastructure/regions_az/"], checkedAt: "2026-10-25" },
-  { id: "gcp", name: "Google Cloud", shortName: "Google Cloud", operator: "Google", asns: [15169, 396982, 19527, 36040, 43515, 139070], sources: ["https://cloud.google.com/compute/docs/regions-zones"], checkedAt: "2026-10-25" },
+  // AS15169 (Google), AS396982 (GOOGLE-CLOUD-PLATFORM), AS19527 (GOOGLE-2, "in use by
+  // Google Cloud customers"), AS139070 (GOOGLE-AS-AP, PeeringDB "Google Cloud Korea"):
+  // registry records at https://rdap.org/autnum/<asn> and PeeringDB, 2026-10-25.
+  // AS36040 and AS43515 are registered as YOUTUBE (ARIN, RIPE), so they are left out.
+  { id: "gcp", name: "Google Cloud", shortName: "Google Cloud", operator: "Google", asns: [15169, 396982, 19527, 139070], sources: ["https://cloud.google.com/compute/docs/regions-zones"], checkedAt: "2026-10-25" },
   { id: "azure", name: "Microsoft Azure", shortName: "Azure", operator: "Microsoft", asns: [8075, 8068, 8069, 12076], sources: ["https://learn.microsoft.com/en-us/azure/reliability/regions-list"], checkedAt: "2026-10-25" },
   // Data centres, not regions: downloaded from the status page by the build script.
   { id: "cloudflare", name: "Cloudflare", shortName: "Cloudflare", operator: "Cloudflare", asns: [13335, 209242], sources: ["https://www.cloudflarestatus.com/api/v2/components.json", "https://www.cloudflare.com/network/"], checkedAt: "2026-10-25" }

@@ -1,6 +1,7 @@
 import {
   Cartesian2,
   Cartesian3,
+  Cartographic,
   CesiumWidget,
   Color,
   EasingFunction,
@@ -14,6 +15,7 @@ import {
   Math as CesiumMath,
   PerspectiveFrustum,
   PointPrimitiveCollection,
+  type PointPrimitive,
   PolylineCollection,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
@@ -28,13 +30,17 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CAMERA_LIMITS,
   borderRings,
+  hoveredSatelliteStyle,
+  hoveredSiteStyle,
+  kmPerPixel,
   planFlight,
   type Emphasis,
   type FlightStep,
   type GeoPoint,
-  type GlobeScene
+  type GlobeScene,
+  type SiteSpec
 } from "@renderer/lib/globe";
-import { clusterLevel, kmPerPixel } from "@renderer/lib/infra/cluster";
+import { clusterLevel } from "@renderer/lib/infra/cluster";
 import {
   BUNDLED_IMAGERY,
   CanvasDrag,
@@ -47,6 +53,11 @@ import {
 } from "@renderer/lib/imagery";
 import { prefersReducedMotion } from "@renderer/lib/motion";
 import { GOVERNOR_RULES, RenderGovernor, renderQuality } from "@renderer/lib/renderGovernor";
+import { PeriodicTicker, SATELLITE_UPDATE_MS } from "@renderer/lib/satellites/clock";
+import { planSatelliteGroups } from "@renderer/lib/satellites/reconcile";
+import type { GroupPropagator } from "@renderer/lib/satellites/propagate";
+import type { SatelliteGroupId } from "@renderer/lib/satellites/groups";
+import type { SatelliteGroupDrawing } from "@renderer/lib/satellites/scene";
 import type { CreateGlobe } from "./controller";
 
 // Cesium loads its workers and images from here. vite.config.ts serves the
@@ -141,6 +152,10 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     // Credits render as plain text in GlobeViewport: Cesium's credit links
     // would navigate the app window.
     creditContainer: document.createElement("div"),
+    // Cesium's credit lightbox (role="dialog", aria-modal) is hidden by an
+    // inline style that the CSP blocks: in the page it stayed in the
+    // accessibility tree with a focusable close button below the canvas.
+    creditViewport: document.createElement("div"),
     contextOptions: {
       webgl: {
         alpha: false,
@@ -244,17 +259,19 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   controls.enableLook = false;
   camera.setView({ destination: Cartesian3.fromDegrees(15, 25, CAMERA_LIMITS.initialHeight) });
 
-  const horizontalFov = () =>
+  // `fov` spans the larger side of the canvas (the height in a portrait window).
+  const frustumFov = () =>
     camera.frustum instanceof PerspectiveFrustum && camera.frustum.fov !== undefined
       ? camera.frustum.fov
       : CesiumMath.PI_OVER_THREE;
+  const largerSide = () => Math.max(canvas.clientWidth, canvas.clientHeight);
   let framesDrawn = 0;
   let level: number | undefined;
   const removePostRender = scene.postRender.addEventListener(() => {
     framesDrawn += 1;
     // Only on frames drawn anyway: a new level re-clusters the site layers.
     const next = clusterLevel(
-      kmPerPixel(camera.positionCartographic.height, horizontalFov(), canvas.clientWidth)
+      kmPerPixel(camera.positionCartographic.height, frustumFov(), largerSide())
     );
     if (next !== level) {
       level = next;
@@ -307,6 +324,84 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   }
 
   let destroyed = false;
+
+  // Satellites (opt-in layer): one point collection per group. Positions
+  // come from SGP4 (lib/satellites/propagate.ts, imported on first use, so
+  // satellite.js is not loaded at start-up), moved by the ticker at most
+  // once a second and not while the window is hidden. Each move asks for
+  // one frame; with no satellites the ticker does not run.
+  interface DrawnGroup {
+    drawing: SatelliteGroupDrawing;
+    collection: PointPrimitiveCollection;
+    points: PointPrimitive[];
+    propagator: GroupPropagator;
+    positions: Float64Array;
+  }
+  const satelliteGroups = new Map<SatelliteGroupId, DrawnGroup>();
+  const satellitePointByKey = new Map<string, { point: PointPrimitive; group: DrawnGroup }>();
+  const satellitePosition = new Cartesian3();
+  const moveSatellites = () => {
+    const now = new Date();
+    for (const group of satelliteGroups.values()) {
+      group.propagator.positions(now, group.positions);
+      group.points.forEach((point, i) => {
+        const x = group.positions[3 * i];
+        point.show = Number.isFinite(x);
+        if (point.show) {
+          satellitePosition.x = x;
+          satellitePosition.y = group.positions[3 * i + 1];
+          satellitePosition.z = group.positions[3 * i + 2];
+          point.position = satellitePosition;
+        }
+      });
+    }
+    // One frame for the move; the loop sleeps right after it.
+    requestRender();
+    governor.wakeForFrame();
+  };
+  const satelliteTicker = new PeriodicTicker(moveSatellites, SATELLITE_UPDATE_MS);
+  let propagation: Promise<typeof import("@renderer/lib/satellites/propagate")> | undefined;
+  let satelliteRequest = 0;
+  // A thin dark outline keeps the small points visible over bright day imagery.
+  const SATELLITE_OUTLINE = { color: MARKER_OUTLINE, width: 1 };
+  const styleSatellites = (group: DrawnGroup) => {
+    const { drawing } = group;
+    const color = Color.fromCssColorString(drawing.color).withAlpha(drawing.opacity);
+    for (const point of group.points) {
+      point.color = color;
+      point.pixelSize = drawing.pixelSize;
+      point.outlineColor = SATELLITE_OUTLINE.color;
+      point.outlineWidth = SATELLITE_OUTLINE.width;
+    }
+  };
+  const styleSatellite = (key: string | undefined, hovered: boolean) => {
+    const entry = key ? satellitePointByKey.get(key) : undefined;
+    if (!entry) {
+      return false;
+    }
+    const { drawing } = entry.group;
+    const style = hovered
+      ? hoveredSatelliteStyle(drawing)
+      : { pixelSize: drawing.pixelSize, outlineWidth: SATELLITE_OUTLINE.width };
+    entry.point.pixelSize = style.pixelSize;
+    entry.point.outlineWidth = style.outlineWidth;
+    entry.point.outlineColor = hovered ? Color.WHITE : SATELLITE_OUTLINE.color;
+    return true;
+  };
+  const removeSatelliteGroup = (group: DrawnGroup) => {
+    for (const satellite of group.drawing.satellites) {
+      satellitePointByKey.delete(satellite.key);
+    }
+    satelliteGroups.delete(group.drawing.group);
+    // Destroys the collection and its points.
+    scene.primitives.remove(group.collection);
+  };
+  const satelliteHeightKm = (key: string): number | undefined => {
+    const entry = satellitePointByKey.get(key);
+    const place = entry?.point.show ? Cartographic.fromCartesian(entry.point.position) : undefined;
+    return place ? place.height / 1000 : undefined;
+  };
+
   void fetch("./world.geojson")
     .then((response) => {
       if (!response.ok) {
@@ -378,7 +473,8 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       callbacks.onHoverHop(target?.kind === "hop" ? target.hopIndex : undefined, hoverClient);
     }
     if (target?.kind === "site" || before?.kind === "site") {
-      callbacks.onHoverSite(target?.kind === "site" ? target.key : undefined, hoverClient);
+      const key = target?.kind === "site" ? target.key : undefined;
+      callbacks.onHoverSite(key, hoverClient, key ? satelliteHeightKm(key) : undefined);
     }
   };
   const pickHover = () => {
@@ -432,8 +528,11 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   resizeObserver.observe(container);
 
   let minimized = false;
-  const updateVisibility = () =>
-    governor.setVisible(document.visibilityState === "visible" && !minimized);
+  const updateVisibility = () => {
+    const visible = document.visibilityState === "visible" && !minimized;
+    governor.setVisible(visible);
+    satelliteTicker.setVisible(visible);
+  };
   // Not every webview reports a minimized window as hidden, so the Tauri
   // window is asked too: after a resize and on every visibility change.
   const appWindow = isTauri() ? getCurrentWindow() : undefined;
@@ -547,12 +646,26 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       });
     }
   };
+  // The drawn site markers by spec key, to restyle the hovered one in place.
+  const sitePointByKey = new Map<string, { point: PointPrimitive; spec: SiteSpec }>();
+  let hoveredSiteKey: string | undefined;
+  const styleSite = (key: string | undefined, hovered: boolean) => {
+    const site = key ? sitePointByKey.get(key) : undefined;
+    if (!site) {
+      return false;
+    }
+    const style = hovered ? hoveredSiteStyle(site.spec) : site.spec;
+    site.point.pixelSize = style.pixelSize;
+    site.point.outlineColor = Color.fromCssColorString(style.outline);
+    return true;
+  };
   const drawSites = (spec: GlobeScene) => {
     sitePoints.removeAll();
     siteLabels.removeAll();
+    sitePointByKey.clear();
     for (const site of [...spec.facilities, ...spec.exchanges, ...spec.cloudRegions]) {
       const position = toCartesian(site.position);
-      sitePoints.add({
+      const point = sitePoints.add({
         id: { siteKey: site.key } satisfies SiteId,
         position,
         pixelSize: site.pixelSize,
@@ -560,6 +673,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
         outlineColor: Color.fromCssColorString(site.outline),
         outlineWidth: site.outlineWidth
       });
+      sitePointByKey.set(site.key, { point, spec: site });
       if (site.label) {
         siteLabels.add({
           id: { siteKey: site.key } satisfies SiteId,
@@ -576,6 +690,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
         });
       }
     }
+    styleSite(hoveredSiteKey, true);
   };
   const drawCables = (spec: GlobeScene) => {
     cableLines.removeAll();
@@ -656,7 +771,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           window.screen.width,
           window.screen.height
         ),
-        fovRad: horizontalFov(),
+        fovRad: frustumFov(),
         maximumScreenSpaceError: globe.maximumScreenSpaceError
       });
       const steps = planFlight(
@@ -671,7 +786,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           insets,
           widthPx: canvas.clientWidth,
           heightPx: canvas.clientHeight,
-          fovRad: horizontalFov()
+          fovRad: frustumFov()
         }
       );
       // App-made moves load no online tiles, not even the wider view while
@@ -707,6 +822,87 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
       onlineGate.setInputLocked(!enabled);
     },
 
+    setHoveredSite(key) {
+      if (key === hoveredSiteKey) {
+        return;
+      }
+      const restyled = styleSite(hoveredSiteKey, false) || styleSatellite(hoveredSiteKey, false);
+      hoveredSiteKey = key;
+      if (styleSite(key, true) || styleSatellite(key, true) || restyled) {
+        scene.requestRender();
+      }
+    },
+
+    setSatellites(drawings) {
+      const request = ++satelliteRequest;
+      if (drawings.length === 0) {
+        satelliteTicker.setRunning(false);
+        if (satelliteGroups.size > 0) {
+          [...satelliteGroups.values()].forEach(removeSatelliteGroup);
+          scene.requestRender();
+        }
+        return;
+      }
+      propagation ??= import("@renderer/lib/satellites/propagate");
+      propagation
+        .then(({ createPropagator }) => {
+          if (destroyed || request !== satelliteRequest) {
+            return;
+          }
+          const drawn = new Map(
+            [...satelliteGroups.values()].map((group) => [group.drawing.group, group.drawing.satellites])
+          );
+          const plan = planSatelliteGroups(drawn, drawings);
+          for (const group of plan.remove) {
+            const old = satelliteGroups.get(group);
+            if (old) {
+              removeSatelliteGroup(old);
+            }
+          }
+          for (const drawing of plan.keep) {
+            const kept = satelliteGroups.get(drawing.group);
+            if (kept) {
+              kept.drawing = drawing;
+              styleSatellites(kept);
+            }
+          }
+          for (const drawing of plan.build) {
+            const collection = new PointPrimitiveCollection();
+            scene.primitives.add(collection);
+            const group: DrawnGroup = {
+              drawing,
+              collection,
+              points: [],
+              propagator: createPropagator(drawing.satellites),
+              positions: new Float64Array(drawing.satellites.length * 3)
+            };
+            for (const satellite of drawing.satellites) {
+              const point = collection.add({
+                id: { siteKey: satellite.key } satisfies SiteId,
+                position: Cartesian3.ZERO,
+                show: false
+              });
+              group.points.push(point);
+              satellitePointByKey.set(satellite.key, { point, group });
+            }
+            styleSatellites(group);
+            satelliteGroups.set(drawing.group, group);
+          }
+          styleSatellite(hoveredSiteKey, true);
+          satelliteTicker.setRunning(true);
+          // Positions for new points now, or with the next move (at most a
+          // second away): never two moves in one second.
+          satelliteTicker.poke();
+          scene.requestRender();
+        })
+        .catch((error: unknown) => {
+          propagation = undefined;
+          if (!destroyed) {
+            callbacks.onSatelliteError(error instanceof Error ? error.message : String(error));
+          }
+        });
+    },
+
     setImagery(options) {
       dayNight = options.dayNight;
       globe.enableLighting = dayNight;
@@ -719,6 +915,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
     destroy() {
       destroyed = true;
       governor.dispose();
+      satelliteTicker.dispose();
       window.clearInterval(sunTimer);
       window.clearTimeout(hoverTimer);
       window.clearTimeout(minimizedTimer);

@@ -1,19 +1,30 @@
 // Injected into the page before the app loads (see check.mjs). It stands in
-// for the Tauri IPC with two fixture traces and synthetic infrastructure data
-// (exchanges, data centres, cables; made up, not PeeringDB or TeleGeography
-// data), and counts what the check needs: animation frames, WebGL draws,
-// online tile requests, IPC calls per command, CSP violations and page
-// errors. Plain browser JavaScript, not bundled with the app.
+// for the Tauri IPC with three fixture traces and synthetic infrastructure
+// and satellite data (exchanges, data centres, cables, orbital elements;
+// made up, not PeeringDB, TeleGeography or CelesTrak data), and counts what
+// the check needs: animation frames, frames that drew, WebGL draws, online
+// tile requests, IPC calls per command, CSP violations and page errors.
+// Plain browser JavaScript, not bundled with the app.
 (() => {
-  const probe = { raf: 0, draws: 0, onlineTiles: [], ipc: {}, csp: [], errors: [] };
+  const probe = { raf: 0, drawnFrames: 0, draws: 0, onlineTiles: [], ipc: {}, csp: [], errors: [] };
   window.__globeCheck = probe;
 
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (callback) =>
     raf((time) => {
       probe.raf += 1;
+      const before = probe.draws;
       callback(time);
+      if (probe.draws > before) {
+        probe.drawnFrames += 1;
+      }
     });
+
+  // check.mjs hides the page this way (headless Chrome is never hidden).
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => (window.__pageHidden ? "hidden" : "visible")
+  });
 
   const getContext = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function (type, options) {
@@ -197,6 +208,39 @@
     ]
   };
 
+  // A route whose third hop is in Starlink's network (AS14593): the hop
+  // details and the satellites layer mark it. Addresses are documentation
+  // ranges, marked public here.
+  ROUTES["starlink.example"] = [
+    hop(1, "192.168.1.1", 1, noLocation, { isPrivate: true }),
+    hop(2, "100.64.0.1", 24, noLocation, { isPrivate: true }),
+    hop(
+      3,
+      "203.0.113.25",
+      31,
+      {
+        ...noLocation,
+        isRttReference: true,
+        best: estimate("geolite-city", 51.51, -0.13, 50, "medium", "London, United Kingdom")
+      },
+      asn(14593, "SPACEX-STARLINK")
+    ),
+    hop(
+      4,
+      "198.51.100.7",
+      33,
+      { ...noLocation, best: estimate("hostname-hint", 51.51, -0.13, 50, "high", "London, United Kingdom") },
+      asn(1299, "ARELION")
+    ),
+    hop(
+      5,
+      "192.0.2.10",
+      40,
+      { ...noLocation, best: estimate("geolite-city", 50.11, 8.68, 20, "medium", "Frankfurt, Germany") },
+      asn(15169, "GOOGLE")
+    )
+  ];
+
   // Synthetic exchanges and data centres in the layout of get_peeringdb_sites.
   const CITIES = [
     ["Frankfurt", "DE", 50.11, 8.68],
@@ -276,6 +320,43 @@
     ]
   };
 
+  // Synthetic orbital elements in the layout of get_satellites: evenly spread
+  // planes, like the real constellations' shells. Epoch 6 hours ago.
+  const epoch = new Date(Date.now() - 6 * 3600 * 1000).toISOString().replace("Z", "");
+  const walker = (group, firstId, planes, perPlane, elements) =>
+    Array.from({ length: planes * perPlane }, (_, i) => {
+      const plane = Math.floor(i / perPlane);
+      const slot = i % perPlane;
+      return {
+        noradId: firstId + i,
+        name: `EXAMPLE ${group.toUpperCase()}-${i + 1}`,
+        objectId: "2098-001A",
+        epoch,
+        eccentricity: 0.0001,
+        argOfPericenter: 90,
+        bstar: 0.0001,
+        meanMotionDot: 0,
+        meanMotionDdot: 0,
+        raan: (plane * 360) / planes,
+        meanAnomaly: ((slot * 360) / perPlane + plane * 3) % 360,
+        ...elements
+      };
+    });
+  const SATELLITES = {
+    starlink: walker("starlink", 900000, 72, 22, { meanMotion: 15.06, inclination: 53 }),
+    oneweb: walker("oneweb", 910000, 18, 36, { meanMotion: 13.15, inclination: 87.9 }),
+    "gps-ops": walker("gps", 920000, 6, 4, { meanMotion: 2.0056, inclination: 55 }),
+    stations: walker("station", 930000, 3, 1, { meanMotion: 15.49, inclination: 51.6 }),
+    geo: walker("geo", 940000, 1, 40, { meanMotion: 1.0027, inclination: 0.05, eccentricity: 0.0002 })
+  };
+  const SATELLITE_LAYERS = {
+    starlink: ["satellites-starlink", true],
+    oneweb: ["satellites-oneweb", false],
+    "gps-ops": ["satellites-gps", true],
+    stations: ["satellites-stations", true],
+    geo: ["satellites-geo", false]
+  };
+
   const listeners = new Map();
   let nextId = 1;
   const emit = (event, payload) => {
@@ -334,6 +415,22 @@
             throw "Submarine cables are off: turn the layer on in Layers and accept its notice. Nothing was downloaded.";
           }
           return CABLES;
+        }
+        case "get_satellites": {
+          // As the backend: the satellites layer and the group on, the notice accepted.
+          const ui = settings["preferences.ui"];
+          const [layer, byDefault] = SATELLITE_LAYERS[args.group] ?? [];
+          const groupOn = layer && (ui?.layers?.[layer] ?? byDefault);
+          if (!ui?.layers?.satellites || !ui?.consents?.satellites || !groupOn) {
+            throw "Satellites are off: turn the layer and the group on in Layers and accept the notice. Nothing was downloaded.";
+          }
+          return {
+            group: args.group,
+            fetchedAt: Date.now(),
+            source: `https://celestrak.org/NORAD/elements/gp.php?GROUP=${args.group}&FORMAT=csv`,
+            note: null,
+            satellites: SATELLITES[args.group]
+          };
         }
         case "get_geo_database_meta":
           return { cityDbStatus: "loaded", asnDbStatus: "loaded" };

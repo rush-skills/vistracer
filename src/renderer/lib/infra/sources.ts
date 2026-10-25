@@ -5,8 +5,14 @@
  * hide the others. A source whose outer shape is wrong is an error.
  */
 
+import { SATELLITE_GROUPS, type SatelliteGroupId, type SatelliteSourceId } from "../satellites/groups";
+
 /** Data a layer loads when it is switched on (`LayerDefinition.data`). */
-export type InfraSourceId = "peeringdb-sites" | "cloud-regions" | "submarine-cables";
+export type InfraSourceId =
+  | "peeringdb-sites"
+  | "cloud-regions"
+  | "submarine-cables"
+  | SatelliteSourceId;
 
 export interface Exchange {
   /** "ix:<PeeringDB id>", the same id as `IxpMatch.ixId` of a hop. */
@@ -17,7 +23,6 @@ export interface Exchange {
   country: string | null;
   latitude: number;
   longitude: number;
-  radiusKm: number;
   facilityCount: number;
   networkCount: number;
 }
@@ -37,12 +42,11 @@ export interface Facility {
 }
 
 export interface PeeringDbSiteData {
-  /** When exchange matching downloaded the list, ms since the epoch. */
-  storedAt: number;
   /** False for a list saved by an older version: it has no data centres. */
   complete: boolean;
   exchanges: Exchange[];
   facilities: Facility[];
+  /** Records dropped at the edge; logged by the loader. */
   rejected: number;
 }
 
@@ -70,17 +74,7 @@ export interface CloudRegion {
   longitude: number;
 }
 
-export interface SnapshotSource {
-  what: string;
-  urls: string[];
-  licence: string;
-  fetchedAt: string;
-  recordCount: number;
-}
-
 export interface CloudRegionData {
-  builtAt: string;
-  sources: SnapshotSource[];
   providers: CloudProvider[];
   regions: CloudRegion[];
   rejected: number;
@@ -96,7 +90,6 @@ export interface SubmarineCable {
 }
 
 export interface CableData {
-  fetchedAt: number;
   /** Set when a refresh failed and the backend sent its saved copy. */
   note: string | null;
   cables: SubmarineCable[];
@@ -157,7 +150,6 @@ function exchange(row: Fields): Exchange | null {
   const name = text(row.name);
   const lat = latitude(row.latitude);
   const lon = longitude(row.longitude);
-  const radiusKm = typeof row.radiusKm === "number" && row.radiusKm > 0 ? row.radiusKm : null;
   const city = optionalText(row.city);
   const country = optionalText(row.country);
   const facilityCount = count(row.facilityCount);
@@ -167,7 +159,6 @@ function exchange(row: Fields): Exchange | null {
     !name ||
     lat == null ||
     lon == null ||
-    radiusKm == null ||
     city === undefined ||
     country === undefined ||
     facilityCount == null ||
@@ -183,7 +174,6 @@ function exchange(row: Fields): Exchange | null {
     country,
     latitude: lat,
     longitude: lon,
-    radiusKm,
     facilityCount,
     networkCount
   };
@@ -234,14 +224,12 @@ export function parsePeeringDbSites(raw: unknown): PeeringDbSiteData | null {
   if (!isRecord(raw)) {
     throw new Error("The exchange list from the backend is not an object.");
   }
-  const storedAt = count(raw.storedAt);
-  if (storedAt == null || typeof raw.complete !== "boolean") {
-    throw new Error("The exchange list from the backend has no download time.");
+  if (typeof raw.complete !== "boolean") {
+    throw new Error("The exchange list from the backend does not say whether it is complete.");
   }
   const exchanges = records(list(raw, "exchanges", "The exchange list"), exchange);
   const facilities = records(list(raw, "facilities", "The exchange list"), facility);
   return {
-    storedAt,
     complete: raw.complete,
     exchanges: exchanges.kept,
     facilities: facilities.kept,
@@ -260,21 +248,6 @@ function provider(row: Fields): (CloudProvider & { key: string }) | null {
     return null;
   }
   return { key: id, id, name, shortName, operator, asns: asns as number[], sites };
-}
-
-function source(row: unknown): SnapshotSource | null {
-  if (!isRecord(row)) {
-    return null;
-  }
-  const what = text(row.what);
-  const licence = text(row.licence);
-  const fetchedAt = text(row.fetchedAt);
-  const recordCount = count(row.recordCount);
-  const urls = Array.isArray(row.urls) ? row.urls.map(text) : null;
-  if (!what || !licence || !fetchedAt || recordCount == null || !urls || urls.includes(null)) {
-    return null;
-  }
-  return { what, licence, fetchedAt, recordCount, urls: urls as string[] };
 }
 
 /** `public/infra/cloud-regions.json` (scripts/infra-data/build-cloud-regions.mjs). */
@@ -314,10 +287,7 @@ export function parseCloudRegions(raw: unknown): CloudRegionData {
       longitude: lon
     };
   });
-  const sources = Array.isArray(raw.meta.sources) ? raw.meta.sources.map(source) : [];
   return {
-    builtAt: text(raw.meta.builtAt) ?? "unknown",
-    sources: sources.filter((entry): entry is SnapshotSource => entry !== null),
     providers: providers.kept.map(({ id, name, shortName, operator, asns, sites }) => ({
       id,
       name,
@@ -352,10 +322,6 @@ export function parseSubmarineCables(raw: unknown): CableData {
   if (!isRecord(raw)) {
     throw new Error("The cable map from the backend is not an object.");
   }
-  const fetchedAt = count(raw.fetchedAt);
-  if (fetchedAt == null) {
-    throw new Error("The cable map from the backend has no download time.");
-  }
   const cables = records(list(raw, "cables", "The cable map"), (row) => {
     const id = text(row.id);
     const name = text(row.name);
@@ -365,5 +331,122 @@ export function parseSubmarineCables(raw: unknown): CableData {
     }
     return { key: `cable:${id}`, id, name, segments: segments as Array<Array<[number, number]>> };
   });
-  return { fetchedAt, note: text(raw.note), cables: cables.kept, rejected: cables.rejected };
+  return { note: text(raw.note), cables: cables.kept, rejected: cables.rejected };
+}
+
+/** One satellite's mean elements (OMM fields for SGP4), from CelesTrak. */
+export interface SatelliteElements {
+  /** "sat|<group>|<NORAD id>": the pick and hover key on the globe. */
+  key: string;
+  noradId: number;
+  name: string;
+  /** International designator ("1998-067A"); empty when unknown. */
+  objectId: string;
+  /** UTC without a zone, as CelesTrak sends it. */
+  epoch: string;
+  epochMs: number;
+  /** Revolutions per day. */
+  meanMotion: number;
+  eccentricity: number;
+  /** Degrees. */
+  inclination: number;
+  raan: number;
+  argOfPericenter: number;
+  meanAnomaly: number;
+  bstar: number;
+  meanMotionDot: number;
+  meanMotionDdot: number;
+}
+
+export interface SatelliteGroupData {
+  group: SatelliteGroupId;
+  /** When the backend downloaded the elements, ms since the epoch. */
+  fetchedAt: number;
+  /** Set when the backend could not get a newer copy. */
+  note: string | null;
+  satellites: SatelliteElements[];
+  rejected: number;
+}
+
+const EPOCH = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?$/;
+
+const within = (value: unknown, low: number, high: number): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= low && value <= high
+    ? value
+    : null;
+
+function satellite(row: Fields, group: SatelliteGroupId): SatelliteElements | null {
+  const noradId = count(row.noradId);
+  const name = text(row.name);
+  const epoch = typeof row.epoch === "string" && EPOCH.test(row.epoch) ? row.epoch : null;
+  const epochMs = epoch ? Date.parse(`${epoch}Z`) : Number.NaN;
+  const meanMotion = within(row.meanMotion, Number.MIN_VALUE, 20);
+  const eccentricity = within(row.eccentricity, 0, 0.999999);
+  const inclination = within(row.inclination, 0, 180);
+  const raan = within(row.raan, 0, 360);
+  const argOfPericenter = within(row.argOfPericenter, 0, 360);
+  const meanAnomaly = within(row.meanAnomaly, 0, 360);
+  const bstar = within(row.bstar, -1, 1);
+  const meanMotionDot = within(row.meanMotionDot, -1, 1);
+  const meanMotionDdot = within(row.meanMotionDdot, -1, 1);
+  if (
+    noradId == null ||
+    noradId === 0 ||
+    !name ||
+    typeof row.objectId !== "string" ||
+    !epoch ||
+    !Number.isFinite(epochMs) ||
+    meanMotion == null ||
+    eccentricity == null ||
+    inclination == null ||
+    raan == null ||
+    argOfPericenter == null ||
+    meanAnomaly == null ||
+    bstar == null ||
+    meanMotionDot == null ||
+    meanMotionDdot == null
+  ) {
+    return null;
+  }
+  return {
+    key: `sat|${group}|${noradId}`,
+    noradId,
+    name,
+    objectId: row.objectId.trim(),
+    epoch,
+    epochMs,
+    meanMotion,
+    eccentricity,
+    inclination,
+    raan,
+    argOfPericenter,
+    meanAnomaly,
+    bstar,
+    meanMotionDot,
+    meanMotionDdot
+  };
+}
+
+/** `get_satellites` for `group` (the backend parsed CelesTrak's CSV already). */
+export function parseSatelliteGroup(raw: unknown, group: SatelliteGroupId): SatelliteGroupData {
+  if (!isRecord(raw)) {
+    throw new Error("The satellite data from the backend is not an object.");
+  }
+  if (raw.group !== SATELLITE_GROUPS[group].celestrak) {
+    throw new Error(`The backend sent satellite group ${String(raw.group)}, not ${group}.`);
+  }
+  const fetchedAt = count(raw.fetchedAt);
+  if (fetchedAt == null) {
+    throw new Error("The satellite data from the backend has no download time.");
+  }
+  const satellites = records(list(raw, "satellites", "The satellite data"), (row) =>
+    satellite(row, group)
+  );
+  return {
+    group,
+    fetchedAt,
+    note: text(raw.note),
+    satellites: satellites.kept,
+    rejected: satellites.rejected
+  };
 }

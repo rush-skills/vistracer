@@ -7,7 +7,9 @@
  * Rules:
  * - Ticks run only after `wake()` (data, camera input, resize, a render
  *   request from Cesium) and stop after `idleTicksBeforeSleep` ticks that
- *   drew nothing.
+ *   drew nothing. `wakeForFrame()` (a periodic update that needs one frame,
+ *   such as the satellites moving) sleeps right after the tick that draws,
+ *   unless something else woke the loop meanwhile.
  * - At most `maxFps` ticks per second, `batteryFps` on battery.
  * - No ticks while the window is hidden or minimized. Showing the window
  *   again wakes the loop, so a camera flight or a wake that arrived while
@@ -53,6 +55,8 @@ export class RenderGovernor {
   private handle: number | null = null;
   private lastTickMs: number | null = null;
   private idleTicks = 0;
+  /** The loop runs for one frame only (wakeForFrame), not to settle. */
+  private singleFrame = false;
   private visible = true;
   private onBattery = false;
   private disposed = false;
@@ -78,9 +82,24 @@ export class RenderGovernor {
       return;
     }
     this.idleTicks = 0;
+    this.singleFrame = false;
     if (this.handle === null) {
       this.handle = this.scheduler.request(this.onFrame);
     }
+  }
+
+  /**
+   * Asks for the next frame only. While the loop runs for another reason,
+   * this changes nothing; a `wake()` before the frame makes the loop settle
+   * as usual.
+   */
+  wakeForFrame(): void {
+    if (this.disposed || !this.visible || this.handle !== null) {
+      return;
+    }
+    this.idleTicks = 0;
+    this.singleFrame = true;
+    this.handle = this.scheduler.request(this.onFrame);
   }
 
   setVisible(visible: boolean): void {
@@ -125,13 +144,16 @@ export class RenderGovernor {
     }
     this.lastTickMs = timeMs;
     this.stats.ticks += 1;
+    const singleFrame = this.singleFrame;
     if (this.tick()) {
       this.stats.frames += 1;
-      this.idleTicks = 0;
+      // tick() may have called wake() (a render request during the frame).
+      this.idleTicks = singleFrame && this.singleFrame ? this.rules.idleTicksBeforeSleep : 0;
     } else {
       this.idleTicks += 1;
     }
     if (this.idleTicks >= this.rules.idleTicksBeforeSleep) {
+      this.singleFrame = false;
       this.stats.sleeps += 1;
       return;
     }

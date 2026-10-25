@@ -13,7 +13,7 @@
 //   cloud-regions.ts for the few codes it has no open airport for.
 //
 // The two downloads are saved in the --from folder (default
-// .claude-runs/infra-data, gitignored) and read from there on the next run,
+// scripts/infra-data/.cache, gitignored) and read from there on the next run,
 // so a rebuild with the same inputs gives the same file. Delete the folder
 // to download again. Needs Node 22.18 or later (TypeScript type stripping).
 
@@ -30,7 +30,7 @@ const SCHEMA_VERSION = 1;
 const args = process.argv.slice(2);
 const fromIndex = args.indexOf("--from");
 const inputDir = path.resolve(
-  fromIndex >= 0 ? args.splice(fromIndex, 2)[1] : path.join(ROOT, ".claude-runs", "infra-data")
+  fromIndex >= 0 ? args.splice(fromIndex, 2)[1] : path.join(ROOT, "scripts", "infra-data", ".cache")
 );
 const output = path.resolve(args[0] ?? path.join(ROOT, "src/renderer/public/infra/cloud-regions.json"));
 

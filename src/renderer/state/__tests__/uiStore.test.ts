@@ -119,6 +119,33 @@ describe("uiStore", () => {
     });
   });
 
+  it("writes a notice accepted while the saved file loads before whenSaved resolves", async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    api.getSettings.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const loading = useUiStore.getState().load();
+    useUiStore.getState().setLayerVisible("submarine-cables", true);
+    useUiStore.getState().acceptConsent();
+    let saved = false;
+    const written = useUiStore
+      .getState()
+      .whenSaved()
+      .then(() => (saved = true));
+    await flush();
+    // The backend would refuse now: nothing is written yet, so whenSaved waits.
+    expect(saved).toBe(false);
+    expect(api.setSettings).not.toHaveBeenCalled();
+
+    answer({ theme: "dark", layers: {}, collapsed: {} });
+    await loading;
+    await written;
+    expect(api.setSettings).toHaveBeenLastCalledWith("preferences.ui", {
+      theme: "dark",
+      layers: { "submarine-cables": true },
+      collapsed: {},
+      consents: { "submarine-cables": true }
+    });
+  });
+
   it("uses the defaults but saves nothing when the settings cannot be read", async () => {
     api.getSettings.mockRejectedValue(new Error("no app data folder"));
     vi.spyOn(console, "warn").mockImplementation(() => undefined);

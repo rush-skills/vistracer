@@ -29,15 +29,6 @@ export function clusterLevel(kmPerPx: number): number {
 
 export const cellKmForLevel = (level: number): number => 2 ** level;
 
-/**
- * Ground distance per pixel at the centre of a top-down view, for a
- * perspective camera `heightM` above the ground with horizontal field of
- * view `fovRad` over `widthPx` pixels.
- */
-export function kmPerPixel(heightM: number, fovRad: number, widthPx: number): number {
-  return (2 * heightM * Math.tan(fovRad / 2)) / Math.max(1, widthPx) / 1000;
-}
-
 export interface ClusterPoint {
   key: string;
   latitude: number;

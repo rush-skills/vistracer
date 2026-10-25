@@ -28,15 +28,15 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (304 tests across 34 files)
-npm run test:e2e       # Run e2e tests (82 tests across 7 files)
+npm run test           # Run unit + component tests (356 tests across 38 files)
+npm run test:e2e       # Run e2e tests (84 tests across 7 files)
 npm run test:watch     # Run tests in watch mode
-node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): wide start view, idle frames and compositor frames, online tile requests (incl. the online imagery switch), export input lock, infrastructure layers (no request while off, each source once, cable consent, no request to TeleGeography) in headless Chrome (36 checks)
+node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): wide start view, idle frames and compositor frames, online tile requests (incl. the online imagery switch), export input lock, infrastructure layers (no request while off, each source once, cable consent, no request to TeleGeography), satellites (no request or SGP4 code while off, consent, one frame per second, none while hidden), accessible names in headless Chrome (50 checks)
 node scripts/infra-data/build-cloud-regions.mjs  # Rebuild src/renderer/public/infra/cloud-regions.json (Node >= 22.18)
-node scripts/globe-check/ui-shots.mjs [dir]  # After a build: screenshots of every UI state, dark/light/960x640
+node scripts/globe-check/ui-shots.mjs [dir]  # After a build: screenshots of every UI state, dark/light/960x640/reduced motion+transparency
 
 # Rust
-cd src-tauri && cargo test                                # 182 tests (+3 ignored network smoke tests)
+cd src-tauri && cargo test                                # 199 tests (+4 ignored network smoke tests)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -62,6 +62,7 @@ VisTracer follows Tauri's architecture with a Rust backend and web frontend:
   - Auto-downloads GeoLite2 databases via MaxMind license key
   - Serves globe imagery tiles from NASA GIBS through a disk cache (`vistiles` URI scheme)
   - External enrichment providers (Team Cymru, RDAP, RIPE Stat, PeeringDB, PeeringDB IX list)
+  - Opt-in downloads behind the saved switch and consent: TeleGeography cable map, CelesTrak satellite groups
   - Hop location estimates (`geoloc/`): IX LAN, host name hint, GeoLite2; speed-of-light check; anycast
   - Entry point: `src-tauri/src/main.rs`
 
@@ -99,6 +100,7 @@ Key Tauri Commands:
 - `get_tile_cache_info` / `clear_tile_cache`: size of the globe tile cache, and emptying it
 - `get_peeringdb_sites`: exchanges and facilities from the IX list exchange matching downloaded (or null); never downloads
 - `get_submarine_cables`: the opt-in TeleGeography cable map; refuses unless the saved `preferences.ui` has layer `submarine-cables` on and its consent accepted
+- `get_satellites(group)`: one CelesTrak group of the opt-in satellites layer (`starlink`, `oneweb`, `gps-ops`, `stations`, `geo` only); refuses unless the saved `preferences.ui` has layer `satellites` and the group's switch on and consent `satellites` accepted; at most one request per group in 2 h, 12 h reuse, 2 h stop after an HTTP error
 
 Key Events (Tauri emit/listen):
 - `vistracer:traceroute:progress`: Streamed hop progress events
@@ -108,7 +110,7 @@ Key Events (Tauri emit/listen):
 
 - `main.rs`: Tauri app setup, command registration, state management, `vistiles` URI scheme
 - `atomic_file.rs`: `write_atomic` (unique temp file + rename), shared by the provider cache, the tile cache and the cable cache
-- `upstream.rs`: `HttpFetcher`: HTTPS to a fixed host list, redirects only within it, size cap (tiles: GIBS; cables: www.submarinecablemap.com)
+- `upstream.rs`: `HttpFetcher`: HTTPS to a fixed host list, redirects only within it, size cap (tiles: GIBS; cables: www.submarinecablemap.com; satellites: celestrak.org); `FetchError { message, sent }` says whether a request can have reached the host
 - `types.rs`: Shared data types (serialized to/from frontend)
 - `net.rs`: Private IP detection (mirrors `src/common/net.ts`) and `is_publicly_routable` (gate for provider lookups)
 - `commands/traceroute.rs`: Run orchestration: spawn, reader task, `select!` loop, lookup tasks, cancel, Linux UDP fallback
@@ -120,13 +122,14 @@ Key Events (Tauri emit/listen):
 - `commands/enrichment_cache.rs`: TTL cache and `ProviderCache` (shared by lookups and the IX download, write lock from snapshot to rename), persisted to `$APPCACHE/enrichment-cache.json`
 - `commands/ix_list.rs`: PeeringDB IX list download in a detached task, stale-while-refresh, 24 h TTL; `sites()` serves the exchange and data centre layers without downloading (a dataset of the previous version, without facilities, is refreshed)
 - `commands/cables.rs`: opt-in submarine cable map: parse and compact the GeoJSON at the edge, single flight, `$APPCACHE/submarine-cables.json` for 7 days, 10 min backoff with the old copy
+- `commands/satellites.rs`: opt-in satellite groups from CelesTrak (CSV, parsed at the edge): `SATELLITE_GROUPS` table (layer id, group, default), single flight, the saved switch read at the start, after the lock and right before the request, `$APPCACHE/satellites/<group>.json` for 12 h, `requests.json` saved before each request (no request without it; one per group in 2 h, also after a timeout or broken answer; 2 h stop after an HTTP error or unusable data; 15 min after a failed connection), older copy with a note; a saved time more than 5 min in the future (clock ahead) makes a copy stale and is moved to now plus its length, once
 - `commands/retry.rs`: `ProviderError`, backoff with jitter, `with_retry`
 - `commands/dns.rs`: Reverse DNS on the blocking pool with timeout and caching
 - `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup
 - `commands/app_info.rs`: App version and updater key state
 - `commands/tile_cache.rs`: globe tile cache: allowlisted GIBS layers, URI parsing, `$APPCACHE/tiles` with a 500 MB LRU cap, single-flight downloads, 3-failure pause, redirect allowlist; no upstream request while the "Online imagery" layer switch is off (`set_online_enabled`, applied at start and on every `set_settings`)
 - `commands/geodb_downloader.rs`: MaxMind database auto-download
-- `commands/persistence.rs`: In-memory store for settings, DNS cache, runs; settings validation; `UiPreferences` (theme, layer switches, collapsed panels, accepted layer notices `consents`; ids checked, unknown ids kept; a saved section is read field by field, so one bad value keeps the other choices)
+- `commands/persistence.rs`: In-memory store for settings, DNS cache, runs; settings validation; `UiPreferences` (theme, layer switches, collapsed panels, accepted layer notices `consents`; ids checked, unknown ids kept; a saved section is read field by field, so one bad value keeps the other choices; `submarine_cables()` and `satellite_group()` gates)
 - `geoloc/estimate.rs`: per-run location of every hop: candidates, RTT bound, reference hop, anycast, precedence
 - `geoloc/rtt.rs`: speed-of-light check (infeasible / tightened / widened / feasible); never moves an estimate
 - `geoloc/hostname.rs` + `geoloc/places.rs`: location hints in router host names; bundled airport table `data/airports.csv` (OurAirports, public domain; see `data/README.md`)
@@ -151,11 +154,12 @@ CesiumJS globe, details and diagram in [docs/architecture.md#globe](./docs/archi
 
 - **Scene mapping** (`src/renderer/lib/globe.ts`, pure): `buildGlobeScene` turns hops into markers, raised great-circle arcs, confidence rings (km, styled by confidence), anycast reach circles and labels; `nextCameraFocus` / `planFlight` decide camera flights; app-made flights stay at or above `bundledOnlyHeight` and `OnlineImageryGate` keeps the online layer off after them until the user zooms, drags or tilts (`lib/imagery.ts`). Export input lock uses the controller's per-gesture switches, not `enableInputs` (Cesium flights reset it). No Cesium import, tested in jsdom.
 - **Adapter** (`modules/app/components/globe/cesiumGlobe.ts`): the only Cesium import. `CesiumWidget` with every ion default off (`baseLayer: false`, ellipsoid terrain, no sky box), primitives (not entities), picking for hover/click. `GlobeViewport.tsx` loads it lazily behind the `GlobeController` interface (`globe/controller.ts`); tests mock that module.
-- **Render governor** (`src/renderer/lib/renderGovernor.ts`): owns the rAF loop. `requestRenderMode`, wake on data/input/resize/`scene.requestRender()`, sleep after 20 idle ticks, 60 fps cap (30 on battery), paused when hidden or minimized.
+- **Render governor** (`src/renderer/lib/renderGovernor.ts`): owns the rAF loop. `requestRenderMode`, wake on data/input/resize/`scene.requestRender()`, sleep after 20 idle ticks, 60 fps cap (30 on battery), paused when hidden or minimized. `wakeForFrame()` asks for one frame (the satellites, once a second) and sleeps right after it.
 - **Imagery** (`src/renderer/lib/imagery.ts`): bundled Blue Marble + Black Marble tiles (levels 0–4) in `src/renderer/public/imagery/` (built by `scripts/build-globe-imagery.mjs`); online Blue Marble levels 5–8 via `vistiles://` → Rust tile cache → NASA GIBS. Night imagery fades out with Cesium's lighting fade when zooming in.
 - **Arc colouring**: latency bands (`latencyToColor`); markers and rings use `hopIndexToColor` (20-colour palette, shared with the hop table).
 - **Day/night**: Cesium's sun from the clock (wall clock on each drawn frame, and every 10 minutes while idle).
-- **Vite**: `vite.config.ts` serves/copies Cesium's `Workers/`, IAU2006 tables, terrain heights and images to `/cesium/`, and aliases `meshoptimizer` to a stub (its WebAssembly would break the CSP).
+- **Vite**: `vite.config.ts` serves/copies Cesium's `Workers/`, IAU2006 tables, terrain heights and images to `/cesium/`, and aliases `meshoptimizer` and satellite.js's `#wasm-single-thread`/`#wasm-multi-thread` to stubs (their WebAssembly would break the CSP).
+- **Credits**: the adapter gives Cesium a detached `creditContainer` and `creditViewport` (its lightbox is an `aria-modal` dialog whose hiding style the CSP blocks); `lib/attribution.ts` + `Attribution.tsx` show the credits.
 
 ### UI Shell
 
@@ -175,15 +179,26 @@ Details and diagram in [docs/architecture.md#infrastructure-layers](./docs/archi
 - **Registry fields** (`lib/layers.ts`): target kinds `scene`, `filter` (provider switch, applied before clustering), `style` (network colours), `imagery`; `parent` (child switch), `data` (source loaded when first shown), `consent` (notice before first use), `swatch`, `commandName`. All infrastructure layers default off.
 - **Data** (`state/infraStore.ts`, `hooks/useInfra.ts`): `peeringdb-sites` (IPC, never downloads), `cloud-regions` (bundled `public/infra/cloud-regions.json`), `submarine-cables` (IPC after `uiStore.whenSaved()`); parsed at the edge in `lib/infra/sources.ts`. Loaded when the set of needed sources changes; hidden layers keep their data.
 - **PeeringDB is not bundled** (its AUP forbids passing data on in bulk without approval); the layers reuse exchange matching's list.
-- **Pure libs** (`lib/infra/`): `cluster.ts` (greedy by importance, 2^n km cells), `routeLinks.ts` (phase 2 IX match + nearest sites), `cloudMatch.ts` (ASN + distance → high/medium/low with a reason), `asnColors.ts` (Paul Tol light, 7 colours, CVD + contrast tested), `cableGuess.ts`, `scene.ts`, `siteCard.ts`.
+- **Pure libs** (`lib/infra/`): `cluster.ts` (greedy by importance, 2^n km cells), `routeLinks.ts` (phase 2 IX match + nearest sites), `cloudMatch.ts` (ASN + distance → high/medium/low with a reason), `asnColors.ts` (Paul Tol light, 7 colours, CVD + contrast tested), `cableGuess.ts`, `scene.ts`, `siteCard.ts`, `format.ts` (start-up text helpers).
+- **Lazy code**: `lib/infra/code.ts` (parsers, clustering, matching, site and satellite cards, satellite drawing) loads with the first layer data into `infraStore.code`; until then the hooks return empty results. Do not import those modules statically from start-up code or the globe adapter (the globe check fails when another script than `index` and `cesiumGlobe` loads while the layers are off).
 - **UI**: `LayerConsentDialog` (cables: CC BY-NC-SA 3.0 + host), `AsnLegend`, site hover cards, an Infrastructure section in the hop details; TeleGeography credit only while the cable layer is on.
+
+### Satellites
+
+Details and diagram in [docs/architecture.md#satellites](./docs/architecture.md#satellites):
+
+- **Registry**: `satellites` (group Space, consent: celestrak.org, limits) with five group switches `satellites-<group>` (`target: { kind: "satellites", group }`, `data: celestrak-<group>`); ids and defaults must equal Rust's `SATELLITE_GROUPS` (a layers test reads satellites.rs).
+- **Data**: `lib/satellites/groups.ts` (group table, colours, `MAX_SATELLITES_PER_GROUP` 12,000), `parseSatelliteGroup` in `lib/infra/sources.ts`, one infra source per group loaded after `uiStore.whenSaved()`, `staleAt` 12 h.
+- **Drawing**: `hooks/useSatellites.ts` (`useSatelliteDrawing` keeps identity while data/highlight are the same), `lib/satellites/scene.ts` (thin evenly, highlight), `lib/satellites/reconcile.ts` (`planSatelliteGroups`: keep, rebuild, remove), `GlobeController.setSatellites` (one `PointPrimitiveCollection` per group; hover styles in `lib/globe.ts`), `lib/satellites/propagate.ts` (satellite.js SGP4, lazy chunk), `lib/satellites/clock.ts` (`PeriodicTicker`, ≤ 1 move/s, paused when hidden).
+- **Route relevance**: `lib/satellites/isp.ts` (satellite ISP ASNs → likely satellite link with confidence; GEO checked against 470 ms RTT), shown in the hop details (with a "Show <group> satellites" button) and the hover card, always on; highlights the group.
+- **Card**: `lib/satellites/card.ts` (name, NORAD id, altitude at hover, element age). CelesTrak credit (list, chip, exports) while the layer is on.
 
 ### State Management
 
 Zustand stores:
 - `tracerouteStore`: `runs`, `currentRunId`, `status` (`idle` | `running` | `success` | `error`), `selectedHopIndex`, `hoveredHopIndex` and `hoverAnchor` (pointer or timeline rectangle; a hover card shows only with an anchor). Globe, timeline and hop table share selection and hover.
-- `uiStore`: theme, layer switches, collapsed panels, accepted notices (saved in `preferences.ui`), `pendingConsent`, `paletteOpen`.
-- `infraStore`: the infrastructure layer sources (idle, loading, ready, unavailable, error) and the hovered site.
+- `uiStore`: theme, layer switches, collapsed panels, accepted notices (saved in `preferences.ui`), `pendingConsent`, `paletteOpen`; `whenSaved()` also waits for the settings read in flight.
+- `infraStore`: the infrastructure and satellite layer sources (idle, loading, ready with `staleAt`, unavailable, error), the lazily loaded layer `code`, and the hovered site or satellite.
 - `exportStore` / `noticeStore`: export in progress and the export dialog; short result notices with one timer.
 
 ### GeoIP Database Management
@@ -220,55 +235,59 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 304 tests across 34 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 356 tests across 38 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 11 tests: store behavior, hovered hop, user selections ignored during an export
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
-  - `src/renderer/lib/__tests__/globe.test.ts` — 33 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders, flight floor (a whole trace follow from a zoomed-in view never moves sideways below it), network colours (split arcs), flight framing in the free area (the trace-follow floor test runs framed too)
-  - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 8 tests: idle sleep (no frames requested), wake during a frame, fps cap and battery, hidden/visible (resumes a running flight), dispose, render quality
+  - `src/renderer/lib/__tests__/globe.test.ts` — 34 tests: arcs (great circle, raised profile), confidence rings (radius on the sphere, styles, conflict style, emphasis), markers, labels, anycast reach, camera focus, borders, flight floor (a whole trace follow from a zoomed-in view never moves sideways below it), network colours (split arcs), flight framing in the free area (the trace-follow floor test runs framed too), field of view across the larger side (portrait windows)
+  - `src/renderer/lib/__tests__/renderGovernor.test.ts` — 9 tests: idle sleep (no frames requested), wake during a frame, one frame per periodic update (`wakeForFrame`), fps cap and battery, hidden/visible (resumes a running flight), dispose, render quality
   - `src/renderer/lib/__tests__/imagery.test.ts` — 13 tests: tile scheme URL per platform, no online layer in a browser, night imagery fade, bundled-only height, online layer held at start and after app moves until user input, only drags that start on the globe count
-  - `src/renderer/lib/__tests__/layers.test.ts` — 13 tests: registry ids and groups, every scene item has a switch, online imagery entry, infrastructure entries off with their data, cable consent text, provider filters match the snapshot, visibility defaults, needed sources, filters, style, shared empty lists, scene and imagery mapping
+  - `src/renderer/lib/__tests__/layers.test.ts` — 16 tests: registry ids and groups, every scene item has a switch, online imagery entry, infrastructure entries off with their data, cable consent text, satellites notice (celestrak.org, limits), group switches equal to Rust's `SATELLITE_GROUPS` (read from satellites.rs), satellite groups need the parent, provider filters match the snapshot, visibility defaults, needed sources, filters, style, shared empty lists, scene and imagery mapping
   - `src/renderer/lib/infra/__tests__/sources.test.ts` — 11 tests: edge parsers (PeeringDB sites, cloud snapshot, cable map), malformed records dropped and counted, bad outer shape or layout rejected, the bundled snapshot parses fully and matches the curated table
   - `src/renderer/lib/infra/__tests__/cluster.test.ts` — 8 tests: level steps, km per pixel, heaviest seed, order independence, every site once and seeds a cell apart, route sites as seeds, large cells at high latitude and the poles, antimeridian
   - `src/renderer/lib/infra/__tests__/asnColors.test.ts` — 9 tests: stable colour per ASN, distinct per route, repeats past 7, unknown grey and last, hop ranges, 3:1 on the dark globe, ΔE ≥ 12 under protanopia/deuteranopia/tritanopia
-  - `src/renderer/lib/infra/__tests__/cloudMatch.test.ts` — 11 tests: high/medium/low rules, vague estimates, weak or disputed estimates at most medium, anycast, another network never matches, proximity only without an ASN, hidden providers, km text
+  - `src/renderer/lib/infra/__tests__/cloudMatch.test.ts` — 11 tests: high/medium/low rules, vague estimates (no "edge site" for them), weak or disputed estimates at most medium, anycast, another network never matches, proximity only without an ASN, hidden providers, km text
   - `src/renderer/lib/infra/__tests__/routeLinks.test.ts` — 3 tests: phase 2 IX match lights its exchange, nearest exchange and data centre, weak or disputed hops not linked
   - `src/renderer/lib/infra/__tests__/cableGuess.test.ts` — 4 tests: great-circle densifying, guess for a long crossing, none for short/low-confidence/no cable, at most two nearest first
-  - `src/renderer/lib/infra/__tests__/scene.test.ts` — 12 tests: nothing for hidden layers, route sites lit and labelled, clustering and filters before clustering, marker styles, guessed cables (every line, one label), unchanged route results kept, marker contrast, site cards
+  - `src/renderer/lib/infra/__tests__/scene.test.ts` — 12 tests: nothing for hidden layers, route sites lit and labelled, clustering and filters before clustering, marker styles and the hovered style, guessed cables (every line, one label), unchanged route results kept, marker contrast, site cards
   - `src/renderer/lib/__tests__/timeline.test.ts` — 5 tests: RTT stats, samples, loss, latency jumps, location kinds, screen reader text
   - `src/renderer/lib/__tests__/hoverCard.test.ts` — 7 tests: card content (anycast, private, no reply, conflict), placement next to the pointer or a timeline hop, always inside the window
-  - `src/renderer/lib/__tests__/commands.test.ts` — 13 tests: provider switch names and showing the parent, registry contents, toggle titles, hop search, disabled reasons (incl. no trace or hop flight during an export), typed host and its place in the results, word-by-word fuzzy ranking, ⌘K vs Ctrl+K, auto repeat, non-Latin layouts
+  - `src/renderer/lib/__tests__/commands.test.ts` — 15 tests: provider switch names and showing the parent, a child under a hidden parent offered as "Show" (README example), satellite group commands, registry contents, toggle titles, hop search, disabled reasons (incl. no trace or hop flight during an export), typed host and its place in the results, word-by-word fuzzy ranking, ⌘K vs Ctrl+K, auto repeat, non-Latin layouts
   - `src/renderer/styles/__tests__/tokens.test.ts` — 17 tests: WCAG AA for text tokens in both themes (glass and solid), text on the globe, reduced motion and transparency rules
-  - `src/renderer/state/__tests__/uiStore.test.ts` — 6 tests: parsing saved UI preferences (incl. consents), defaults, saving, choices made while the read is in flight, no writes after a failed read, write failures
-  - `src/renderer/state/__tests__/infraStore.test.ts` — 8 tests: nothing loaded until asked then once, no list / old list messages, retry only when asked again, cable switch written before the backend is asked, cloud file layout check, layer notice accept/decline/once
-  - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 13 tests: scene and fly-to (with panel insets) through a mocked `GlobeController`, hover/select sync, no flight for a click during an export, input lock during export, hidden layers and imagery switches, WebGL failure message, imagery notice, infrastructure items on/off, re-clustering on a new level only, site hover to the store, no framing during an export, no rebuild for an unchanged hop update, `measureInsets`
-  - `src/renderer/modules/app/components/__tests__/LayerPanel.test.tsx` — 6 tests: switches from the registry by group, online imagery off saved, Escape returns focus, child switches, data status, cable notice before the first show and only once
+  - `src/renderer/state/__tests__/uiStore.test.ts` — 7 tests: parsing saved UI preferences (incl. consents), defaults, saving, choices made while the read is in flight, a notice accepted during the read written before `whenSaved` resolves, no writes after a failed read, write failures
+  - `src/renderer/state/__tests__/infraStore.test.ts` — 13 tests: nothing loaded until asked then once (layer code with the first data), dropped records logged, no list / old list messages, retry only when asked again, cable and satellite switches written before the backend is asked, satellite data reloaded after 12 h with the old shown meanwhile and kept as the same object for the same download, a group dated in the future asked again, thinning note, cloud file layout check, layer notice accept/decline/once
+  - `src/renderer/modules/app/components/__tests__/GlobeViewport.test.tsx` — 16 tests: scene and fly-to (with panel insets) through a mocked `GlobeController`, hover/select sync, no flight for a click during an export, input lock during export, hidden layers and imagery switches, WebGL failure message, imagery notice, infrastructure items on/off, re-clustering on a new level only, site hover to the store (restyled, no rebuild), no framing during an export, no rebuild for an unchanged hop update, satellite groups drawn and kept across hop events, the route's constellation highlighted, satellite hover with its height, `measureInsets` (incl. the legend's left edge)
+  - `src/renderer/modules/app/components/__tests__/LayerPanel.test.tsx` — 7 tests: switches from the registry by group, online imagery off saved, Escape returns focus, child switches, data status, cable notice before the first show and only once, satellite groups under Satellites behind their notice
   - `src/renderer/modules/app/components/__tests__/AsnLegend.test.tsx` — 2 tests: legend of the route's networks, status bar legend switches
   - `src/renderer/modules/app/components/__tests__/HopTimeline.test.tsx` — 9 tests: RTT/loss/confidence/jumps, selection sync both ways, arrow keys/Home/End, selection left to an export (keys still prevented), Escape hides the card, hover sync, scroll into view, aria-controls only to an existing list, collapse saved
-  - `src/renderer/modules/app/components/__tests__/HoverCard.test.tsx` — 4 tests: content from the store with no bridge call or fetch, placed again after an export, no card for table hover or during export, site card from the loaded data (a hop wins)
+  - `src/renderer/modules/app/components/__tests__/HoverCard.test.tsx` — 7 tests: content from the store with no bridge call or fetch, satellite card (name, NORAD id, altitude, element age), likely satellite link of a hop (a low-confidence one called possible, with the reason), placed again after an export, no card for table hover or during export, site card from the loaded data (a hop wins)
   - `src/renderer/modules/app/components/__tests__/CommandPalette.test.tsx` — 12 tests: open/close per platform, held shortcut, focus return, combobox/listbox roles, fuzzy match, execute, disabled commands, typed host, focus trap (Tab and presses inside the bar), empty result, not over another dialog
-  - `src/renderer/modules/app/components/__tests__/Attribution.test.tsx` — 3 tests: full credit list with required notices, GIBS credit and acknowledgement also while online imagery is off, TeleGeography credit and chip only while the cable layer is on
+  - `src/renderer/modules/app/components/__tests__/Attribution.test.tsx` — 4 tests: full credit list with required notices, GIBS credit and acknowledgement also while online imagery is off, TeleGeography credit and chip only while the cable layer is on, CelesTrak while the satellites are on and satellite.js always
   - `src/renderer/modules/app/components/__tests__/FooterBar.test.tsx` — 1 test: a finished export's reset timer does not end the next export
-  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 17 tests: infrastructure section (cloud match, nearest data centre), dots in network colours, multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, row selection (not during an export), hover sync, scroll to selection, focus kept when the pane collapses
+  - `src/renderer/modules/app/components/__tests__/HopDetailsPane.test.tsx` — 20 tests: infrastructure section (cloud match, nearest data centre), likely satellite link with a button that opens the notice (focus into it and back with Escape), a low-confidence link called possible, without the button, dots in network colours, multipath, PeeringDB, provider failures, location fields, RTT conflict, anycast, empty states, row selection (not during an export), hover sync, scroll to selection, focus kept when the pane collapses
   - `src/renderer/modules/app/components/__tests__/IntegrationSettingsModal.test.tsx` — 11 tests: provider toggles, exchange matching switch, key, URL validation, tile cache size and clearing, online tile disclosure
   - `src/renderer/modules/app/lib/__tests__/tileCache.test.ts` — 2 tests: cache size text
-  - `src/renderer/modules/app/lib/__tests__/exportCredits.test.ts` — 2 tests: TeleGeography credit in exports only while the cable layer is on, drawn in the lower right corner
+  - `src/renderer/modules/app/lib/__tests__/exportCredits.test.ts` — 2 tests: TeleGeography and CelesTrak credits in exports only while their layer is on, drawn in the lower right corner
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
+  - `src/renderer/hooks/__tests__/useInfraLoading.test.tsx` — 3 tests: a source read again when one of its layers is turned off and on (also while a sibling layer stays on), a failed source retried only then, a missing exchange list read again after a trace for the layers that show it
+  - `src/renderer/lib/satellites/__tests__/propagate.test.ts` — 5 tests: SGP4 against Vallado's case 00005 (distance and z to the metre at 0 and 360 min), a geostationary longitude against IAU 1982 sidereal time (independent of satellite.js), a Starlink-like height, NaN for a decayed satellite
+  - `src/renderer/lib/satellites/__tests__/clock.test.ts` — 5 tests: nothing while there is nothing to move, at most one update a second (also with new data), the first data at once, paused while hidden and one catch-up, stopped and disposed
+  - `src/renderer/lib/satellites/__tests__/satellites.test.ts` — 15 tests: `parseSatelliteGroup` (keys, malformed records dropped and counted, wrong group or shape), satellite ISP match (Starlink medium, GEO by RTT, other networks ignored, highlight only likely links, "possible" wording for low confidence), drawing (style, stable arrays, highlight, even thinning, 3:1 on the dark globe), `planSatelliteGroups` (keep, rebuild, remove), satellite card and key (own group names only), element age text
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
 
-- **E2E tests** (`vitest.e2e.config.ts`): 82 tests across 7 files
-  - `tests/e2e/bridge.test.ts` — 20 tests: Tauri bridge invoke/listen integration, tile cache commands, exchange list and cable map commands
+- **E2E tests** (`vitest.e2e.config.ts`): 84 tests across 7 files
+  - `tests/e2e/bridge.test.ts` — 21 tests: Tauri bridge invoke/listen integration, tile cache commands, exchange list, cable map and satellite group commands
   - `tests/e2e/traceroute-flow.test.ts` — 7 tests: full traceroute lifecycle
   - `tests/e2e/store-integration.test.ts` — 15 tests: Zustand store with API
   - `tests/e2e/settings-persistence.test.ts` — 10 tests: settings round-trip
   - `tests/e2e/geodb-management.test.ts` — 7 tests: GeoDB download/configure flow
   - `tests/e2e/net-utilities.test.ts` — 16 tests: network utility functions
-  - `tests/e2e/ui-shell.test.tsx` — 7 tests: whole App through the real bridge (faked invoke/listen, mocked Cesium adapter): panels and a trace, command bar theme + layer switch saved, typed host traced with the panel's options, reset options keeps the target, collapsed panels after a restart, no layer data while the layers are off (then each source once), cable notice → one download after consent, none while off
+  - `tests/e2e/ui-shell.test.tsx` — 8 tests: whole App through the real bridge (faked invoke/listen, mocked Cesium adapter): panels and a trace, command bar theme + layer switch saved, typed host traced with the panel's options, reset options keeps the target, collapsed panels after a restart, no layer data while the layers are off (then each source once), cable notice → one download after consent, none while off; satellites notice → one request per shown group after consent, none for a group switch alone or while off
 
 ### Rust Tests
 
-- 182 tests in `src-tauri/src/` (plus three ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache, `smoke_real_cable_map` downloads the TeleGeography cable map) covering:
+- 199 tests in `src-tauri/src/` (plus four ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache, `smoke_real_cable_map` downloads the TeleGeography cable map, `smoke_real_celestrak` downloads the GPS group from CelesTrak once) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
@@ -278,6 +297,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
   - PeeringDB sites: facilities and counts from real rows, served from memory and the disk cache with no download, a dataset of the previous version used and refreshed
   - Cable map: GeoJSON parsing (synthetic fixture), malformed features, nothing read or sent while not allowed, one download for concurrent calls, disk copy after a restart, backoff, retry after it, stale copy, damaged copy replaced, host allowlist; `UiPreferences::submarine_cables` needs layer and consent
+  - Satellites: CelesTrak CSV parsing (fixture in CelesTrak's layout with Vallado's case 00005; malformed rows skipped; not GP data is an error), only celestrak.org and the five groups, nothing read or sent while not allowed (also for a group queued behind another request after the layer was turned off, and when the switch is off right before the request), a broken-off answer counts as a download, no request without a saved request log, one request for concurrent calls, 12 h reuse across a restart, one request per group in 2 h across a restart, 2 h stop for every group after an HTTP error or unusable data (persisted), 15 min retry after a network error, older copy with a note, damaged files replaced, a copy dated in the future refreshed (note with date and time) and future request or pause times capped and saved once; `UiPreferences::satellite_group` needs layer, group (or its default) and consent
   - Tile cache: URI parsing on every platform, rejected hosts and paths (never fetched), upstream allowlist, hit/miss, errors and non-images not cached, LRU eviction at the cap, crash leftovers and interrupted clears, clear, single flight for one tile, concurrent writes of many tiles, failure pause, no download while online imagery is off (cached tiles still served), GET/HEAD only (405 otherwise), `HttpFetcher` size cap and redirect allowlist (local mock server); `write_atomic` under concurrent writers
 
 ## Key Implementation Details
@@ -291,6 +311,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 - **State persistence**: In-memory `AppStore` with `Mutex` for thread-safe access; settings in `$APPDATA/settings.json`, provider cache in `$APPCACHE/enrichment-cache.json`, globe tiles in `$APPCACHE/tiles/`
 - **CSP**: strict policy in `tauri.conf.json` (`script-src 'self'`); never inject inline scripts (gif.js loads as a `?url` asset). The tile scheme (`vistiles:`, `http://vistiles.localhost`) is allowed in `img-src`/`connect-src`; no `'wasm-unsafe-eval'` (see `meshoptimizerStub.ts`)
 - **Updater**: `plugins.updater.pubkey` is a placeholder until the signing key is set up; `get_app_info` reports `updaterConfigured`
+- **Never run `prettier --write` on whole folders**: the repo is not Prettier-clean, so it rewrites lines nobody changed. Format only new files or new code.
 
 ## Build & Package
 
@@ -327,3 +348,4 @@ npm run tauri:build
 - `cesium` (~1.146, Apache-2.0): 3D globe; licenses of bundled data in [docs/third-party-data.md](./docs/third-party-data.md)
 - `zustand`: State management
 - `@tanstack/react-query`: Async data fetching
+- `satellite.js` (~7.1, MIT): SGP4 for the satellites layer (lazy chunk; its WebAssembly builds are stubbed)

@@ -1,5 +1,12 @@
 import type { HopResolution } from "@common/ipc";
-import type { CableSpec, GeoPoint, InfraScene, SiteLayer, SiteSpec } from "../globe";
+import {
+  SITE_OUTLINE_LIT,
+  type CableSpec,
+  type GeoPoint,
+  type InfraScene,
+  type SiteLayer,
+  type SiteSpec
+} from "../globe";
 import {
   SITE_COLORS,
   hiddenFilterKeys,
@@ -7,7 +14,8 @@ import {
   type LayerVisibility
 } from "../layers";
 import { cablePositions, guessCables, type CableGuess } from "./cableGuess";
-import { matchCloudRegions, regionTitle, type CloudMatch } from "./cloudMatch";
+import { matchCloudRegions, type CloudMatch } from "./cloudMatch";
+import { regionTitle } from "./format";
 import { cellKmForLevel, clusterSites, type Cluster } from "./cluster";
 import { linkExchanges, linkFacilities, type SiteLinks } from "./routeLinks";
 import type {
@@ -269,8 +277,6 @@ export function buildSiteClusters(
 /** Pick ids of site markers: "<layer>|<site key>". */
 export const siteSpecKey = (layer: SiteLayer, key: string) => `${layer}|${key}`;
 
-const OUTLINE_ON_ROUTE = "#FFFFFF";
-
 function siteColors(site: SiteCluster): { fill: string; outline: string } {
   if (site.layer === "exchanges") {
     return SITE_COLORS.exchange;
@@ -281,26 +287,23 @@ function siteColors(site: SiteCluster): { fill: string; outline: string } {
   return SITE_COLORS[site.provider as keyof typeof SITE_COLORS] ?? SITE_COLORS.exchange;
 }
 
-/** Marker specs; cheap, so hover emphasis does not cluster again. */
-export function siteSpecs(sites: readonly SiteCluster[], hoveredKey: string | undefined): SiteSpec[] {
+/** Marker specs, built once per clustering. */
+export function siteSpecs(sites: readonly SiteCluster[]): SiteSpec[] {
   const specs = sites.map((site) => {
     const key = siteSpecKey(site.layer, site.cluster.key);
     const { fill, outline } = siteColors(site);
     const extra = Math.min(8, 2 * Math.log2(site.cluster.members.length));
-    const hovered = key === hoveredKey;
     const base = site.layer === "facilities" ? 7 : 6;
     const { latitude, longitude } = site.cluster;
     return {
       key,
       layer: site.layer,
-      members: site.cluster.members,
       position: { latitude, longitude, height: 0 },
       color: fill,
-      outline: site.linked || hovered ? OUTLINE_ON_ROUTE : outline,
+      outline: site.linked ? SITE_OUTLINE_LIT : outline,
       // A ring (facility) needs a wider outline to read as a ring.
       outlineWidth: (site.layer === "facilities" ? 2 : 1) + (site.linked ? 1 : 0),
-      pixelSize: base + extra + (site.linked ? 4 : 0) + (hovered ? 2 : 0),
-      filterKey: site.provider,
+      pixelSize: base + extra + (site.linked ? 4 : 0),
       label: site.label
     };
   });
@@ -355,15 +358,11 @@ export function cableSpecs(
   return specs.sort((a, b) => guess(a) - guess(b));
 }
 
-export function infraScene(
-  clusters: SiteClusters,
-  cables: CableSpec[],
-  hoveredKey: string | undefined
-): InfraScene {
+export function infraScene(clusters: SiteClusters, cables: CableSpec[]): InfraScene {
   return {
-    exchanges: siteSpecs(clusters.exchanges, hoveredKey),
-    facilities: siteSpecs(clusters.facilities, hoveredKey),
-    cloudRegions: siteSpecs(clusters.cloudRegions, hoveredKey),
+    exchanges: siteSpecs(clusters.exchanges),
+    facilities: siteSpecs(clusters.facilities),
+    cloudRegions: siteSpecs(clusters.cloudRegions),
     cables
   };
 }

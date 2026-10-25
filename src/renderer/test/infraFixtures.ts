@@ -1,3 +1,5 @@
+import * as infraCode from "@renderer/lib/infra/code";
+import type { InfraCode } from "@renderer/lib/infra/code";
 import type {
   CableData,
   CloudProvider,
@@ -9,6 +11,9 @@ import type {
 } from "@renderer/lib/infra/sources";
 
 /** Small, parsed infrastructure data for renderer tests. */
+
+/** The lazily loaded layer code, for tests that put data in the infra store directly. */
+export const INFRA_CODE: InfraCode = infraCode;
 
 export const exchange = (
   id: number,
@@ -24,7 +29,6 @@ export const exchange = (
   country: null,
   latitude,
   longitude,
-  radiusKm: 25,
   facilityCount: 3,
   networkCount
 });
@@ -49,7 +53,6 @@ export const facility = (
 });
 
 export const PEERINGDB: PeeringDbSiteData = {
-  storedAt: 1,
   complete: true,
   exchanges: [
     exchange(31, "DE-CIX Frankfurt", 50.11, 8.68, 1019),
@@ -89,8 +92,6 @@ export const region = (
 });
 
 export const CLOUD: CloudRegionData = {
-  builtAt: "2026-10-25",
-  sources: [],
   providers: PROVIDERS,
   regions: [
     region("aws", "eu-central-1", "Frankfurt", 50.11, 8.68),
@@ -103,7 +104,6 @@ export const CLOUD: CloudRegionData = {
 };
 
 export const CABLES: CableData = {
-  fetchedAt: 1,
   note: null,
   cables: [
     {

@@ -103,17 +103,32 @@ export interface SiteSpec {
   /** Pick id: unique in the scene. */
   key: string;
   layer: SiteLayer;
-  /** Site keys (lib/infra/sources.ts), the one drawn first. */
-  members: string[];
   position: GeoPoint;
   color: string;
   outline: string;
   pixelSize: number;
   outlineWidth: number;
-  /** The layer filter this site belongs to (a cloud provider). */
-  filterKey?: string;
   /** Sites on the route are labelled. */
   label?: string;
+}
+
+/** The outline of a site on the route, and of the marker under the pointer. */
+export const SITE_OUTLINE_LIT = "#FFFFFF";
+
+/**
+ * The style of the site marker under the pointer. The adapter applies it to
+ * that one point, so a hover does not rebuild the site markers.
+ */
+export function hoveredSiteStyle(spec: SiteSpec): { pixelSize: number; outline: string } {
+  return { pixelSize: spec.pixelSize + 2, outline: SITE_OUTLINE_LIT };
+}
+
+/** The satellite under the pointer: larger, with a white outline. */
+export function hoveredSatelliteStyle(group: { pixelSize: number }): {
+  pixelSize: number;
+  outlineWidth: number;
+} {
+  return { pixelSize: group.pixelSize + 4, outlineWidth: 2 };
 }
 
 export interface CableSpec {
@@ -605,8 +620,18 @@ export interface ViewFrame {
   insets: ViewInsets;
   widthPx: number;
   heightPx: number;
-  /** Horizontal field of view of the camera. */
+  /** Field of view across the larger side (Cesium's `PerspectiveFrustum.fov`). */
   fovRad: number;
+}
+
+/**
+ * Ground distance per pixel at the centre of a top-down view, for a
+ * perspective camera `heightM` above the ground. `fovRad` spans the larger
+ * side of the view, `viewportPx` pixels: Cesium's `PerspectiveFrustum.fov`
+ * is the width's in a landscape view and the height's in a portrait one.
+ */
+export function kmPerPixel(heightM: number, fovRad: number, viewportPx: number): number {
+  return (2 * heightM * Math.tan(fovRad / 2)) / Math.max(1, viewportPx) / 1000;
 }
 
 /** A free area smaller than this share of the canvas is not worth framing in. */
@@ -645,7 +670,7 @@ export function framedTarget(
   if (dxPx === 0 && dyPx === 0) {
     return { latitude: focus.latitude, longitude: focus.longitude };
   }
-  const kmPerPx = (2 * heightM * Math.tan(frame.fovRad / 2)) / frame.widthPx / 1000;
+  const kmPerPx = kmPerPixel(heightM, frame.fovRad, Math.max(frame.widthPx, frame.heightPx));
   // North is up in a top-down view: panels at the bottom move the camera south.
   const bearing = Math.atan2(dxPx, -dyPx);
   const target = destination(focus, bearing, Math.hypot(dxPx, dyPx) * kmPerPx);

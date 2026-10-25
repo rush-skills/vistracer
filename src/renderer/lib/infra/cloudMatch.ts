@@ -1,5 +1,6 @@
 import type { HopResolution, LocationConfidence, LocationEstimate } from "@common/ipc";
 import { greatCircleKm, hopPosition } from "../globe";
+import { formatKm, regionTitle } from "./format";
 import type { CloudProvider, CloudRegion } from "./sources";
 
 /**
@@ -32,9 +33,6 @@ export interface CloudMatch {
   reason: string;
 }
 
-/** "12 km", "1,200 km"; a distance that rounds to 0 is "under 1 km". */
-export const formatKm = (value: number) =>
-  value < 0.5 ? "under 1 km" : `${Math.round(value).toLocaleString("en-US")} km`;
 const km = formatKm;
 
 /** Why an estimate cannot support a high match, or null when it can. */
@@ -44,9 +42,6 @@ function estimateDoubt(position: LocationEstimate): string | null {
   }
   return position.confidence === "low" ? "low confidence" : null;
 }
-
-export const regionTitle = (provider: CloudProvider, region: CloudRegion) =>
-  `${provider.shortName} ${region.code}${region.city !== region.name ? ` (${region.city})` : ""}`;
 
 function nearest(
   regions: readonly CloudRegion[],
@@ -70,9 +65,9 @@ function nearest(
  *   medium or high confidence that the RTT check does not dispute.
  * - medium: the provider's ASN, a region within `NEAR_REGION_KM` (also a
  *   close region with a weak or disputed estimate).
- * - low: the provider's ASN with no region near (an edge site, or no
- *   location); or no ASN at all and a trusted, precise estimate next to a
- *   region.
+ * - low: the provider's ASN with no region near (an edge site, an estimate
+ *   too vague to tell, or no location); or no ASN at all and a trusted,
+ *   precise estimate next to a region.
  * - none: the ASN belongs to another network, however close a region is.
  */
 export function matchCloudRegion(
@@ -117,12 +112,18 @@ export function matchCloudRegion(
     const close = distanceKm <= limit && position.radiusKm <= PRECISE_ESTIMATE_KM;
     const confidence: LocationConfidence =
       close && !doubt ? "high" : distanceKm <= NEAR_REGION_KM ? "medium" : "low";
+    // Far from every region: a precise estimate there is likely an edge
+    // site; a vague one (a country centroid) says nothing about the site.
+    const far =
+      position.radiusKm > PRECISE_ESTIMATE_KM
+        ? `the hop's estimate (±${km(position.radiusKm)}) is too vague to place it at a ${kind(owner)}; the nearest, ${title}, is ${km(distanceKm)} from it.`
+        : `the nearest ${owner.shortName} ${kind(owner)}, ${title}, is ${km(distanceKm)} away: probably an edge site.`;
     const reason =
       confidence === "high"
         ? `${network}, and ${title} is ${km(distanceKm)} from the hop's estimate. An edge site of the same network in that city would look the same.`
         : confidence === "medium"
           ? `${network}; ${title} is ${km(distanceKm)} from the hop's estimate (±${km(position.radiusKm)}${doubt ? `, ${doubt}` : ""}), so the ${kind(owner)} is a guess.`
-          : `${network}, but the nearest ${owner.shortName} ${kind(owner)}, ${title}, is ${km(distanceKm)} away: probably an edge site.`;
+          : `${network}, but ${far}`;
     return { hopIndex: hop.hopIndex, provider: owner, region, distanceKm, confidence, reason };
   }
 

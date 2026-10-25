@@ -11,6 +11,9 @@ describe("export credits", () => {
     expect(exportCredits(layerVisibility({}))).toEqual([]);
     expect(exportCredits(layerVisibility({ "submarine-cables": true }))).toEqual([TELEGEOGRAPHY]);
     expect(exportCredits(layerVisibility({ "submarine-cables": false, exchanges: true }))).toEqual([]);
+    expect(exportCredits(layerVisibility({ satellites: true }))).toEqual([
+      "Satellite positions computed from CelesTrak GP data (celestrak.org)."
+    ]);
   });
 
   it("draws the credit lines in the lower right corner of the frame", () => {
