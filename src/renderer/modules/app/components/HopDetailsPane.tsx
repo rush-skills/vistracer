@@ -110,7 +110,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
               <tr>
                 <th aria-label="Colour on the globe"></th>
                 <th>#</th>
-                <th>Endpoint and network</th>
+                <th>Endpoint</th>
                 <th>RTT (ms)</th>
                 <th>Location</th>
               </tr>
@@ -166,7 +166,7 @@ export const HopDetailsPane: React.FC<HopDetailsPaneProps> = React.memo(({ run, 
                       <td>
                         <div className="hop-details__endpoint">
                           <span>
-                            <span className="hop-details__address">{hop.ipAddress ?? "*"}</span>
+                            {hop.ipAddress ?? "*"}
                             {extraPaths > 0 && (
                               <span
                                 className="hop-details__tag"

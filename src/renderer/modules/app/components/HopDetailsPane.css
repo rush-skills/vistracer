@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  width: clamp(320px, 31vw, 480px);
+  width: clamp(336px, 31vw, 480px);
   min-height: 0;
   max-height: 100%;
   padding: var(--space-3);
@@ -74,9 +74,23 @@
   background: var(--surface-1);
 }
 
+/* Fixed columns, so a long host name wraps instead of pushing Location out. */
 .hop-details__table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.hop-details__table th:nth-child(1) {
+  width: 22px;
+}
+
+.hop-details__table th:nth-child(2) {
+  width: 26px;
+}
+
+.hop-details__table th:nth-child(4) {
+  width: 64px;
 }
 
 .hop-details__table thead th {
@@ -90,7 +104,7 @@
 
 .hop-details__table th,
 .hop-details__table td {
-  padding: var(--space-2);
+  padding: var(--space-2) var(--space-1);
   text-align: left;
   vertical-align: top;
   font-size: var(--text-xs);
@@ -132,6 +146,8 @@
 .hop-details__endpoint,
 .hop-details__latency,
 .hop-details__location {
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -139,10 +155,6 @@
 
 .hop-details__endpoint {
   overflow-wrap: anywhere;
-}
-
-.hop-details__address {
-  white-space: nowrap;
 }
 
 .hop-details__table th {

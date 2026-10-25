@@ -44,6 +44,11 @@ code {
   outline-offset: 2px;
 }
 
+/* A dialog focuses its own container only to bring the focus inside. */
+[role="dialog"][tabindex="-1"]:focus {
+  outline: none;
+}
+
 /*
  * A floating panel over the globe. backdrop-filter costs nothing while the
  * globe is idle: the canvas does not change, so the compositor reuses the
