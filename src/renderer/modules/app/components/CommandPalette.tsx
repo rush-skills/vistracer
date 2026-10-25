@@ -1,12 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FiSearch } from "react-icons/fi";
 import { useCommandContext } from "@renderer/hooks/useCommands";
-import {
-  buildCommands,
-  searchCommands,
-  traceCommand,
-  type Command
-} from "@renderer/lib/commands";
+import { buildCommands, commandResults, type Command } from "@renderer/lib/commands";
 import { isCommandBarShortcut } from "@renderer/lib/shortcuts";
 import { useUiStore } from "@renderer/state/uiStore";
 import "./CommandPalette.css";
@@ -26,11 +21,10 @@ const CommandDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const optionRefs = useRef(new Map<string, HTMLLIElement>());
 
-  const results = useMemo(() => {
-    const trace = traceCommand(query, context);
-    const found = searchCommands(commands, query);
-    return trace ? [trace, ...found] : found;
-  }, [commands, context, query]);
+  const results = useMemo(
+    () => commandResults(commands, query, context),
+    [commands, context, query]
+  );
   const current = results[Math.min(active, results.length - 1)];
 
   // Focus moves into the bar and back to where it was when the bar closes.
@@ -94,7 +88,15 @@ const CommandDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         role="dialog"
         aria-modal="true"
         aria-label="Command bar"
-        onMouseDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          event.stopPropagation();
+          // A press anywhere but the search field (an option, the hints)
+          // would move the focus out of the bar, and Escape, the arrows and
+          // the focus trap with it. Clicks still run options.
+          if (event.target !== inputRef.current) {
+            event.preventDefault();
+          }
+        }}
         onKeyDown={onKeyDown}
       >
         <div className="command-palette__search">
@@ -104,8 +106,8 @@ const CommandDialog: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             type="text"
             role="combobox"
             aria-label="Search commands or type a host to trace"
-            aria-expanded={true}
-            aria-controls={LIST_ID}
+            aria-expanded={results.length > 0}
+            aria-controls={results.length > 0 ? LIST_ID : undefined}
             aria-autocomplete="list"
             aria-activedescendant={current ? optionId(current) : undefined}
             placeholder="Search commands, or type a host to trace"

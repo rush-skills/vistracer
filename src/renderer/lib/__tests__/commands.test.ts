@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ROUTE, makeRun } from "@renderer/test/fixtures";
 import {
   buildCommands,
+  commandResults,
   fuzzyScore,
   isValidTarget,
   searchCommands,
@@ -107,9 +108,11 @@ describe("buildCommands", () => {
     const running = context({ running: true });
     expect(byId(running, "trace.rerun").disabledReason).toBe("A trace is running.");
     expect(byId(running, "trace.cancel").disabledReason).toBeUndefined();
-    expect(byId(context({ exporting: true }), "export.gif").disabledReason).toBe(
-      "An export is running."
-    );
+    // A new run would end the export's camera lock.
+    const exporting = context({ exporting: true });
+    expect(byId(exporting, "export.gif").disabledReason).toBe("An export is running.");
+    expect(byId(exporting, "trace.rerun").disabledReason).toBe("An export is running.");
+    expect(traceCommand("example.org", exporting)?.disabledReason).toBe("An export is running.");
 
     const ctx = context();
     const rerun = byId(ctx, "trace.rerun");
@@ -139,6 +142,23 @@ describe("traceCommand", () => {
     expect(traceCommand("example.org", context({ running: true }))?.disabledReason).toBe(
       "A trace is running."
     );
+  });
+});
+
+describe("commandResults", () => {
+  const ids = (ctx: CommandContext, query: string) =>
+    commandResults(buildCommands(ctx), query, ctx).map((command) => command.id);
+
+  it("puts a host first, but a trace to a bare word after the matching commands", () => {
+    const ctx = context();
+    expect(ids(ctx, "example.org")[0]).toBe("trace.start");
+    // "trace again" means the command, not a trace to the host "again".
+    const again = ids(ctx, "trace again");
+    expect(again[0]).toBe("trace.rerun");
+    expect(again.at(-1)).toBe("trace.start");
+    expect(ids(context({ running: true }), "trace cancel")[0]).toBe("trace.cancel");
+    expect(ids(ctx, "trace localhost")).toContain("trace.start");
+    expect(ids(ctx, "layers")).not.toContain("trace.start");
   });
 });
 

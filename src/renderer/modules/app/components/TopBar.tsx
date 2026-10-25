@@ -10,6 +10,7 @@ import { useRecentRuns } from "@renderer/hooks/useRecentRuns";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { FiSliders } from "react-icons/fi";
 import { usePanel } from "@renderer/hooks/usePanel";
+import { useExportStore } from "@renderer/state/exportStore";
 import { IntegrationSettingsModal } from "./IntegrationSettingsModal";
 import logo from "@assets/logo.png";
 import { UI_EVENTS, type StartTraceDetail } from "../lib/uiEvents";
@@ -101,6 +102,7 @@ export const TopBar: React.FC = () => {
   const { data: recentRuns } = useRecentRuns();
 
   const isRunning = status === "running";
+  const exporting = useExportStore((state) => state.working);
 
   // The command bar starts traces through UI_EVENTS.START_TRACE; they use
   // the options in this form, read from the latest render.
@@ -109,7 +111,12 @@ export const TopBar: React.FC = () => {
   const traceTo = React.useCallback(
     async (rawTarget: string) => {
       const target = rawTarget.trim();
-      if (!target || useTracerouteStore.getState().status === "running") {
+      // A new run during an export would end the export's camera lock.
+      if (
+        !target ||
+        useTracerouteStore.getState().status === "running" ||
+        useExportStore.getState().working
+      ) {
         return;
       }
       const options = formRef.current;
@@ -295,14 +302,14 @@ export const TopBar: React.FC = () => {
     };
 
   const isSubmitEnabled = useMemo(() => {
-    if (!form.target.trim()) {
+    if (!form.target.trim() || exporting) {
       return false;
     }
     if (isRunning && pendingRequest) {
       return false;
     }
     return true;
-  }, [form.target, isRunning, pendingRequest]);
+  }, [form.target, isRunning, pendingRequest, exporting]);
 
   const handleChange = (field: keyof TracerouteFormState) =>
     (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {

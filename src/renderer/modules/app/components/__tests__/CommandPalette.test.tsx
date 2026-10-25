@@ -147,16 +147,33 @@ describe("CommandPalette", () => {
 
   it("keeps the focus inside while open", () => {
     pressShortcut({ ctrlKey: true });
-    key("Tab");
+    // fireEvent returns false when the handler prevented the default move.
+    expect(key("Tab")).toBe(false);
     expect(document.activeElement).toBe(input());
-    key("Tab", { shiftKey: true });
+    expect(key("Tab", { shiftKey: true })).toBe(false);
     expect(document.activeElement).toBe(input());
+  });
+
+  it("keeps the focus in the search field when a press lands elsewhere in the bar", () => {
+    useTracerouteStore.setState({ currentRunId: undefined });
+    pressShortcut({ ctrlKey: true });
+    type("png");
+    const disabled = options()[0];
+    // A press on an option or the key hints would otherwise blur the field,
+    // and Escape and the arrows would stop working.
+    expect(fireEvent.mouseDown(disabled)).toBe(false);
+    expect(fireEvent.mouseDown(screen.getByText("move"))).toBe(false);
+    expect(fireEvent.mouseDown(input())).toBe(true);
+    key("Escape");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("says when nothing matches", () => {
     pressShortcut({ ctrlKey: true });
     type("qqqqq");
     expect(screen.queryByRole("listbox")).toBeNull();
+    expect(input().getAttribute("aria-expanded")).toBe("false");
+    expect(input().hasAttribute("aria-controls")).toBe(false);
     expect(screen.getByText("No command matches “qqqqq”.")).toBeTruthy();
   });
 

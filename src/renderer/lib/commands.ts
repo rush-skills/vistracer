@@ -53,6 +53,14 @@ export interface CommandContext {
 
 const RUNNING = "A trace is running.";
 const NO_RUN = "Trace a host first.";
+const EXPORTING = "An export is running.";
+
+/**
+ * A new trace during an export would end the export's camera lock
+ * (startRun clears captureActive) and change the recorded frames.
+ */
+const traceBlocked = (ctx: CommandContext) =>
+  ctx.running ? RUNNING : ctx.exporting ? EXPORTING : undefined;
 
 export function buildCommands(ctx: CommandContext): Command[] {
   const { actions, run } = ctx;
@@ -64,7 +72,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
     group: "Trace",
     detail: run ? `${run.request.target} (${run.request.protocol})` : undefined,
     keywords: "repeat rerun again",
-    disabledReason: !run ? NO_RUN : ctx.running ? RUNNING : undefined,
+    disabledReason: !run ? NO_RUN : traceBlocked(ctx),
     run: () => {
       if (run) {
         actions.rerun(run.request);
@@ -125,7 +133,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
     });
   }
 
-  const exportBlocked = !run ? NO_RUN : ctx.exporting ? "An export is running." : undefined;
+  const exportBlocked = !run ? NO_RUN : ctx.exporting ? EXPORTING : undefined;
   const exportCommand = (format: ExportCommandFormat, title: string, keywords: string) => ({
     id: `export.${format}`,
     title,
@@ -180,51 +188,69 @@ export function isValidTarget(target: string): boolean {
 }
 
 /**
- * "Trace <host>" for a query that names a host: "trace " and a target, or
- * something with a dot or a colon (a domain or an IP address). A bare word
- * like "layers" is a search, not a host.
+ * The host a query names: "trace " and a target, or something with a dot or
+ * a colon (a domain or an IP address). A bare word like "layers" is a
+ * search, not a host.
  */
-export function traceCommand(query: string, ctx: CommandContext): Command | null {
+function traceTarget(query: string): string | null {
   const trimmed = query.trim();
   const prefixed = /^trace\s+(\S+)$/i.exec(trimmed);
   const target = prefixed ? prefixed[1] : /[.:]/.test(trimmed) ? trimmed : "";
-  if (!target || !isValidTarget(target)) {
+  return target && isValidTarget(target) ? target : null;
+}
+
+/** "Trace <host>" for a query that names a host (see traceTarget). */
+export function traceCommand(query: string, ctx: CommandContext): Command | null {
+  const target = traceTarget(query);
+  if (!target) {
     return null;
   }
   return {
     id: "trace.start",
     title: `Trace ${target}`,
     group: "Trace",
-    disabledReason: ctx.running ? RUNNING : undefined,
+    disabledReason: traceBlocked(ctx),
     run: () => ctx.actions.startTrace(target)
   };
+}
+
+/**
+ * What the command bar lists for `query`, best first. "Trace <host>" leads
+ * when the target looks like a host (a dot or a colon). For "trace <word>"
+ * it comes after the matching commands, so "trace again" still offers "Run
+ * the last trace again" first rather than a trace to the host "again".
+ */
+export function commandResults(
+  commands: Command[],
+  query: string,
+  ctx: CommandContext
+): Command[] {
+  const found = searchCommands(commands, query);
+  const trace = traceCommand(query, ctx);
+  if (!trace) {
+    return found;
+  }
+  return /[.:]/.test(traceTarget(query) ?? "") ? [trace, ...found] : [...found, trace];
 }
 
 const WORD_BREAK = /[\s.,:/-]/;
 
 /**
- * How well `query` matches `text`, case-insensitive; null when it does not.
- * The query as one piece of the text scores highest (more at a word start).
+ * How well one word matches `haystack` (lower case); null when it does not.
+ * The word as one piece of the text scores highest (more at a word start).
  * Otherwise its letters must appear in order: letters in a row and letters
  * at word starts score more.
  */
-export function fuzzyScore(query: string, text: string): number | null {
-  const needle = query.toLowerCase().replace(/\s+/g, "");
-  const haystack = text.toLowerCase();
-  if (!needle) {
-    return 0;
-  }
-  // Shorter texts with the same match are closer matches.
-  const lengthPenalty = haystack.length * 0.01;
-  const piece = haystack.indexOf(needle);
+function wordScore(word: string, haystack: string): number | null {
+  const piece = haystack.indexOf(word);
   if (piece >= 0) {
     const atWord = piece === 0 || WORD_BREAK.test(haystack[piece - 1]);
-    return 10 + needle.length * 4 + (atWord ? 4 : 0) - lengthPenalty;
+    return 10 + word.length * 4 + (atWord ? 4 : 0);
   }
   let score = 0;
   let from = 0;
   let previous = -2;
-  for (const letter of needle) {
+  for (const letter of word) {
     const at = haystack.indexOf(letter, from);
     if (at < 0) {
       return null;
@@ -239,7 +265,30 @@ export function fuzzyScore(query: string, text: string): number | null {
     previous = at;
     from = at + 1;
   }
-  return score - lengthPenalty;
+  return score;
+}
+
+/**
+ * How well `query` matches `text`, case-insensitive: every word of the query
+ * must match (wordScore), and the scores add up. Null when a word does not
+ * match.
+ */
+export function fuzzyScore(query: string, text: string): number | null {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return 0;
+  }
+  const haystack = text.toLowerCase();
+  let total = 0;
+  for (const word of words) {
+    const score = wordScore(word, haystack);
+    if (score == null) {
+      return null;
+    }
+    total += score;
+  }
+  // Shorter texts with the same match are closer matches.
+  return total - haystack.length * 0.01;
 }
 
 /** Commands that match `query`, best first; all of them, in order, for an empty query. */
@@ -250,12 +299,12 @@ export function searchCommands(commands: Command[], query: string): Command[] {
   return commands
     .map((command, order) => {
       const title = fuzzyScore(query, command.title);
-      const other = fuzzyScore(
+      const all = fuzzyScore(
         query,
-        [command.group, command.detail, command.keywords].filter(Boolean).join(" ")
+        [command.title, command.group, command.detail, command.keywords].filter(Boolean).join(" ")
       );
-      // The title counts double: it is what the user reads.
-      const best = Math.max(title == null ? -Infinity : title * 2, other ?? -Infinity);
+      // A match in the title counts double: it is what the user reads.
+      const best = Math.max(title == null ? -Infinity : title * 2, all ?? -Infinity);
       return { command, order, score: best };
     })
     .filter((match) => match.score > -Infinity)
