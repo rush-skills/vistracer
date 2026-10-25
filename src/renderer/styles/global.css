@@ -6,12 +6,6 @@
   background-color: var(--color-space);
   color: var(--color-text);
   -webkit-font-smoothing: antialiased;
-
-  /* Older names, used by the modal styles. */
-  --color-background: var(--color-space);
-  --color-surface: var(--glass-bg-solid);
-  --color-border: var(--color-line);
-  --color-accent-muted: var(--color-accent-soft);
 }
 
 html,
