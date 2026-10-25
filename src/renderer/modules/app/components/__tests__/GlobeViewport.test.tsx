@@ -336,10 +336,12 @@ describe("measureInsets", () => {
       panel("bottom", rect(12, 440, 500, 120)),
       panel("bottom", rect(12, 572, 600, 56)),
       panel("top", rect(12, 12, 420, 68)),
+      // The network legend, on the left above the timeline.
+      panel("left", rect(12, 200, 300, 180)),
       // A hidden panel has no size and covers nothing.
       panel("right", rect(0, 0, 0, 0))
     ];
-    expect(measureInsets(canvas)).toEqual({ top: 80, right: 348, bottom: 200, left: 0 });
+    expect(measureInsets(canvas)).toEqual({ top: 80, right: 348, bottom: 200, left: 312 });
     panels.forEach((element) => element.remove());
   });
 });

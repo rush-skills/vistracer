@@ -35,8 +35,8 @@ export const GLOBE_INSET = "data-globe-inset";
 
 /**
  * Pixels of each canvas edge that the panels marked with GLOBE_INSET cover
- * ("top", "right", "bottom"). Collapsed panels are small, so they cost
- * little; a hidden panel has no size.
+ * ("top", "right", "bottom", "left"). Collapsed panels are small, so they
+ * cost little; a hidden panel has no size.
  */
 export function measureInsets(canvas: HTMLElement): ViewInsets {
   const box = canvas.getBoundingClientRect();
@@ -53,6 +53,8 @@ export function measureInsets(canvas: HTMLElement): ViewInsets {
       insets.bottom = Math.max(insets.bottom, box.bottom - rect.top);
     } else if (edge === "top") {
       insets.top = Math.max(insets.top, rect.bottom - box.top);
+    } else if (edge === "left") {
+      insets.left = Math.max(insets.left, rect.right - box.left);
     }
   }
   return insets;

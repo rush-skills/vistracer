@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { greatCircleKm } from "@renderer/lib/globe";
+import { greatCircleKm, kmPerPixel } from "@renderer/lib/globe";
 import {
   CLUSTER_SPACING_PX,
   MAX_CLUSTER_LEVEL,
   cellKmForLevel,
   clusterLevel,
   clusterSites,
-  kmPerPixel,
   type ClusterPoint
 } from "@renderer/lib/infra/cluster";
 
@@ -35,7 +34,7 @@ describe("cluster level", () => {
   });
 
   it("measures a pixel at the centre of a top-down view", () => {
-    // 1,000 km up, 60° wide over 1,000 px: 2 × 1,000 × tan(30°) / 1,000 ≈ 1.155 km.
+    // 1,000 km up, 60° over the larger side of 1,000 px: 2 × 1,000 × tan(30°) / 1,000 ≈ 1.155 km.
     expect(kmPerPixel(1_000_000, Math.PI / 3, 1000)).toBeCloseTo(1.155, 3);
   });
 });

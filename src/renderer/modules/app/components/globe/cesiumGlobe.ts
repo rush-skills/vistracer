@@ -28,13 +28,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CAMERA_LIMITS,
   borderRings,
+  kmPerPixel,
   planFlight,
   type Emphasis,
   type FlightStep,
   type GeoPoint,
   type GlobeScene
 } from "@renderer/lib/globe";
-import { clusterLevel, kmPerPixel } from "@renderer/lib/infra/cluster";
+import { clusterLevel } from "@renderer/lib/infra/cluster";
 import {
   BUNDLED_IMAGERY,
   CanvasDrag,
@@ -244,17 +245,19 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
   controls.enableLook = false;
   camera.setView({ destination: Cartesian3.fromDegrees(15, 25, CAMERA_LIMITS.initialHeight) });
 
-  const horizontalFov = () =>
+  // `fov` spans the larger side of the canvas (the height in a portrait window).
+  const frustumFov = () =>
     camera.frustum instanceof PerspectiveFrustum && camera.frustum.fov !== undefined
       ? camera.frustum.fov
       : CesiumMath.PI_OVER_THREE;
+  const largerSide = () => Math.max(canvas.clientWidth, canvas.clientHeight);
   let framesDrawn = 0;
   let level: number | undefined;
   const removePostRender = scene.postRender.addEventListener(() => {
     framesDrawn += 1;
     // Only on frames drawn anyway: a new level re-clusters the site layers.
     const next = clusterLevel(
-      kmPerPixel(camera.positionCartographic.height, horizontalFov(), canvas.clientWidth)
+      kmPerPixel(camera.positionCartographic.height, frustumFov(), largerSide())
     );
     if (next !== level) {
       level = next;
@@ -656,7 +659,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           window.screen.width,
           window.screen.height
         ),
-        fovRad: horizontalFov(),
+        fovRad: frustumFov(),
         maximumScreenSpaceError: globe.maximumScreenSpaceError
       });
       const steps = planFlight(
@@ -671,7 +674,7 @@ export const createCesiumGlobe: CreateGlobe = (container, callbacks) => {
           insets,
           widthPx: canvas.clientWidth,
           heightPx: canvas.clientHeight,
-          fovRad: horizontalFov()
+          fovRad: frustumFov()
         }
       );
       // App-made moves load no online tiles, not even the wider view while
