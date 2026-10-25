@@ -65,6 +65,8 @@ export interface SatelliteLink {
   confidence: LocationConfidence;
   /** Says what the guess rests on, for the hop details. */
   reason: string;
+  /** For a low confidence: why, in a few words (the hover card). */
+  doubt: string | null;
 }
 
 const ms = (value: number) => `${Math.round(value).toLocaleString("en-US")} ms`;
@@ -81,7 +83,8 @@ export function satelliteLink(hop: HopResolution): SatelliteLink | null {
       hopIndex: hop.hopIndex,
       isp,
       confidence: "medium",
-      reason: `${network}. ${isp.name} carries its users' traffic through satellites in low Earth orbit to ground stations, so the route likely has a satellite link next to this network. Traceroute does not show which link is in space, and the network also has routers on the ground.`
+      reason: `${network}. ${isp.name} carries its users' traffic through satellites in low Earth orbit to ground stations, so the route likely has a satellite link next to this network. Traceroute does not show which link is in space, and the network also has routers on the ground.`,
+      doubt: null
     };
   }
   const rtt = hop.latency.minRttMs ?? hop.latency.avgRttMs;
@@ -90,7 +93,8 @@ export function satelliteLink(hop: HopResolution): SatelliteLink | null {
       hopIndex: hop.hopIndex,
       isp,
       confidence: "medium",
-      reason: `${network}, which carries traffic through geostationary satellites. This hop has no RTT, so the guess cannot be checked.`
+      reason: `${network}, which carries traffic through geostationary satellites. This hop has no RTT, so the guess cannot be checked.`,
+      doubt: null
     };
   }
   return rtt >= GEO_MIN_RTT_MS
@@ -98,14 +102,33 @@ export function satelliteLink(hop: HopResolution): SatelliteLink | null {
         hopIndex: hop.hopIndex,
         isp,
         confidence: "high",
-        reason: `${network}, and the round trip to this hop takes ${ms(rtt)}. A geostationary satellite link adds at least 477 ms, so one is likely between you and this hop.`
+        reason: `${network}, and the round trip to this hop takes ${ms(rtt)}. A geostationary satellite link adds at least 477 ms, so one is likely between you and this hop.`,
+        doubt: null
       }
     : {
         hopIndex: hop.hopIndex,
         isp,
         confidence: "low",
-        reason: `${network}, which carries traffic through geostationary satellites, but the round trip to this hop (${ms(rtt)}) is too short for one between you and this hop. A satellite link, if there is one, comes after it.`
+        reason: `${network}, which carries traffic through geostationary satellites, but the round trip to this hop (${ms(rtt)}) is too short for one between you and this hop. A satellite link, if there is one, comes after it.`,
+        doubt: `a ${ms(rtt)} round trip is too short for a geostationary link`
       };
+}
+
+/**
+ * How the hop details name a link: "likely" only for medium and high
+ * confidence; a low one is a possibility, not a likely link.
+ */
+export function satelliteLinkTitle(link: SatelliteLink): string {
+  return link.confidence === "low"
+    ? `Possible ${link.isp.name} satellite link`
+    : `Likely ${link.isp.name} link`;
+}
+
+/** The hover card's line, with the confidence and, when it is low, why. */
+export function satelliteLinkSummary(link: SatelliteLink): string {
+  return link.confidence === "low"
+    ? `Possible ${link.isp.name} satellite link (low confidence: ${link.doubt})`
+    : `Likely satellite link: ${link.isp.name}, ${link.confidence} confidence`;
 }
 
 export function satelliteLinks(hops: readonly HopResolution[]): Map<number, SatelliteLink> {

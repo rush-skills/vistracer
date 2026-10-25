@@ -611,6 +611,21 @@ describe("HopDetailsPane", () => {
     expect(screen.queryByRole("button", { name: "Show Starlink satellites" })).toBeNull();
   });
 
+  it("calls a low-confidence satellite link possible and offers no constellation", () => {
+    // Viasat's network, but 12 ms away: too close for a geostationary link before this hop.
+    const viasatHop: HopResolution = { ...multipathHop, asn: { asn: 7155, name: "VIASAT" } };
+    const run: TracerouteRun = { ...baseRun, hops: [viasatHop] };
+    useTracerouteStore.setState({ runs: { r: run }, currentRunId: "r" });
+    act(() => useUiStore.setState({ layers: {}, consents: {}, loaded: true, pendingConsent: undefined }));
+    render(<HopDetailsPane run={run} selectedHopIndex={viasatHop.hopIndex} status="success" />);
+    const section = screen.getByRole("region", { name: "Infrastructure" });
+    expect(section.textContent).toContain("Possible Viasat satellite link");
+    expect(section.textContent).toContain("low");
+    expect(section.textContent).toContain("too short for one between you and this hop");
+    expect(section.textContent).not.toContain("Likely");
+    expect(within(section).queryByRole("button")).toBeNull();
+  });
+
   it("moves the focus into the satellites notice and back to the button with Escape", async () => {
     const starlinkHop: HopResolution = { ...multipathHop, asn: { asn: 14593, name: "SPACEX-STARLINK" } };
     const run: TracerouteRun = { ...baseRun, hops: [starlinkHop] };

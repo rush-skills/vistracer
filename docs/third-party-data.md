@@ -190,7 +190,7 @@ layout with made-up rows and Vallado's published SGP4 test case 00005.
 - **Privacy.** The requests show CelesTrak the user's IP address and the
   groups shown; they carry nothing about traces.
 - **Satellite internet providers.** The networks that mark a hop as a
-  likely satellite link (Starlink AS14593, OneWeb AS800, Viasat AS7155,
+  likely or possible satellite link (Starlink AS14593, OneWeb AS800, Viasat AS7155,
   HughesNet AS6621, Eutelsat Skylogic AS29286) are listed in
   `src/renderer/lib/satellites/isp.ts`; their names were checked in
   PeeringDB's network records on 2026-10-25.

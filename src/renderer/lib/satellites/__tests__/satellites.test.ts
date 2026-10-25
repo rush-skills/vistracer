@@ -7,6 +7,8 @@ import {
   GEO_MIN_RTT_MS,
   routeConstellations,
   satelliteLink,
+  satelliteLinkSummary,
+  satelliteLinkTitle,
   satelliteLinks
 } from "@renderer/lib/satellites/isp";
 import { hoveredSatelliteStyle } from "@renderer/lib/globe";
@@ -86,6 +88,8 @@ describe("satelliteLink (satellite internet providers on the route)", () => {
     expect(link).toMatchObject({ hopIndex: 2, confidence: "medium", isp: { name: "Starlink", group: "starlink" } });
     expect(link?.reason).toContain("AS14593 is SpaceX's Starlink network");
     expect(link?.reason).toContain("does not show which link is in space");
+    expect(link && satelliteLinkTitle(link)).toBe("Likely Starlink link");
+    expect(link && satelliteLinkSummary(link)).toBe("Likely satellite link: Starlink, medium confidence");
     expect(satelliteLink(hop(3, 800, 40))?.isp.group).toBe("oneweb");
   });
 
@@ -93,9 +97,16 @@ describe("satelliteLink (satellite internet providers on the route)", () => {
     const slow = satelliteLink(hop(2, 7155, 612));
     expect(slow?.confidence).toBe("high");
     expect(slow?.reason).toContain("612 ms");
+    expect(slow && satelliteLinkTitle(slow)).toBe("Likely Viasat link");
+    expect(slow && satelliteLinkSummary(slow)).toBe("Likely satellite link: Viasat, high confidence");
     const fast = satelliteLink(hop(2, 6621, 35));
     expect(fast?.confidence).toBe("low");
     expect(fast?.reason).toContain("too short");
+    // Low confidence is a possibility, never "likely".
+    expect(fast && satelliteLinkTitle(fast)).toBe("Possible HughesNet satellite link");
+    expect(fast && satelliteLinkSummary(fast)).toBe(
+      "Possible HughesNet satellite link (low confidence: a 35 ms round trip is too short for a geostationary link)"
+    );
     expect(satelliteLink(hop(2, 29286, null))?.confidence).toBe("medium");
     expect(GEO_MIN_RTT_MS).toBeLessThan(477);
   });

@@ -5,6 +5,7 @@ import { useSatelliteLinks } from "@renderer/hooks/useSatellites";
 import { formatKm, regionTitle } from "@renderer/lib/infra/format";
 import { layerActive, layerVisibility, type LayerId } from "@renderer/lib/layers";
 import { SATELLITE_GROUPS } from "@renderer/lib/satellites/groups";
+import { satelliteLinkTitle } from "@renderer/lib/satellites/isp";
 import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { useUiStore } from "@renderer/state/uiStore";
 import { PROVIDER_LABELS, findProvider } from "../lib/providers";
@@ -245,7 +246,7 @@ const km = (value: number | null) => (value == null ? "" : ` (${formatKm(value)}
  * What the shown infrastructure layers say about this hop: the cloud
  * region it is likely in, the exchange and data centre near it, and
  * cables that may carry the link to it; and, from its network alone, a
- * likely satellite link. Nothing else while those layers are off.
+ * likely or possible satellite link. Nothing else while those layers are off.
  */
 const InfraSection: React.FC<HopInspectorProps> = ({ hop }) => {
   const route = useRouteInfra();
@@ -327,7 +328,7 @@ const InfraSection: React.FC<HopInspectorProps> = ({ hop }) => {
           <>
             <dt>Satellite</dt>
             <dd>
-              Likely {satellite.isp.name} link{" "}
+              {satelliteLinkTitle(satellite)}{" "}
               <span
                 className={`hop-details__confidence hop-details__confidence--${satellite.confidence}`}
               >

@@ -1053,8 +1053,8 @@ The opt-in **Satellites** layer draws a few groups of satellites where
 they are now: Starlink, OneWeb, GPS, space stations and geostationary
 satellites. The orbital elements come from CelesTrak; the positions are
 computed in the renderer with SGP4. A hop in the network of a satellite
-internet provider is marked as a likely satellite link, from its ASN
-alone, with or without the layer.
+internet provider is marked as a likely (or, with low confidence,
+possible) satellite link, from its ASN alone, with or without the layer.
 
 ```mermaid
 flowchart LR
@@ -1067,7 +1067,7 @@ flowchart LR
         store[("infraStore<br/>celestrak-* sources,<br/>staleAt 12 h")]
         parse["parseSatelliteGroup<br/>(lazy infra code)"]
         drawing["useSatelliteDrawing<br/>satelliteDrawing: thin to 12,000,<br/>highlight route's constellation"]
-        isp["lib/satellites/isp.ts<br/>hop ASN → likely satellite link"]
+        isp["lib/satellites/isp.ts<br/>hop ASN → likely or possible<br/>satellite link"]
         adapter["globe/cesiumGlobe.ts<br/>point collection per group"]
         sgp4["lib/satellites/propagate.ts<br/>satellite.js SGP4<br/>(lazy chunk)"]
         ticker["PeriodicTicker<br/>≤ 1 move per second,<br/>none while hidden"]
@@ -1184,7 +1184,9 @@ online tiles with the satellites moving.
   geostationary ones high when the hop's RTT is at least 470 ms (a round
   trip through a GEO satellite covers four times 35,786 km, 477 ms), low
   when it is shorter (the link, if any, is after that hop). The hop
-  details and the hover card say so; while the provider's group is shown,
+  details and the hover card say "Likely Viasat link" for medium and high,
+  and "Possible Viasat satellite link" with the reason for low
+  (`satelliteLinkTitle`, `satelliteLinkSummary`); while the provider's group is shown,
   its satellites are drawn opaque and larger, and the hop details offer
   to show the group (through the notice).
 

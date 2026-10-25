@@ -2,6 +2,7 @@ import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { hoverCardContent, placeCard } from "@renderer/lib/hoverCard";
 import { useRouteInfra } from "@renderer/hooks/useInfra";
 import { satelliteData, useSatelliteLinks } from "@renderer/hooks/useSatellites";
+import { satelliteLinkSummary } from "@renderer/lib/satellites/isp";
 import { readySource, useInfraStore } from "@renderer/state/infraStore";
 import { selectCurrentRun, useTracerouteStore } from "@renderer/state/tracerouteStore";
 import "./HoverCard.css";
@@ -107,7 +108,7 @@ export const HoverCard: React.FC = () => {
           )}
           {satellite && (
             <div className="hover-card__satellite">
-              {`Likely satellite link: ${satellite.isp.name}, ${satellite.confidence} confidence`}
+              {satelliteLinkSummary(satellite)}
             </div>
           )}
           {content.note && <p className="hover-card__note">{content.note}</p>}

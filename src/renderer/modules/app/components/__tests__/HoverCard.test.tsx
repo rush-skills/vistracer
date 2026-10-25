@@ -69,14 +69,26 @@ describe("HoverCard", () => {
   });
 
   it("says when a hop is likely a satellite link", () => {
-    const run = makeRun(ROUTE);
-    run.hops[1] = { ...run.hops[1], asn: { asn: 14593, name: "SPACEX-STARLINK" } };
+    const hops = ROUTE.map((hop, i) => (i === 1 ? { ...hop, asn: { asn: 14593, name: "SPACEX-STARLINK" } } : hop));
+    const run = { ...makeRun(ROUTE), hops };
     useTracerouteStore.setState({ runs: { r1: run } });
     render(<HoverCard />);
     act(() => useTracerouteStore.getState().setHoveredHop(run.hops[1].hopIndex, { kind: "point", x: 50, y: 50 }));
     expect(screen.getByRole("tooltip").textContent).toContain(
       "Likely satellite link: Starlink, medium confidence"
     );
+  });
+
+  it("calls a low-confidence satellite link possible, with the reason", () => {
+    // A HughesNet hop only 30 ms away: too close for a geostationary link before it.
+    const hops = ROUTE.map((hop, i) => (i === 2 ? { ...hop, asn: { asn: 6621, name: "HUGHES-NET" } } : hop));
+    const run = { ...makeRun(ROUTE), hops };
+    useTracerouteStore.setState({ runs: { r1: run } });
+    render(<HoverCard />);
+    act(() => useTracerouteStore.getState().setHoveredHop(run.hops[2].hopIndex, { kind: "point", x: 50, y: 50 }));
+    const text = screen.getByRole("tooltip").textContent ?? "";
+    expect(text).toContain("Possible HughesNet satellite link (low confidence: a 30 ms round trip is too short for a geostationary link)");
+    expect(text).not.toContain("Likely");
   });
 
   it("shows the hovered hop from the store and makes no request", () => {
