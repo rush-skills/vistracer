@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::integrations::{CymruRecord, RdapRecord, RipeStatRecord};
+use crate::atomic_file::write_atomic;
 use crate::geoloc::ixp::IxDataset;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -142,17 +143,6 @@ struct CacheFileRef<'a> {
     entries: &'a TtlMap<CachedRecord>,
 }
 
-/// Writes through a temporary file and a rename, so a crash during the
-/// write cannot leave a truncated cache behind.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
-}
-
 #[derive(Debug, Default)]
 pub struct EnrichmentCache {
     entries: TtlMap<CachedRecord>,
@@ -268,8 +258,7 @@ pub struct ProviderCache {
     retain_ms: i64,
     entries: Mutex<EnrichmentCache>,
     /// Held from snapshot to rename, so two writers (two runs that finish
-    /// together, or a run and an IX list download) write in snapshot order
-    /// and never share the temporary file.
+    /// together, or a run and an IX list download) write in snapshot order.
     persist_lock: Mutex<()>,
 }
 
@@ -353,6 +342,13 @@ impl ProviderCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::atomic_file::is_temp_file;
+
+    fn has_temp_files(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .any(|entry| is_temp_file(&entry.unwrap().path()))
+    }
 
     const HOUR: i64 = 3_600_000;
 
@@ -419,7 +415,7 @@ mod tests {
             .unwrap()
             .unwrap();
         write_atomic(&path, &bytes).unwrap();
-        assert!(!path.with_extension("json.tmp").exists());
+        assert!(!has_temp_files(&dir));
         assert_eq!(cache.snapshot_if_dirty(2 * HOUR, 24 * HOUR).unwrap(), None);
 
         let loaded = EnrichmentCache::load(&path, 25 * HOUR, 24 * HOUR);
@@ -475,7 +471,7 @@ mod tests {
             Some(Some(cymru(15169))),
             "the newer snapshot must be the one on disk"
         );
-        assert!(!path.with_extension("json.tmp").exists());
+        assert!(!has_temp_files(&dir));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

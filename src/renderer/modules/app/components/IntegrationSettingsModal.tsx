@@ -1,10 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { DEFAULT_RDAP_BASE_URL, type GeoDatabaseMeta, type IntegrationSettings } from "@common/ipc";
+import {
+  DEFAULT_RDAP_BASE_URL,
+  type GeoDatabaseMeta,
+  type IntegrationSettings,
+  type TileCacheInfo
+} from "@common/ipc";
 import type { VisTracerWindow } from "@common/bridge";
 import { FiAlertCircle, FiCheckCircle, FiFolder } from "react-icons/fi";
 import { useModalA11y } from "@renderer/hooks/useModalA11y";
 import { useUpdateStore, type UpdateStatus } from "@renderer/state/updateStore";
+import { describeTileCache } from "../lib/tileCache";
 import "./IntegrationSettingsModal.css";
 
 interface IntegrationSettingsModalProps {
@@ -136,6 +142,74 @@ const UpdatesSection: React.FC = () => {
             Install and restart
           </button>
         )}
+      </div>
+    </section>
+  );
+};
+
+const errorText = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
+
+/** Size of the detailed-imagery cache, with a button to empty it. */
+const GlobeImagerySection: React.FC = () => {
+  const [info, setInfo] = useState<TileCacheInfo>();
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setInfo(await window.visTracer.getTileCacheInfo());
+      setError(undefined);
+    } catch (loadError) {
+      setError(errorText(loadError, "Could not read the tile cache."));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const clear = async () => {
+    setBusy(true);
+    try {
+      setInfo(await window.visTracer.clearTileCache());
+      setError(undefined);
+    } catch (clearError) {
+      setError(errorText(clearError, "Could not clear the tile cache."));
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section
+      className="integration-settings-modal__updates"
+      aria-labelledby="integration-settings-imagery-title"
+    >
+      <header>
+        <h3 id="integration-settings-imagery-title">Globe imagery</h3>
+      </header>
+      <small className="integration-settings-modal__hint">
+        NASA Blue Marble and Black Marble imagery ships with the app. When you zoom in, sharper
+        tiles are downloaded from NASA GIBS (gibs.earthdata.nasa.gov) and kept on this computer.
+        These downloads show NASA the approximate areas you zoom into. Automatic camera moves
+        (following a trace, selecting a hop, exports) stay zoomed out and use only the bundled
+        imagery.
+      </small>
+      <p className="integration-settings-modal__hint" role="status">
+        Tile cache: {info ? describeTileCache(info) : error ? "unknown." : "reading…"}
+      </p>
+      {error && <div className="integration-settings-modal__error">{error}</div>}
+      <div className="integration-settings-modal__update-actions">
+        <button
+          type="button"
+          className="integration-settings-modal__button"
+          onClick={() => void clear()}
+          disabled={busy || !info || info.tileCount === 0}
+        >
+          {busy ? "Clearing…" : "Clear tile cache"}
+        </button>
       </div>
     </section>
   );
@@ -522,6 +596,8 @@ export const IntegrationSettingsModal: React.FC<IntegrationSettingsModalProps> =
               </small>
             </div>
           </section>
+
+          <GlobeImagerySection />
 
           <UpdatesSection />
 

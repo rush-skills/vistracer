@@ -1,47 +1,95 @@
-import { Vector3 } from "three";
 import type { HopResolution, LocationConfidence, LocationEstimate } from "@common/ipc";
 
-export interface ArcDescriptor {
-  id: string;
-  from: HopResolution;
-  to: HopResolution;
-  points: Vector3[];
-  color: string;
-}
+/**
+ * Pure mapping from hop data to what the globe draws. Positions are degrees
+ * and metres above the ellipsoid; the Cesium adapter
+ * (modules/app/components/globe/cesiumGlobe.ts) only converts and draws.
+ */
 
-const EARTH_RADIUS = 5;
 const EARTH_RADIUS_KM = 6371;
 /** A ring this large covers a continent and tells the user nothing. */
 export const MAX_RING_RADIUS_KM = 5000;
+/** Ring segments are at most this long, so the ring stays round. */
+const RING_SEGMENT_KM = 50;
+/** Arc peak height as a share of the hop distance, within the limits below. */
+const ARC_HEIGHT_RATIO = 0.12;
+const ARC_MIN_PEAK_M = 2_000;
+const ARC_MAX_PEAK_M = 1_500_000;
+/** Hops closer than this share one spot; an arc between them is invisible. */
+const MIN_ARC_KM = 1;
+const ARC_SEGMENT_KM = 100;
 
-export function latLngToVector3(latitude: number, longitude: number, radius = EARTH_RADIUS): Vector3 {
-  const phi = ((90 - latitude) * Math.PI) / 180;
-  const theta = ((longitude + 180) * Math.PI) / 180;
-
-  const x = -radius * Math.sin(phi) * Math.cos(theta);
-  const z = radius * Math.sin(phi) * Math.sin(theta);
-  const y = radius * Math.cos(phi);
-
-  return new Vector3(x, y, z);
+export interface GeoPoint {
+  longitude: number;
+  latitude: number;
+  /** Metres above the ellipsoid. */
+  height: number;
 }
 
-export function interpolateGreatCircle(
-  start: Vector3,
-  end: Vector3,
-  steps = 32,
-  radius = EARTH_RADIUS
-): Vector3[] {
-  const points: Vector3[] = [];
-  const startNormalized = start.clone().normalize();
-  const endNormalized = end.clone().normalize();
+export type Emphasis = "normal" | "hovered" | "selected";
 
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    const interpolated = startNormalized.clone().lerp(endNormalized, t).normalize().multiplyScalar(radius);
-    points.push(interpolated);
-  }
+export interface MarkerSpec {
+  hopIndex: number;
+  position: GeoPoint;
+  color: string;
+  emphasis: Emphasis;
+}
 
-  return points;
+export interface ArcSpec {
+  fromHopIndex: number;
+  toHopIndex: number;
+  positions: GeoPoint[];
+  color: string;
+}
+
+export interface RingStyle {
+  opacity: number;
+  dashed: boolean;
+  /** Pixels. */
+  lineWidth: number;
+}
+
+/** Solid for high confidence, dashed and fainter as confidence drops. */
+export const RING_STYLES: Record<LocationConfidence, RingStyle> = {
+  high: { opacity: 0.9, dashed: false, lineWidth: 2 },
+  medium: { opacity: 0.6, dashed: true, lineWidth: 1.75 },
+  low: { opacity: 0.4, dashed: true, lineWidth: 1.5 }
+};
+
+export interface RingSpec extends RingStyle {
+  hopIndex: number;
+  radiusKm: number;
+  confidence: LocationConfidence;
+  color: string;
+  positions: GeoPoint[];
+}
+
+/**
+ * The area an anycast hop answered from: a circle around the reference hop
+ * with the RTT bound as radius. Drawn dotted, with no point, because the
+ * site that answered is somewhere inside it.
+ */
+export interface ReachSpec {
+  hopIndex: number;
+  referenceHopIndex: number;
+  radiusKm: number;
+  color: string;
+  opacity: number;
+  positions: GeoPoint[];
+}
+
+export interface LabelSpec {
+  hopIndex: number;
+  position: GeoPoint;
+  text: string;
+}
+
+export interface GlobeScene {
+  markers: MarkerSpec[];
+  arcs: ArcSpec[];
+  rings: RingSpec[];
+  reaches: ReachSpec[];
+  labels: LabelSpec[];
 }
 
 export function latencyToColor(avgRttMs: number | null | undefined): string {
@@ -58,32 +106,32 @@ export function latencyToColor(avgRttMs: number | null | undefined): string {
   return "#ff5f5f";
 }
 
-// Generate a distinct color for each hop index
-export function hopIndexToColor(hopIndex: number): string {
-  const colors = [
-    "#FF4444", // Bright Red
-    "#00D9FF", // Bright Cyan
-    "#9B59B6", // Purple
-    "#FFA07A", // Light Salmon
-    "#2ECC71", // Emerald Green
-    "#F7DC6F", // Yellow
-    "#E74C3C", // Red-Orange
-    "#45B7D1", // Sky Blue
-    "#F8B739", // Orange
-    "#1ABC9C", // Turquoise
-    "#E63946", // Dark Red
-    "#457B9D", // Steel Blue
-    "#FF9F1C", // Bright Orange
-    "#2A9D8F", // Dark Teal
-    "#E76F51", // Terra Cotta
-    "#8338EC", // Violet
-    "#FF006E", // Pink
-    "#06FFA5", // Neon Green
-    "#FFB703", // Gold
-    "#3498DB", // Blue
-  ];
+const HOP_COLORS = [
+  "#FF4444", // Bright Red
+  "#00D9FF", // Bright Cyan
+  "#9B59B6", // Purple
+  "#FFA07A", // Light Salmon
+  "#2ECC71", // Emerald Green
+  "#F7DC6F", // Yellow
+  "#E74C3C", // Red-Orange
+  "#45B7D1", // Sky Blue
+  "#F8B739", // Orange
+  "#1ABC9C", // Turquoise
+  "#E63946", // Dark Red
+  "#457B9D", // Steel Blue
+  "#FF9F1C", // Bright Orange
+  "#2A9D8F", // Dark Teal
+  "#E76F51", // Terra Cotta
+  "#8338EC", // Violet
+  "#FF006E", // Pink
+  "#06FFA5", // Neon Green
+  "#FFB703", // Gold
+  "#3498DB" // Blue
+];
 
-  return colors[hopIndex % colors.length];
+/** A distinct colour per hop, shared by the globe and the hop table. */
+export function hopIndexToColor(hopIndex: number): string {
+  return HOP_COLORS[hopIndex % HOP_COLORS.length];
 }
 
 /**
@@ -98,183 +146,447 @@ export function hopPosition(hop: HopResolution): LocationEstimate | null {
   return best;
 }
 
-export function buildArcDescriptors(hops: HopResolution[]): ArcDescriptor[] {
-  const arcs: ArcDescriptor[] = [];
-  const located = hops.flatMap((hop) => {
-    const position = hopPosition(hop);
-    return position ? [{ hop, position }] : [];
-  });
+const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+const toDegrees = (radians: number) => (radians * 180) / Math.PI;
+const normaliseLongitude = (longitude: number) => ((((longitude + 180) % 360) + 360) % 360) - 180;
 
-  // Connect consecutive located hops, skipping hops without a position.
-  for (let i = 0; i < located.length - 1; i += 1) {
-    const current = located[i].hop;
-    const next = located[i + 1].hop;
-
-    const start = latLngToVector3(located[i].position.latitude, located[i].position.longitude);
-    const end = latLngToVector3(located[i + 1].position.latitude, located[i + 1].position.longitude);
-
-    // Validate that the resulting vectors are valid
-    if (!isFinite(start.x) || !isFinite(start.y) || !isFinite(start.z) ||
-        !isFinite(end.x) || !isFinite(end.y) || !isFinite(end.z)) {
-      continue;
-    }
-
-    // Increase steps for smoother, more solid-looking lines
-    const points = interpolateGreatCircle(start, end, 64);
-    // Use latency-based color for the arc
-    arcs.push({
-      id: `${current.hopIndex}-${next.hopIndex}`,
-      from: current,
-      to: next,
-      points,
-      color: latencyToColor(current.latency.avgRttMs)
-    });
-  }
-
-  return arcs;
+/** Great-circle distance on a sphere of radius `EARTH_RADIUS_KM`. */
+export function greatCircleKm(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+): number {
+  const dLat = toRadians(to.latitude - from.latitude);
+  const dLon = toRadians(to.longitude - from.longitude);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(from.latitude)) * Math.cos(toRadians(to.latitude)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
-export const EARTH_RADIUS_UNITS = EARTH_RADIUS;
+/** The point `distanceKm` from `from` along the initial bearing `bearingRad`. */
+function destination(
+  from: { latitude: number; longitude: number },
+  bearingRad: number,
+  distanceKm: number
+): { latitude: number; longitude: number } {
+  const angle = distanceKm / EARTH_RADIUS_KM;
+  const lat1 = toRadians(from.latitude);
+  const lon1 = toRadians(from.longitude);
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(angle) + Math.cos(lat1) * Math.sin(angle) * Math.cos(bearingRad)
+  );
+  const lon2 =
+    lon1 +
+    Math.atan2(
+      Math.sin(bearingRad) * Math.sin(angle) * Math.cos(lat1),
+      Math.cos(angle) - Math.sin(lat1) * Math.sin(lat2)
+    );
+  return { latitude: toDegrees(lat2), longitude: normaliseLongitude(toDegrees(lon2)) };
+}
 
 /**
- * Points of a circle on the globe surface: all points `radiusKm` along the
- * surface from the centre. `radius` is the sphere the line is drawn on.
+ * All points `radiusKm` along the surface from the centre, closed (the last
+ * point repeats the first). Segments are at most `RING_SEGMENT_KM` long.
  */
-export function circlePoints(
-  latitude: number,
-  longitude: number,
-  radiusKm: number,
-  segments = 64,
-  radius = EARTH_RADIUS
-): Vector3[] {
-  const centre = latLngToVector3(latitude, longitude, 1);
-  const angle = radiusKm / EARTH_RADIUS_KM;
-  const helper = Math.abs(centre.y) < 0.99 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
-  const u = new Vector3().crossVectors(centre, helper).normalize();
-  const w = new Vector3().crossVectors(centre, u).normalize();
-  const points: Vector3[] = [];
+export function circlePositions(latitude: number, longitude: number, radiusKm: number): GeoPoint[] {
+  const circumference = 2 * Math.PI * EARTH_RADIUS_KM * Math.sin(radiusKm / EARTH_RADIUS_KM);
+  const segments = Math.min(720, Math.max(48, Math.ceil(circumference / RING_SEGMENT_KM)));
+  const points: GeoPoint[] = [];
   for (let i = 0; i <= segments; i += 1) {
-    const phi = (i / segments) * Math.PI * 2;
-    points.push(
-      centre
-        .clone()
-        .multiplyScalar(Math.cos(angle))
-        .addScaledVector(u, Math.sin(angle) * Math.cos(phi))
-        .addScaledVector(w, Math.sin(angle) * Math.sin(phi))
-        .multiplyScalar(radius)
-    );
+    const bearing = ((i % segments) / segments) * 2 * Math.PI;
+    points.push({ ...destination({ latitude, longitude }, bearing, radiusKm), height: 0 });
   }
   return points;
 }
 
-export interface RingStyle {
-  opacity: number;
-  dashed: boolean;
-  lineWidth: number;
+/**
+ * Points along the great circle from `from` to `to`, raised in the middle
+ * (a sine profile) so the route stands out from the surface.
+ */
+export function arcPositions(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+): GeoPoint[] {
+  const distanceKm = greatCircleKm(from, to);
+  const peak = Math.min(
+    ARC_MAX_PEAK_M,
+    Math.max(ARC_MIN_PEAK_M, distanceKm * 1000 * ARC_HEIGHT_RATIO)
+  );
+  const segments = Math.min(128, Math.max(16, Math.ceil(distanceKm / ARC_SEGMENT_KM)));
+  const angle = distanceKm / EARTH_RADIUS_KM;
+  const toUnit = (point: { latitude: number; longitude: number }) => {
+    const lat = toRadians(point.latitude);
+    const lon = toRadians(point.longitude);
+    return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
+  };
+  const a = toUnit(from);
+  const b = toUnit(to);
+  // Same or antipodal points have no unique great circle: interpolate the
+  // vectors linearly instead of dividing by sin(angle) ≈ 0.
+  const degenerate = Math.abs(Math.sin(angle)) < 1e-9;
+  const points: GeoPoint[] = [];
+  for (let i = 0; i <= segments; i += 1) {
+    const t = i / segments;
+    const wa = degenerate ? 1 - t : Math.sin((1 - t) * angle) / Math.sin(angle);
+    const wb = degenerate ? t : Math.sin(t * angle) / Math.sin(angle);
+    const [x, y, z] = [0, 1, 2].map((k) => wa * a[k] + wb * b[k]);
+    points.push({
+      latitude: toDegrees(Math.atan2(z, Math.hypot(x, y))),
+      longitude: toDegrees(Math.atan2(y, x)),
+      height: peak * Math.sin(Math.PI * t)
+    });
+  }
+  return points;
 }
 
-/** Solid for high confidence, dashed and fainter as confidence drops. */
-export const RING_STYLES: Record<LocationConfidence, RingStyle> = {
-  high: { opacity: 0.9, dashed: false, lineWidth: 1.6 },
-  medium: { opacity: 0.6, dashed: true, lineWidth: 1.3 },
-  low: { opacity: 0.4, dashed: true, lineWidth: 1 }
-};
-
-export interface ConfidenceRing extends RingStyle {
-  id: string;
-  hopIndex: number;
-  radiusKm: number;
-  confidence: LocationConfidence;
-  color: string;
-  points: Vector3[];
+interface LocatedHop {
+  hop: HopResolution;
+  position: LocationEstimate;
 }
 
-/** One uncertainty ring per drawn hop, scaled to its radius in km. */
-export function buildConfidenceRings(
-  hops: HopResolution[],
-  selectedHopIndex?: number
-): ConfidenceRing[] {
+function locatedHops(hops: HopResolution[]): LocatedHop[] {
   return hops.flatMap((hop) => {
     const position = hopPosition(hop);
-    if (!position || position.radiusKm <= 0 || position.radiusKm > MAX_RING_RADIUS_KM) {
+    return position ? [{ hop, position }] : [];
+  });
+}
+
+function emphasisOf(hopIndex: number, selected?: number, hovered?: number): Emphasis {
+  if (hopIndex === selected) {
+    return "selected";
+  }
+  return hopIndex === hovered ? "hovered" : "normal";
+}
+
+/** Arcs between consecutive located hops, coloured by the first hop's latency. */
+export function buildArcs(hops: HopResolution[]): ArcSpec[] {
+  const located = locatedHops(hops);
+  const arcs: ArcSpec[] = [];
+  for (let i = 0; i < located.length - 1; i += 1) {
+    const from = located[i];
+    const to = located[i + 1];
+    if (greatCircleKm(from.position, to.position) < MIN_ARC_KM) {
+      continue;
+    }
+    arcs.push({
+      fromHopIndex: from.hop.hopIndex,
+      toHopIndex: to.hop.hopIndex,
+      positions: arcPositions(from.position, to.position),
+      color: latencyToColor(from.hop.latency.avgRttMs)
+    });
+  }
+  return arcs;
+}
+
+/** One uncertainty ring per drawn hop, true to its radius in km. */
+export function buildRings(
+  hops: HopResolution[],
+  selectedHopIndex?: number,
+  hoveredHopIndex?: number
+): RingSpec[] {
+  return locatedHops(hops).flatMap(({ hop, position }) => {
+    if (position.radiusKm <= 0 || position.radiusKm > MAX_RING_RADIUS_KM) {
       return [];
     }
     // A conflict keeps its confidence for ranking, but the RTT check
     // disagrees with it, so its ring looks as uncertain as a low estimate.
     const style =
       position.rtt?.verdict === "conflict" ? RING_STYLES.low : RING_STYLES[position.confidence];
-    const selected = hop.hopIndex === selectedHopIndex;
+    const emphasised = emphasisOf(hop.hopIndex, selectedHopIndex, hoveredHopIndex) !== "normal";
     return [
       {
-        id: `ring-${hop.hopIndex}`,
         hopIndex: hop.hopIndex,
         radiusKm: position.radiusKm,
         confidence: position.confidence,
         color: hopIndexToColor(hop.hopIndex),
-        points: circlePoints(
-          position.latitude,
-          position.longitude,
-          position.radiusKm,
-          64,
-          EARTH_RADIUS + 0.03
-        ),
-        opacity: selected ? 1 : style.opacity,
+        positions: circlePositions(position.latitude, position.longitude, position.radiusKm),
+        opacity: emphasised ? 1 : style.opacity,
         dashed: style.dashed,
-        lineWidth: selected ? style.lineWidth + 0.8 : style.lineWidth
+        lineWidth: emphasised ? style.lineWidth + 1 : style.lineWidth
       }
     ];
   });
 }
 
+/** Reach circles of anycast hops whose RTT bound is known. */
+function buildReaches(
+  hops: HopResolution[],
+  selectedHopIndex?: number,
+  hoveredHopIndex?: number
+): ReachSpec[] {
+  return hops.flatMap((hop) => {
+    const anycast = hop.location.anycast;
+    if (!anycast || anycast.maxDistanceKm == null || anycast.referenceHopIndex == null) {
+      return [];
+    }
+    const radiusKm = anycast.maxDistanceKm;
+    const reference = hops.find((candidate) => candidate.hopIndex === anycast.referenceHopIndex);
+    const centre = reference ? hopPosition(reference) : null;
+    if (!centre || radiusKm <= 0 || radiusKm > MAX_RING_RADIUS_KM) {
+      return [];
+    }
+    const emphasised = emphasisOf(hop.hopIndex, selectedHopIndex, hoveredHopIndex) !== "normal";
+    return [
+      {
+        hopIndex: hop.hopIndex,
+        referenceHopIndex: anycast.referenceHopIndex,
+        radiusKm,
+        color: hopIndexToColor(hop.hopIndex),
+        opacity: emphasised ? 0.95 : 0.5,
+        positions: circlePositions(centre.latitude, centre.longitude, radiusKm)
+      }
+    ];
+  });
+}
+
+export function buildMarkers(
+  hops: HopResolution[],
+  selectedHopIndex?: number,
+  hoveredHopIndex?: number
+): MarkerSpec[] {
+  const markers = locatedHops(hops).map(({ hop, position }) => ({
+    hopIndex: hop.hopIndex,
+    position: { latitude: position.latitude, longitude: position.longitude, height: 0 },
+    color: hopIndexToColor(hop.hopIndex),
+    emphasis: emphasisOf(hop.hopIndex, selectedHopIndex, hoveredHopIndex)
+  }));
+  // Emphasised markers last, so they draw on top of hops at the same place.
+  const rank: Record<Emphasis, number> = { normal: 0, hovered: 1, selected: 2 };
+  return markers.sort((a, b) => rank[a.emphasis] - rank[b.emphasis]);
+}
+
+/** Labels for the selected and the hovered hop. */
+function buildLabels(
+  hops: HopResolution[],
+  reaches: ReachSpec[],
+  selectedHopIndex?: number,
+  hoveredHopIndex?: number
+): LabelSpec[] {
+  const wanted = [...new Set([selectedHopIndex, hoveredHopIndex])].filter(
+    (index): index is number => index != null
+  );
+  return wanted.flatMap((hopIndex) => {
+    const hop = hops.find((candidate) => candidate.hopIndex === hopIndex);
+    if (!hop) {
+      return [];
+    }
+    const position = hopPosition(hop);
+    if (position) {
+      return [
+        {
+          hopIndex,
+          position: { latitude: position.latitude, longitude: position.longitude, height: 0 },
+          text: `${hopIndex} · ${position.label}`
+        }
+      ];
+    }
+    const reach = reaches.find((candidate) => candidate.hopIndex === hopIndex);
+    if (reach && hop.location.anycast) {
+      // The northernmost point of the circle: on the area, not at a site.
+      return [
+        {
+          hopIndex,
+          position: reach.positions[0],
+          text: `${hopIndex} · anycast (${hop.location.anycast.service}), within ${Math.round(
+            reach.radiusKm
+          ).toLocaleString("en-US")} km of hop ${reach.referenceHopIndex}`
+        }
+      ];
+    }
+    return [];
+  });
+}
+
+export function buildGlobeScene(
+  hops: HopResolution[],
+  selectedHopIndex?: number,
+  hoveredHopIndex?: number
+): GlobeScene {
+  const reaches = buildReaches(hops, selectedHopIndex, hoveredHopIndex);
+  return {
+    markers: buildMarkers(hops, selectedHopIndex, hoveredHopIndex),
+    arcs: buildArcs(hops),
+    rings: buildRings(hops, selectedHopIndex, hoveredHopIndex),
+    reaches,
+    labels: buildLabels(hops, reaches, selectedHopIndex, hoveredHopIndex)
+  };
+}
+
+/** Where the camera looks for a hop: its estimate, or an anycast hop's reach. */
+function hopFocus(
+  hops: HopResolution[],
+  hopIndex: number
+): { latitude: number; longitude: number; radiusKm: number } | null {
+  const hop = hops.find((candidate) => candidate.hopIndex === hopIndex);
+  if (!hop) {
+    return null;
+  }
+  const position = hopPosition(hop);
+  if (position) {
+    return {
+      latitude: position.latitude,
+      longitude: position.longitude,
+      radiusKm: position.radiusKm
+    };
+  }
+  const reach = buildReaches(hops).find((candidate) => candidate.hopIndex === hopIndex);
+  if (!reach) {
+    return null;
+  }
+  const reference = hops.find((candidate) => candidate.hopIndex === reach.referenceHopIndex);
+  const centre = reference ? hopPosition(reference) : null;
+  return centre
+    ? { latitude: centre.latitude, longitude: centre.longitude, radiusKm: reach.radiusKm }
+    : null;
+}
+
+export interface CameraFocus {
+  latitude: number;
+  longitude: number;
+  radiusKm: number;
+}
+
+/** What the camera last reacted to. */
+export interface CameraTracker {
+  runKey?: string;
+  locatedCount: number;
+  selectedHopIndex?: number;
+}
+
+export const INITIAL_CAMERA_TRACKER: CameraTracker = { locatedCount: 0 };
+
 /**
- * Calculate the sun's direction vector based on current date/time.
- * Uses a simplified solar position algorithm.
- *
- * @param date - The date/time to calculate for (defaults to now)
- * @returns Vector3 pointing from Earth center towards the sun
+ * Decides where to fly: to a newly selected hop, else to the newest hop
+ * that got a location during the run. Returns no target when nothing the
+ * user cares about changed (enrichment updates of the same hops).
  */
-export function calculateSunDirection(date: Date = new Date()): Vector3 {
-  // Get Julian date (days since Jan 1, 2000, 12:00 UTC)
-  const J2000 = Date.UTC(2000, 0, 1, 12, 0, 0);
-  const julianDate = (date.getTime() - J2000) / 86400000; // Convert ms to days
+export function nextCameraFocus(
+  previous: CameraTracker,
+  runKey: string | undefined,
+  hops: HopResolution[],
+  selectedHopIndex: number | undefined
+): { tracker: CameraTracker; focus: CameraFocus | null } {
+  const sameRun = previous.runKey === runKey;
+  const located = locatedHops(hops);
+  const tracker: CameraTracker = { runKey, locatedCount: located.length, selectedHopIndex };
+  const lastSelected = sameRun ? previous.selectedHopIndex : undefined;
+  if (selectedHopIndex != null && selectedHopIndex !== lastSelected) {
+    const focus = hopFocus(hops, selectedHopIndex);
+    if (focus) {
+      return { tracker, focus };
+    }
+  }
+  const lastCount = sameRun ? previous.locatedCount : 0;
+  if (located.length > lastCount) {
+    const newest = located[located.length - 1].position;
+    return {
+      tracker,
+      focus: { latitude: newest.latitude, longitude: newest.longitude, radiusKm: newest.radiusKm }
+    };
+  }
+  return { tracker, focus: null };
+}
 
-  // Calculate solar declination (angle of sun north/south of equator)
-  // Varies from -23.5° to +23.5° throughout the year
-  const n = julianDate + 1; // Day number
-  const L = (280.460 + 0.9856474 * n) % 360; // Mean longitude of sun
-  const g = (357.528 + 0.9856003 * n) % 360; // Mean anomaly
-  const gRad = (g * Math.PI) / 180;
+/** Camera heights in metres above the ellipsoid. */
+export const CAMERA_LIMITS = {
+  minHeight: 20_000,
+  maxHeight: 40_000_000,
+  initialHeight: 14_000_000
+};
 
-  // Ecliptic longitude
-  const lambda = (L + 1.915 * Math.sin(gRad) + 0.020 * Math.sin(2 * gRad)) % 360;
-  const lambdaRad = (lambda * Math.PI) / 180;
+/**
+ * Keeps the user's zoom when flying to a hop, but high enough to show the
+ * hop's whole ring and never below `floorM`.
+ */
+export function flyHeight(currentHeightM: number, radiusKm: number, floorM: number): number {
+  const fitRing = radiusKm * 1000 * 4;
+  return Math.min(
+    CAMERA_LIMITS.maxHeight,
+    Math.max(CAMERA_LIMITS.minHeight, currentHeightM, fitRing, floorM)
+  );
+}
 
-  // Solar declination
-  const epsilon = 23.439 - 0.0000004 * n; // Obliquity of ecliptic
-  const epsilonRad = (epsilon * Math.PI) / 180;
-  const declination = Math.asin(Math.sin(epsilonRad) * Math.sin(lambdaRad));
+export interface CameraPosition {
+  latitude: number;
+  longitude: number;
+  /** Metres above the ellipsoid. */
+  height: number;
+}
 
-  // Calculate hour angle (east-west position of sun)
-  // Based on current UTC time
-  const hours = date.getUTCHours();
-  const minutes = date.getUTCMinutes();
-  const seconds = date.getUTCSeconds();
-  const utcHours = hours + minutes / 60 + seconds / 3600;
+export interface FlightStep extends CameraPosition {
+  /** `rise` goes straight up; `move` goes to the hop at a constant height. */
+  kind: "rise" | "move";
+}
 
-  // Hour angle: 0° at solar noon (12:00 UTC at 0° longitude)
-  // 15° per hour (360° / 24 hours)
-  // Sun moves westward as time increases
-  const hourAngle = (utcHours - 12) * 15;
-  const hourAngleRad = (hourAngle * Math.PI) / 180;
+/**
+ * Camera moves the app makes itself (following a trace, selecting a hop,
+ * exports) stay at or above `floorM`, the height where the globe uses only
+ * bundled imagery (`bundledOnlyHeight`). Online tiles show NASA the areas
+ * they cover, so only zooms the user makes may fetch them. From below the
+ * floor, the camera first rises over the place the user zoomed into, then
+ * moves to the hop; it never crosses new ground below the floor.
+ */
+export function planFlight(
+  current: CameraPosition,
+  focus: CameraFocus,
+  floorM: number
+): FlightStep[] {
+  const move: FlightStep = {
+    kind: "move",
+    latitude: focus.latitude,
+    longitude: focus.longitude,
+    height: flyHeight(current.height, focus.radiusKm, floorM)
+  };
+  if (current.height >= floorM) {
+    return [move];
+  }
+  return [{ ...current, kind: "rise", height: Math.min(floorM, CAMERA_LIMITS.maxHeight) }, move];
+}
 
-  // Convert to Cartesian coordinates matching Three.js coordinate system
-  // At solar noon (12:00 UTC), sun should point toward +X (Greenwich meridian at 0°)
-  // At 18:00 UTC (6 PM), sun should point toward +Z (90° West)
-  // Y axis = north-south (declination)
-  // X-Z plane = equatorial plane
-  const x = Math.cos(declination) * Math.cos(hourAngleRad);
-  const y = Math.sin(declination);
-  const z = Math.cos(declination) * Math.sin(hourAngleRad);
-
-  return new Vector3(x, y, z).normalize();
+/** Country outlines from a GeoJSON FeatureCollection, as [lon, lat] rings. */
+export function borderRings(geojson: unknown): Array<Array<[number, number]>> {
+  const isPosition = (value: unknown): value is [number, number] =>
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    typeof value[0] === "number" &&
+    typeof value[1] === "number" &&
+    isFinite(value[0]) &&
+    isFinite(value[1]);
+  const toRing = (ring: unknown): Array<[number, number]> | null =>
+    Array.isArray(ring) && ring.length > 1 && ring.every(isPosition)
+      ? ring.map(([lon, lat]) => [lon, lat])
+      : null;
+  if (typeof geojson !== "object" || geojson === null || !("features" in geojson)) {
+    return [];
+  }
+  const features = (geojson as { features: unknown }).features;
+  if (!Array.isArray(features)) {
+    return [];
+  }
+  const rings: Array<Array<[number, number]>> = [];
+  for (const feature of features) {
+    const geometry = (feature as { geometry?: { type?: unknown; coordinates?: unknown } } | null)
+      ?.geometry;
+    if (!geometry || !Array.isArray(geometry.coordinates)) {
+      continue;
+    }
+    const polygons =
+      geometry.type === "Polygon"
+        ? [geometry.coordinates]
+        : geometry.type === "MultiPolygon"
+          ? geometry.coordinates
+          : [];
+    for (const polygon of polygons) {
+      if (!Array.isArray(polygon)) {
+        continue;
+      }
+      for (const ring of polygon) {
+        const parsed = toRing(ring);
+        if (parsed) {
+          rings.push(parsed);
+        }
+      }
+    }
+  }
+  return rings;
 }

@@ -18,6 +18,10 @@ All notable changes to VisTracer will be documented in this file.
 - Anycast detection for public DNS resolvers, DNS root servers and anycast CDN networks; anycast hops are marked and not drawn at a fake point
 - Uncertainty rings on the globe, true to scale and styled by confidence; Location section in the hop details with source, confidence, radius, RTT check, IXP, host name hint and other candidates
 - "Internet exchanges" switch in Integration settings and the quick toggles: places hops at internet exchanges using PeeringDB's public exchange list. On by default (also for existing settings) and separate from the PeeringDB switch; nothing about your route is sent
+- CesiumJS globe with NASA Blue Marble (day) and Black Marble (night) imagery bundled for levels 0–4, so the globe works offline; zooming in closer yourself loads NASA GIBS tiles through a 500 MB disk cache in the backend. Camera moves the app makes (following a trace, selecting a hop, exports) stay zoomed out and load only bundled imagery
+- Hovering a hop on the globe highlights its row in the hop table and the other way round; the selected and hovered hop get a label on the globe
+- Anycast hops with a known RTT bound show the area the answering site can be in (a dotted circle around the reference hop), still without a point
+- "Globe imagery" in Integration settings shows the tile cache size and clears it
 
 ### Changed
 
@@ -25,6 +29,8 @@ All notable changes to VisTracer will be documented in this file.
 - Traceroute binaries are found through PATH with system fallbacks; a missing binary shows an install command
 - Content Security Policy enabled; file system scope limited to the app data, app cache and Downloads folders
 - The globe, camera and export draw each hop at its best location estimate instead of the raw GeoLite2 record; hop markers keep the same size on screen when zooming
+- The globe renders only when something changes and stops its animation loop when idle, hidden or minimized; frame rate is capped at 60 (30 on battery where the webview reports it)
+- The app bundle shrank from 55 MB to 23 MB (macOS): the 10k textures and README media are no longer shipped
 
 ### Fixed
 

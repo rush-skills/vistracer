@@ -26,9 +26,9 @@
         "default-src": "'self'",
         "script-src": "'self'",
         "style-src": "'self'",
-        "img-src": "'self'",
+        "img-src": "'self' vistiles: http://vistiles.localhost",
         "font-src": "'self'",
-        "connect-src": "'self' ipc: http://ipc.localhost",
+        "connect-src": "'self' ipc: http://ipc.localhost vistiles: http://vistiles.localhost data:",
         "worker-src": "'self' blob:",
         "object-src": "'none'",
         "base-uri": "'self'",
@@ -39,9 +39,9 @@
         "default-src": "'self'",
         "script-src": "'self' 'unsafe-inline'",
         "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self'",
+        "img-src": "'self' vistiles: http://vistiles.localhost",
         "font-src": "'self'",
-        "connect-src": "'self' ipc: http://ipc.localhost ws://localhost:5173 http://localhost:5173",
+        "connect-src": "'self' ipc: http://ipc.localhost vistiles: http://vistiles.localhost data: ws://localhost:5173 http://localhost:5173",
         "worker-src": "'self' blob:",
         "object-src": "'none'",
         "base-uri": "'self'",
@@ -61,9 +61,6 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../assets/earthmap10k.jpg",
-      "../assets/earthlights10k.jpg",
-      "../assets/world.geojson",
       "../assets/logo.png"
     ],
     "macOS": {

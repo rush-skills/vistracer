@@ -340,6 +340,27 @@ describe("Tauri Bridge Layer", () => {
     });
   });
 
+  describe("tile cache", () => {
+    it("reads the tile cache size", async () => {
+      const info = { sizeBytes: 1_250_000, tileCount: 61, capBytes: 500_000_000 };
+      mockInvoke.mockResolvedValueOnce(info);
+
+      await expect(api.getTileCacheInfo()).resolves.toEqual(info);
+      expect(mockInvoke).toHaveBeenCalledWith("get_tile_cache_info");
+    });
+
+    it("clears the tile cache and passes on a failure message", async () => {
+      mockInvoke.mockResolvedValueOnce({ sizeBytes: 0, tileCount: 0, capBytes: 500_000_000 });
+      await expect(api.clearTileCache()).resolves.toMatchObject({ tileCount: 0 });
+      expect(mockInvoke).toHaveBeenCalledWith("clear_tile_cache");
+
+      mockInvoke.mockRejectedValueOnce("Could not clear the tile cache in /cache/tiles: busy");
+      await expect(api.clearTileCache()).rejects.toBe(
+        "Could not clear the tile cache in /cache/tiles: busy"
+      );
+    });
+  });
+
   describe("exportSnapshot", () => {
     it("returns client-side export notice for Tauri", async () => {
       const result = await api.exportSnapshot({ format: "png" });

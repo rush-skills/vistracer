@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { HopLocation, HopResolution, LocationEstimate, TracerouteRun } from "@common/ipc";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { HopDetailsPane } from "../HopDetailsPane";
@@ -288,7 +288,7 @@ const fact = (scope: ReturnType<typeof within>, term: string) =>
 
 describe("HopDetailsPane", () => {
   beforeEach(() => {
-    useTracerouteStore.setState({ selectedHopIndex: undefined });
+    useTracerouteStore.setState({ selectedHopIndex: undefined, hoveredHopIndex: undefined });
   });
 
   it("marks multipath hops, failed sources and run notices in the table", () => {
@@ -481,5 +481,41 @@ describe("HopDetailsPane", () => {
     expect(row).toBeTruthy();
     fireEvent.click(row as HTMLElement);
     expect(useTracerouteStore.getState().selectedHopIndex).toBe(2);
+  });
+
+  it("shares the hovered hop with the globe in both directions", () => {
+    const { rerender } = render(<HopDetailsPane run={run} status="success" />);
+    const rowOf = (ip: string) =>
+      screen.getAllByRole("button").find((el) => el.textContent?.includes(ip)) as HTMLElement;
+
+    fireEvent.mouseEnter(rowOf("8.8.8.8"));
+    expect(useTracerouteStore.getState().hoveredHopIndex).toBe(2);
+    fireEvent.mouseLeave(rowOf("8.8.8.8"));
+    expect(useTracerouteStore.getState().hoveredHopIndex).toBeUndefined();
+    fireEvent.focus(rowOf("8.8.8.8"));
+    expect(useTracerouteStore.getState().hoveredHopIndex).toBe(2);
+    fireEvent.blur(rowOf("8.8.8.8"));
+
+    // A hop hovered on the globe is highlighted in the table.
+    act(() => useTracerouteStore.getState().setHoveredHop(1));
+    rerender(<HopDetailsPane run={run} status="success" />);
+    expect(rowOf("72.14.204.170").className).toContain("hop-details__row--hovered");
+    expect(rowOf("8.8.8.8").className).not.toContain("hop-details__row--hovered");
+  });
+
+  it("scrolls a hop selected on the globe into view", () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.textContent ?? "");
+    };
+    try {
+      const { rerender } = render(<HopDetailsPane run={run} status="success" />);
+      rerender(<HopDetailsPane run={run} selectedHopIndex={2} status="success" />);
+      expect(scrolled).toHaveLength(1);
+      expect(scrolled[0]).toContain("8.8.8.8");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
   });
 });

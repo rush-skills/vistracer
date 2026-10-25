@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod atomic_file;
 mod commands;
 mod geoloc;
 mod net;
@@ -16,6 +17,10 @@ use commands::persistence::{
     configure_geo_database_defaults, ensure_app_data_dirs, save_persisted_settings, AppStore,
     IntegrationSettings, SharedStore,
 };
+use commands::tile_cache::{
+    into_response, HttpFetcher, TileCacheInfo, TileError, TileService, TileStore,
+    DEFAULT_CAP_BYTES, TILE_SCHEME,
+};
 use commands::traceroute::{
     cancel_traceroute, create_active_runs, run_traceroute, ActiveRuns, TracerouteDeps,
 };
@@ -29,6 +34,7 @@ struct AppState {
     store: Arc<SharedStore>,
     geo_readers: Arc<SharedGeoReaders>,
     enrichment: Arc<EnrichmentService>,
+    tiles: Arc<TileService<HttpFetcher>>,
     active_runs: ActiveRuns,
     app_data_dir: PathBuf,
 }
@@ -213,6 +219,16 @@ async fn set_settings(
 }
 
 #[tauri::command]
+async fn get_tile_cache_info(state: tauri::State<'_, AppState>) -> Result<TileCacheInfo, String> {
+    state.tiles.info().await
+}
+
+#[tauri::command]
+async fn clear_tile_cache(state: tauri::State<'_, AppState>) -> Result<TileCacheInfo, String> {
+    state.tiles.clear().await
+}
+
+#[tauri::command]
 fn get_app_info(app: tauri::AppHandle) -> AppInfo {
     AppInfo {
         version: app.package_info().version.to_string(),
@@ -236,6 +252,19 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .register_asynchronous_uri_scheme_protocol(TILE_SCHEME, |ctx, request, responder| {
+            let tiles = ctx
+                .app_handle()
+                .try_state::<AppState>()
+                .map(|state| state.tiles.clone());
+            tauri::async_runtime::spawn(async move {
+                let response = match tiles {
+                    Some(tiles) => tiles.respond(&request).await,
+                    None => into_response(Err(TileError::NotReady)),
+                };
+                responder.respond(response);
+            });
+        })
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -276,10 +305,16 @@ fn main() {
                 enrichment_ttl,
             )));
 
+            let tiles = Arc::new(TileService::new(
+                TileStore::new(cache_dir.join("tiles"), DEFAULT_CAP_BYTES),
+                HttpFetcher::default(),
+            ));
+
             app.manage(AppState {
                 store,
                 geo_readers: readers,
                 enrichment,
+                tiles,
                 active_runs: create_active_runs(),
                 app_data_dir,
             });
@@ -298,6 +333,8 @@ fn main() {
             set_settings,
             emit_telemetry,
             get_app_info,
+            get_tile_cache_info,
+            clear_tile_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
