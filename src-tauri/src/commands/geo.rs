@@ -1,7 +1,9 @@
 use crate::commands::persistence::SharedStore;
 use crate::types::*;
-use maxminddb::Reader;
+use maxminddb::{MaxMindDbError, Reader};
+use serde::de::{self, DeserializeOwned, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use std::collections::HashMap;
+use std::fmt;
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Mutex;
@@ -134,11 +136,76 @@ struct CityRecord {
     country: Option<Country>,
 }
 
+// maxminddb decodes typed fields strictly: an `f64` field accepts only an
+// MMDB double, a `u32` only a uint32. These records use GeoLite2's types,
+// which are also the types of the crate's own `geoip2` structs.
 #[derive(serde::Deserialize)]
 struct Location {
     latitude: Option<f64>,
     longitude: Option<f64>,
+    #[serde(default, deserialize_with = "accuracy_radius_km")]
     accuracy_radius: Option<f64>,
+}
+
+/// Reads `accuracy_radius` from any MMDB number type. GeoLite2 stores it as a
+/// uint16, but other writers can use another width, and a strict decode
+/// would then fail the whole record. A value that is not a non-negative
+/// number counts as missing.
+fn accuracy_radius_km<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    struct Radius;
+
+    impl<'de> Visitor<'de> for Radius {
+        type Value = Option<f64>;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("an accuracy radius in kilometres")
+        }
+
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            Ok((v.is_finite() && v >= 0.0).then_some(v))
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            self.visit_f64(v as f64)
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            self.visit_f64(v as f64)
+        }
+
+        fn visit_u128<E: de::Error>(self, v: u128) -> Result<Self::Value, E> {
+            self.visit_f64(v as f64)
+        }
+
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_bytes<E: de::Error>(self, _: &[u8]) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        // A container must be read to its end, or the decoder would read the
+        // next field from the wrong place.
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            Ok(None)
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(Radius)
 }
 
 #[derive(serde::Deserialize)]
@@ -162,6 +229,31 @@ fn english(names: Option<HashMap<String, String>>) -> Option<String> {
     names.and_then(|mut n| n.remove("en"))
 }
 
+/// The record of `ip`, or `None` when the database has no record for it.
+/// A record that does not decode means a damaged file or a file with another
+/// layout, so it is logged as a warning, not at debug level.
+fn decode_record<T: DeserializeOwned>(
+    reader: &Reader<Vec<u8>>,
+    ip: IpAddr,
+    label: &str,
+) -> Option<T> {
+    match reader.lookup(ip).and_then(|result| result.decode::<T>()) {
+        Ok(record) => record,
+        // An IPv6 address in an IPv4-only database.
+        Err(MaxMindDbError::InvalidInput { message }) => {
+            log::debug!("GeoLite2 {label} lookup skipped for {ip}: {message}");
+            None
+        }
+        Err(e) => {
+            log::warn!(
+                "GeoLite2 {label} record for {ip} does not decode: {e}. \
+                 Download the database again or select another .mmdb file."
+            );
+            None
+        }
+    }
+}
+
 /// Looks the address up in the local GeoLite2 databases. This is a memory
 /// lookup, so it runs inline and is not cached.
 pub fn lookup_geolite(
@@ -174,10 +266,7 @@ pub fn lookup_geolite(
     let databases_loaded = guard.city.reader.is_some() || guard.asn.reader.is_some();
 
     let geo = guard.city.reader.as_ref().and_then(|reader| {
-        let record = reader
-            .lookup::<CityRecord>(ip)
-            .map_err(|e| log::debug!("GeoLite2 city lookup failed for {ip}: {e}"))
-            .ok()?;
+        let record = decode_record::<CityRecord>(reader, ip, "City")?;
         let location = record.location?;
         Some(GeoDetails {
             latitude: location.latitude?,
@@ -193,10 +282,7 @@ pub fn lookup_geolite(
     });
 
     let asn = guard.asn.reader.as_ref().and_then(|reader| {
-        let record = reader
-            .lookup::<AsnRecord>(ip)
-            .map_err(|e| log::debug!("GeoLite2 ASN lookup failed for {ip}: {e}"))
-            .ok()?;
+        let record = decode_record::<AsnRecord>(reader, ip, "ASN")?;
         Some(AsnDetails {
             asn: record.autonomous_system_number,
             name: record.autonomous_system_organization,
