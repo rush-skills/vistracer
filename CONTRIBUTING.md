@@ -4,7 +4,7 @@ Thank you for your interest in contributing. This document covers how to get set
 
 ## Prerequisites
 
-- Node.js 22 or later
+- Node.js 22 or later (`engines.node`). `@types/node` stays on the same major, so typechecked code cannot use an API that Node 22 does not have. Dependabot ignores its major updates; raise it together with `engines.node`.
 - npm (bundled with Node.js)
 - macOS, Linux, or Windows
 - (Optional) MaxMind GeoLite2 `.mmdb` files for local geo enrichment during development
