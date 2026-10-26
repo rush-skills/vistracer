@@ -347,7 +347,7 @@ npm run tauri:build
 ### Frontend (package.json)
 - `@tauri-apps/api`: Tauri IPC bridge
 - `@tauri-apps/plugin-updater` / `@tauri-apps/plugin-process`: update check, install, relaunch
-- `react` / `react-dom`: UI framework
+- `react` / `react-dom` 19 (with `@types/react` / `@types/react-dom` 19): UI framework. `useRef` needs an initial value, and `useRef<T>(null)` is a `RefObject<T | null>`
 - `cesium` (~1.146, Apache-2.0): 3D globe; licenses of bundled data in [docs/third-party-data.md](./docs/third-party-data.md)
 - `zustand`: State management
 - `@tanstack/react-query`: Async data fetching

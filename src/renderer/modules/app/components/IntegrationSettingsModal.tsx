@@ -156,10 +156,12 @@ const GlobeImagerySection: React.FC = () => {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ keepError = false }: { keepError?: boolean } = {}) => {
     try {
       setInfo(await window.visTracer.getTileCacheInfo());
-      setError(undefined);
+      if (!keepError) {
+        setError(undefined);
+      }
     } catch (loadError) {
       setError(errorText(loadError, "Could not read the tile cache."));
     }
@@ -176,7 +178,7 @@ const GlobeImagerySection: React.FC = () => {
       setError(undefined);
     } catch (clearError) {
       setError(errorText(clearError, "Could not clear the tile cache."));
-      await load();
+      await load({ keepError: true });
     } finally {
       setBusy(false);
     }

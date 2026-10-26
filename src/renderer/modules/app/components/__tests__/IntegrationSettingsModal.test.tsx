@@ -168,10 +168,16 @@ describe("IntegrationSettingsModal globe imagery", () => {
     await screen.findByText("Tile cache: 49 MB of 500 MB (2,311 tiles).");
 
     fireEvent.click(screen.getByRole("button", { name: "Clear tile cache" }));
+    // Wait until the reload after the failure is done: the message must
+    // still be there then, not only while the reload runs.
+    await waitFor(() => {
+      expect(tileCache.getTileCacheInfo).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: "Clear tile cache" })).toBeTruthy();
+    });
     expect(
-      await screen.findByText("Could not clear the tile cache in /cache/tiles: permission denied")
+      screen.getByText("Could not clear the tile cache in /cache/tiles: permission denied")
     ).toBeTruthy();
-    expect(tileCache.getTileCacheInfo).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Tile cache: 49 MB of 500 MB (2,311 tiles).")).toBeTruthy();
   });
 
   it("reports a cache that cannot be read", async () => {

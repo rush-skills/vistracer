@@ -47,10 +47,9 @@ export function useSatelliteDrawing(): readonly SatelliteGroupDrawing[] {
   const sources = useInfraStore((state) => state.sources);
   const code = useInfraStore((state) => state.code);
   const links = useSatelliteLinks();
-  const last = useRef<{
-    inputs: readonly unknown[];
-    drawing: readonly SatelliteGroupDrawing[];
-  }>();
+  const last = useRef<
+    { inputs: readonly unknown[]; drawing: readonly SatelliteGroupDrawing[] } | undefined
+  >(undefined);
 
   const shown = satelliteGroupsForLayers(layerVisibility(saved));
   const data = satelliteData(sources);
