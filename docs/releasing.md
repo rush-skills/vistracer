@@ -79,6 +79,11 @@ Notes:
   to this name when `version` is no longer `1.0.0`.
 - Apps installed from v1.0.0 have no updater. Users get the first
   updater-enabled release by downloading it; later releases update in-app.
+- Every action in `.github/workflows/` is pinned to a full commit SHA, with
+  its version in a comment (`@<sha> # v6.1.0`). A moved tag cannot change
+  what the release job (which has `contents: write` and the signing key)
+  runs. Dependabot (`github-actions`, weekly) opens the bumps; keep the
+  SHA form when you edit a workflow.
 - CI builds (`ci.yml`) and local `npm run tauri:build` do not create updater
   artifacts, so they need no key. To build a signed release locally:
 
