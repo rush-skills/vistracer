@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 export function useModalA11y(
   isOpen: boolean,
   onClose: () => void
-): React.RefObject<HTMLDivElement> {
+): React.RefObject<HTMLDivElement | null> {
   const panelRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<Element | null>(null);
 
