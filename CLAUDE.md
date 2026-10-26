@@ -311,6 +311,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 - **State persistence**: In-memory `AppStore` with `Mutex` for thread-safe access; settings in `$APPDATA/settings.json`, provider cache in `$APPCACHE/enrichment-cache.json`, globe tiles in `$APPCACHE/tiles/`
 - **CSP**: strict policy in `tauri.conf.json` (`script-src 'self'`); never inject inline scripts (gif.js loads as a `?url` asset). The tile scheme (`vistiles:`, `http://vistiles.localhost`) is allowed in `img-src`/`connect-src`; no `'wasm-unsafe-eval'` (see `meshoptimizerStub.ts`)
 - **Updater**: `plugins.updater.pubkey` is a placeholder until the signing key is set up; `get_app_info` reports `updaterConfigured`
+- **WebView floor**: Safari 16.4 (macOS 11+, `bundle.macOS.minimumSystemVersion` 11.0), WebKitGTK 2.46, WebView2 110; `build.target` is `safari16.4` / `chrome110`. esbuild adds no polyfills: do not use a built-in the floor lacks ([docs/architecture.md#webview-floor](./docs/architecture.md#webview-floor))
 - **Never run `prettier --write` on whole folders**: the repo is not Prettier-clean, so it rewrites lines nobody changed. Format only new files or new code.
 
 ## Build & Package

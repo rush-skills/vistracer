@@ -110,8 +110,9 @@ export default defineConfig({
     assetsInlineLimit: 0,
     // Cesium is one lazy chunk of about 4 MB; it loads from disk in the app.
     chunkSizeWarningLimit: 5000,
-    // Tauri uses Chromium on Windows and WebKit on macOS/Linux
-    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari14"
+    // The oldest webview the globe runs in (docs/architecture.md#webview-floor):
+    // WebKit on macOS and Linux, Chromium (WebView2) on Windows.
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome110" : "safari16.4"
   },
   // Vite options tailored for Tauri development
   clearScreen: false,

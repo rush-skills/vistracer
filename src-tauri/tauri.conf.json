@@ -64,6 +64,7 @@
       "../assets/logo.png"
     ],
     "macOS": {
+      "minimumSystemVersion": "11.0",
       "dmg": {
         "appPosition": {
           "x": 180,

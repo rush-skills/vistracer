@@ -1216,6 +1216,36 @@ the RDAP base URL must be `http(s)`, the PeeringDB key must not contain spaces.
 UI preferences are validated too (`UiPreferences::validated`), see
 [UI shell](#ui-shell).
 
+## WebView floor
+
+The renderer runs in the web view of the operating system: WKWebView
+(WebKit) on macOS, WebKitGTK on Linux and WebView2 (Chromium) on Windows.
+The globe needs at least:
+
+| Platform | Floor | Why |
+| --- | --- | --- |
+| macOS | Safari 16.4: macOS 11 and 12 with the Safari update, built in from macOS 13.3 | Cesium's `Material` tests `value instanceof OffscreenCanvas` for each colour uniform (the country borders at start, every arc and ring). Before Safari 16.4 there is no `OffscreenCanvas` global, so the test throws a `ReferenceError`. Cesium also calls `Array.prototype.toSorted` (Safari 16.0) when its camera controller starts. |
+| Linux | WebKitGTK 2.46 | WebKitGTK exposes `OffscreenCanvas` by default from 2.46 (September 2024). |
+| Windows | WebView2 (Chromium) 110 | `Array.prototype.toSorted`. WebView2 updates itself, and the installer adds it when it is missing. |
+
+- **Build target** (`vite.config.ts` → `build.target`): `safari16.4` for
+  macOS and Linux, `chrome110` for Windows builds
+  (`TAURI_ENV_PLATFORM=windows`). esbuild lowers newer syntax to the
+  target. It adds no polyfills, so code must not use a built-in that the
+  floor does not have.
+- **macOS minimum** (`tauri.conf.json` → `bundle.macOS.minimumSystemVersion`,
+  `11.0`): macOS 10.15 and earlier get Safari 15.6 at most, so the app
+  would start with a globe that cannot draw. On macOS 11 and 12, a Safari
+  update also updates WKWebView, so these versions stay in.
+- **Type checking**: the renderer's TypeScript library is ES2021, below the
+  floor. A newer built-in needs a library change and a check that the
+  floor has it.
+- **Other built-ins in the shipped chunks**: `Object.hasOwn` (Cesium
+  buffer collections the app does not use) and `Array.prototype.at`
+  (satellite.js `propagate`) need Safari 15.4. The render governor calls
+  `navigator.getBattery` only where it exists.
+- **Not tested at the floor**: the globe check runs in the current Chrome.
+
 ## Security
 
 - **CSP** (`tauri.conf.json` → `app.security.csp`): scripts, styles, images and
