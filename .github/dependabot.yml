@@ -19,6 +19,16 @@ updates:
         patterns:
           - "three"
           - "@react-three/*"
+      # Dependabot puts a dependency in the first group that matches it, so
+      # these two groups must stay above dev-tooling.
+      typescript-eslint:
+        patterns:
+          - "@typescript-eslint/*"
+          - "typescript-eslint"
+      eslint:
+        patterns:
+          - "eslint"
+          - "@eslint/*"
       dev-tooling:
         dependency-type: development
         update-types:
@@ -29,6 +39,14 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # Until eslint-plugin-react supports ESLint 10 (7.37.5 accepts up to ^9.7).
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@eslint/js"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: cargo
     directory: /src-tauri
