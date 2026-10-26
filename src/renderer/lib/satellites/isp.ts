@@ -1,4 +1,4 @@
-import type { HopResolution, LocationConfidence } from "@common/ipc";
+import type { HopResolution } from "@common/ipc";
 import type { SatelliteGroupId } from "./groups";
 
 /**
@@ -59,15 +59,16 @@ export const SATELLITE_ISPS: readonly SatelliteIsp[] = [
  */
 export const GEO_MIN_RTT_MS = 470;
 
-export interface SatelliteLink {
+interface SatelliteLinkBase {
   hopIndex: number;
   isp: SatelliteIsp;
-  confidence: LocationConfidence;
   /** Says what the guess rests on, for the hop details. */
   reason: string;
-  /** For a low confidence: why, in a few words (the hover card). */
-  doubt: string | null;
 }
+
+/** A low confidence always says why, in a few words (the hover card). */
+export type SatelliteLink = SatelliteLinkBase &
+  ({ confidence: "low"; doubt: string } | { confidence: "medium" | "high"; doubt: null });
 
 const ms = (value: number) => `${Math.round(value).toLocaleString("en-US")} ms`;
 

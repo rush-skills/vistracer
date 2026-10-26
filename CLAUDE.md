@@ -28,7 +28,7 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (357 tests across 38 files)
+npm run test           # Run unit + component tests (358 tests across 38 files)
 npm run test:e2e       # Run e2e tests (84 tests across 7 files)
 npm run test:watch     # Run tests in watch mode
 node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): wide start view, idle frames and compositor frames, online tile requests (incl. the online imagery switch), export input lock, infrastructure layers (no request while off, each source once, cable consent, no request to TeleGeography), satellites (no request or SGP4 code while off, consent, one frame per second, none while hidden), accessible names in headless Chrome (50 checks)
@@ -235,7 +235,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 357 tests across 38 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 358 tests across 38 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 11 tests: store behavior, hovered hop, user selections ignored during an export
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
@@ -273,7 +273,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - `src/renderer/hooks/__tests__/useInfraLoading.test.tsx` — 4 tests: a source read again when one of its layers is turned off and on (also while a sibling layer stays on), a failed source retried only then, a missing exchange list read again after a trace for the layers that show it, and not read after a trace while only layers with other sources show
   - `src/renderer/lib/satellites/__tests__/propagate.test.ts` — 5 tests: SGP4 against Vallado's case 00005 (distance and z to the metre at 0 and 360 min), a geostationary longitude against IAU 1982 sidereal time (independent of satellite.js), a Starlink-like height, NaN for a decayed satellite
   - `src/renderer/lib/satellites/__tests__/clock.test.ts` — 5 tests: nothing while there is nothing to move, at most one update a second (also with new data), the first data at once, paused while hidden and one catch-up, stopped and disposed
-  - `src/renderer/lib/satellites/__tests__/satellites.test.ts` — 15 tests: `parseSatelliteGroup` (keys, malformed records dropped and counted, wrong group or shape), satellite ISP match (Starlink medium, GEO by RTT, other networks ignored, highlight only likely links, "possible" wording for low confidence), drawing (style, stable arrays, highlight, even thinning, 3:1 on the dark globe), `planSatelliteGroups` (keep, rebuild, remove), satellite card and key (own group names only), element age text
+  - `src/renderer/lib/satellites/__tests__/satellites.test.ts` — 16 tests: `parseSatelliteGroup` (keys, malformed records dropped and counted, wrong group or shape), satellite ISP match (Starlink medium, GEO by RTT, other networks ignored, highlight only likely links, "possible" wording for low confidence, a low-confidence link without a doubt does not compile), drawing (style, stable arrays, highlight, even thinning, 3:1 on the dark globe), `planSatelliteGroups` (keep, rebuild, remove), satellite card and key (own group names only), element age text
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
 
 - **E2E tests** (`vitest.e2e.config.ts`): 84 tests across 7 files

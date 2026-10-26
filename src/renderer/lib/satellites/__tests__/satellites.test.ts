@@ -5,11 +5,13 @@ import { formatAge, parseSatelliteKey, satelliteCardContent } from "@renderer/li
 import { MAX_SATELLITES_PER_GROUP, SATELLITE_GROUPS } from "@renderer/lib/satellites/groups";
 import {
   GEO_MIN_RTT_MS,
+  SATELLITE_ISPS,
   routeConstellations,
   satelliteLink,
   satelliteLinkSummary,
   satelliteLinkTitle,
-  satelliteLinks
+  satelliteLinks,
+  type SatelliteLink
 } from "@renderer/lib/satellites/isp";
 import { hoveredSatelliteStyle } from "@renderer/lib/globe";
 import { planSatelliteGroups } from "@renderer/lib/satellites/reconcile";
@@ -122,6 +124,19 @@ describe("satelliteLink (satellite internet providers on the route)", () => {
     expect([...links.keys()]).toEqual([2, 3]);
     // The HughesNet hop is too fast for a GEO link before it: no highlight.
     expect(routeConstellations(links)).toEqual(new Set(["starlink"]));
+  });
+
+  it("types a low confidence with its doubt and a likely link without one", () => {
+    const base = { hopIndex: 2, isp: SATELLITE_ISPS[3], reason: "AS6621 is the HughesNet network." };
+    const low: SatelliteLink = { ...base, confidence: "low", doubt: "a 35 ms round trip is too short" };
+    expect(satelliteLinkSummary(low)).toBe(
+      "Possible HughesNet satellite link (low confidence: a 35 ms round trip is too short)"
+    );
+    // @ts-expect-error A low confidence without a doubt would show "(low confidence: null)".
+    const noDoubt: SatelliteLink = { ...base, confidence: "low", doubt: null };
+    // @ts-expect-error A likely link has no doubt.
+    const likelyWithDoubt: SatelliteLink = { ...base, confidence: "high", doubt: "too fast" };
+    expect([noDoubt.doubt, likelyWithDoubt.doubt]).toEqual([null, "too fast"]);
   });
 });
 
