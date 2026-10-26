@@ -5,6 +5,7 @@ import { useInfraLoading } from "@renderer/hooks/useInfra";
 import { NO_EXCHANGE_LIST, useInfraStore } from "@renderer/state/infraStore";
 import { useTracerouteStore } from "@renderer/state/tracerouteStore";
 import { useUiStore } from "@renderer/state/uiStore";
+import cloudRegions from "../../public/infra/cloud-regions.json";
 
 const initialInfra = useInfraStore.getState();
 const initialUi = useUiStore.getState();
@@ -31,6 +32,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("useInfraLoading", () => {
@@ -93,12 +95,28 @@ describe("useInfraLoading", () => {
       expect(useInfraStore.getState().sources["peeringdb-sites"].status).toBe("ready")
     );
     expect(getPeeringDbSites).toHaveBeenCalledTimes(2);
+  });
 
-    // With neither the exchange nor the data centre layer shown, a trace reads nothing.
+  it("does not read the missing exchange list after a trace while only other layers show", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(cloudRegions))));
+    // An earlier read found no list, so a reload is possible.
+    useInfraStore.setState((state) => ({
+      sources: {
+        ...state.sources,
+        "peeringdb-sites": { status: "unavailable", message: NO_EXCHANGE_LIST }
+      }
+    }));
+    render(<Loader />);
+    setLayers({ "cloud-regions": true });
+    await waitFor(() =>
+      expect(useInfraStore.getState().sources["cloud-regions"].status).toBe("ready")
+    );
+
     act(() => useTracerouteStore.setState({ status: "running" }));
-    useInfraStore.setState(initialInfra, true);
-    setLayers({ "cloud-regions": false, "data-centres": false });
     act(() => useTracerouteStore.setState({ status: "success" }));
-    expect(getPeeringDbSites).toHaveBeenCalledTimes(2);
+    // A reload would call the backend after the layer code promise.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(getPeeringDbSites).not.toHaveBeenCalled();
+    expect(useInfraStore.getState().sources["peeringdb-sites"].status).toBe("unavailable");
   });
 });
