@@ -296,3 +296,187 @@ pub fn lookup_geolite(
         databases_loaded,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::persistence::AppStore;
+
+    /// MaxMind DB test files; source and licence in fixtures/geoip/README.md.
+    fn fixture(name: &str) -> String {
+        format!("{}/fixtures/geoip/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn lookup(
+        city_db: Option<String>,
+        asn_db: Option<String>,
+        ip: &str,
+    ) -> (GeoLiteResult, SharedGeoReaders) {
+        let mut store = AppStore::default();
+        store.geo.city_db_path = city_db;
+        store.geo.asn_db_path = asn_db;
+        let store: SharedStore = Mutex::new(store);
+        let readers = SharedGeoReaders::default();
+        let result = lookup_geolite(ip.parse().unwrap(), &readers, &store);
+        (result, readers)
+    }
+
+    #[test]
+    fn city_record_decodes_with_accuracy_radius() {
+        let city_db = Some(fixture("GeoLite2-City-Test.mmdb"));
+
+        let (result, _) = lookup(city_db.clone(), None, "81.2.69.142");
+        assert_eq!(
+            result.geo,
+            Some(GeoDetails {
+                latitude: 51.5142,
+                longitude: -0.0931,
+                city: Some("London".into()),
+                country: Some("United Kingdom".into()),
+                iso_code: Some("GB".into()),
+                confidence: Some(10.0),
+            })
+        );
+        assert_eq!(
+            result.status().message.as_deref(),
+            Some("Resolved from local GeoLite2 databases.")
+        );
+
+        // An IPv6 network with a country and no city.
+        let (result, _) = lookup(city_db, None, "2001:218::1");
+        let geo = result.geo.expect("record for 2001:218::/32");
+        assert_eq!((geo.latitude, geo.longitude), (35.68536, 139.75309));
+        assert_eq!(geo.city, None);
+        assert_eq!(geo.iso_code.as_deref(), Some("JP"));
+        assert_eq!(geo.confidence, Some(100.0));
+    }
+
+    #[test]
+    fn asn_record_decodes() {
+        let asn_db = Some(fixture("GeoLite2-ASN-Test.mmdb"));
+        for (ip, number, name) in [
+            ("1.128.0.1", 1221, "Telstra Pty Ltd"),
+            ("2600:6000::1", 237, "Merit Network Inc."),
+        ] {
+            let (result, _) = lookup(None, asn_db.clone(), ip);
+            let asn = result.asn.expect(ip);
+            assert_eq!(asn.asn, Some(number));
+            assert_eq!(asn.name.as_deref(), Some(name));
+        }
+    }
+
+    #[test]
+    fn address_without_record_is_no_result() {
+        let (result, readers) = lookup(
+            Some(fixture("GeoLite2-City-Test.mmdb")),
+            Some(fixture("GeoLite2-ASN-Test.mmdb")),
+            "1.1.1.1",
+        );
+        assert_eq!(result.geo, None);
+        assert_eq!(result.asn, None);
+        assert!(result.databases_loaded);
+        assert_eq!(result.status().status, ProviderState::Success);
+        assert_eq!(
+            result.status().message.as_deref(),
+            Some("No GeoLite2 record for this address.")
+        );
+        let (city, asn, errors) = database_statuses(&readers);
+        assert_eq!(city, GeoDatabaseStatus::Loaded);
+        assert_eq!(asn, GeoDatabaseStatus::Loaded);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn file_that_is_not_a_database_is_a_load_error() {
+        let path =
+            std::env::temp_dir().join(format!("vistracer-not-mmdb-{}.mmdb", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"not a MaxMind database").unwrap();
+        let (result, readers) = lookup(
+            Some(path.to_string_lossy().into_owned()),
+            Some(fixture("missing.mmdb")),
+            "81.2.69.142",
+        );
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(!result.databases_loaded);
+        assert_eq!(result.status().status, ProviderState::Skipped);
+        let (city, asn, errors) = database_statuses(&readers);
+        assert_eq!(city, GeoDatabaseStatus::Error);
+        assert_eq!(asn, GeoDatabaseStatus::Error);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(
+            errors[0].starts_with("City database: Failed to open database: "),
+            "{errors:?}"
+        );
+        assert_eq!(errors[1], "ASN database: File not found");
+    }
+
+    #[test]
+    fn damaged_record_is_no_result() {
+        // The file opens, but its doubles have the wrong size, so the record
+        // of this address does not decode.
+        let (result, readers) = lookup(
+            Some(fixture("GeoIP2-City-Test-Broken-Double-Format.mmdb")),
+            None,
+            "81.2.69.142",
+        );
+        assert_eq!(result.geo, None);
+        assert!(result.databases_loaded);
+        assert_eq!(database_statuses(&readers).0, GeoDatabaseStatus::Loaded);
+    }
+
+    #[test]
+    fn accuracy_radius_reads_any_number_type() {
+        // The decoder test record has one value of each MMDB type, with the
+        // type as its key. Each value is read as an accuracy radius.
+        #[derive(serde::Deserialize)]
+        struct EveryType {
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            array: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            boolean: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            bytes: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            double: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            float: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            int32: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            map: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            uint16: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            uint32: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            uint64: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            uint128: Option<f64>,
+            #[serde(deserialize_with = "accuracy_radius_km")]
+            utf8_string: Option<f64>,
+        }
+
+        let reader = load_reader(&fixture("MaxMind-DB-test-decoder.mmdb")).unwrap();
+        let record: EveryType =
+            decode_record(&reader, "1.1.1.1".parse().unwrap(), "test").expect("record");
+
+        assert_eq!(record.uint16, Some(100.0));
+        assert_eq!(record.uint32, Some(268_435_456.0));
+        assert_eq!(record.uint64, Some(2f64.powi(60)));
+        assert_eq!(record.uint128, Some(2f64.powi(120)));
+        assert_eq!(record.double, Some(42.123456));
+        assert_eq!(record.float, Some(f64::from(1.1f32)));
+        // -268435456: a negative radius means nothing.
+        assert_eq!(record.int32, None);
+        for (key, value) in [
+            ("array", record.array),
+            ("boolean", record.boolean),
+            ("bytes", record.bytes),
+            ("map", record.map),
+            ("utf8_string", record.utf8_string),
+        ] {
+            assert_eq!(value, None, "{key}");
+        }
+    }
+}
