@@ -1246,9 +1246,11 @@ The globe needs at least:
   `11.0`): macOS 10.15 and earlier get Safari 15.6 at most, so the app
   would start with a globe that cannot draw. On macOS 11 and 12, a Safari
   update also updates WKWebView, so these versions stay in.
-- **Type checking**: the renderer's TypeScript library is ES2021, below the
-  floor. A newer built-in needs a library change and a check that the
-  floor has it.
+- **Type checking**: the renderer's TypeScript library is ES2021 plus
+  ES2022.Array, below the floor. ES2022.Array adds only `.at()` on arrays
+  and typed arrays (Safari 15.4, Chrome 92). Without it, `.at()` typechecks
+  only through a shim in `@types/node` that version 26 removes. A newer
+  built-in needs a library change and a check that the floor has it.
 - **Other built-ins in the shipped chunks**: `Object.hasOwn` (Cesium
   buffer collections the app does not use) and `Array.prototype.at`
   (satellite.js `propagate`) need Safari 15.4. The render governor calls

@@ -5,7 +5,7 @@
     "jsx": "react-jsx",
     "module": "ESNext",
     "target": "ES2021",
-    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "lib": ["ES2021", "ES2022.Array", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "noEmit": true
   },

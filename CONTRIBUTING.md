@@ -4,7 +4,7 @@ Thank you for your interest in contributing. This document covers how to get set
 
 ## Prerequisites
 
-- Node.js 22 or later
+- Node.js 22 or later (`engines.node`). `@types/node` stays on the same major, so typechecked code cannot use an API that Node 22 does not have. Dependabot ignores its major updates; raise it together with `engines.node`.
 - npm (bundled with Node.js)
 - macOS, Linux, or Windows
 - (Optional) MaxMind GeoLite2 `.mmdb` files for local geo enrichment during development
@@ -46,7 +46,7 @@ Before opening a pull request, make sure both commands exit cleanly. `npm run li
 ESLint uses the flat config in `eslint.config.js` (ESLint 9). It applies the recommended presets of `@eslint/js`, `typescript-eslint`, `eslint-plugin-react` (with `jsx-runtime`) and `eslint-plugin-react-hooks`, then `eslint-config-prettier` last. TypeScript files are parsed against `tsconfig.renderer.json`.
 
 - ESLint stays on 9 until `eslint-plugin-react` supports ESLint 10. Dependabot ignores ESLint major updates for this reason.
-- `eslint-plugin-react-hooks` stays on 6. Version 7 adds the React Compiler rules to its recommended preset, and the app does not use the React Compiler.
+- `eslint-plugin-react-hooks` stays on 6. Version 7 adds the React Compiler rules to its recommended preset, and the app does not use the React Compiler. Dependabot ignores its major updates.
 
 Key conventions:
 

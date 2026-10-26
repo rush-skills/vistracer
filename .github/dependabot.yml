@@ -47,6 +47,18 @@ updates:
       - dependency-name: "@eslint/js"
         update-types:
           - "version-update:semver-major"
+      # @types/node tracks engines.node in package.json (>=22). Types of a
+      # newer Node let APIs that Node 22 does not have typecheck. Raise both
+      # together.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
+      # react-hooks 7 removes configs["flat/recommended"], which
+      # eslint.config.js uses, and adds the React Compiler rules (19
+      # findings). Lift this in the PR that adopts v7.
+      - dependency-name: "eslint-plugin-react-hooks"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: cargo
     directory: /src-tauri
