@@ -19,7 +19,7 @@ flowchart LR
     state -->|"take_changed()"| early["hop event<br/>lookupState: pending"]
     state -->|new address| spawn["JoinSet task<br/>max 8 per run"]
     spawn --> worker["Lookup worker<br/>(one per address)"]
-    worker --> dns["Reverse DNS<br/>blocking pool, 4 s timeout"]
+    worker --> dns["Reverse DNS<br/>blocking pool, max 8 calls,<br/>4 s timeout"]
     worker --> geolite["GeoLite2 City + ASN<br/>local .mmdb"]
     worker --> enrich["EnrichmentService"]
     enrich --> cache[("TTL cache 7 d<br/>memory + $APPCACHE/enrichment-cache.json")]
@@ -75,6 +75,15 @@ flowchart LR
    is started as root through `osascript`. Cancel kills `osascript`, but the
    root `traceroute` keeps running until it ends (stopping it needs root);
    its output is ignored.
+
+### Lookup limits
+
+| Limit | Value |
+| --- | --- |
+| Lookup tasks of a run | 8 at a time (`LOOKUP_CONCURRENCY`, `commands/traceroute.rs`) |
+| Reverse DNS calls in the system resolver | 8 at a time, for all runs together (`MAX_RESOLVER_CALLS`, `commands/dns.rs`). `getnameinfo` blocks and cannot be stopped, so a call keeps its slot until the resolver answers or gives up, also after the timeout |
+| Reverse DNS wait | 4 s, the wait for a slot included (`REVERSE_DNS_TIMEOUT`). After it, the hop has no host name. With a resolver that does not answer, 8 calls hold the slots; later lookups wait 4 s and start no call, so the blocking pool does not grow |
+| Provider calls | See [Enrichment](#enrichment) |
 
 ### Linux privileges
 
