@@ -334,7 +334,8 @@ npm run tauri:build
 
 ### Rust (src-tauri/Cargo.toml)
 - `tauri` v2: Application framework
-- `tauri-plugin-updater` (~2.10) / `tauri-plugin-process` (~2.3): in-app updates and relaunch (pinned to match tauri 2.10)
+- `tauri-plugin-updater` (~2.14) / `tauri-plugin-process` (~2.4): in-app updates and relaunch (pinned to match tauri 2.12)
+- Every `tauri` / `tauri-plugin-*` crate must be on the same major.minor as its `@tauri-apps/*` npm package: `tauri build` and `tauri dev` stop with "Found version mismatched Tauri packages" otherwise. Upgrade both sides in one PR (Dependabot opens them as separate PRs).
 - `maxminddb`: GeoIP database reader
 - `tokio`: Async runtime
 - `reqwest`: HTTP client (for external providers, MaxMind downloads)
