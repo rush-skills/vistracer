@@ -165,7 +165,7 @@ fn is_fresh(fetched_at: i64, now: i64) -> bool {
 fn copy_age(fetched_at: i64, now: i64) -> String {
     if fetched_at - now > CLOCK_TOLERANCE_MS {
         format!(
-            "the saved copy dated {} (the system clock was ahead when it was saved)",
+            "the saved copy dated {} (the system clock was wrong when it was saved, or is wrong now)",
             clock_time(fetched_at)
         )
     } else {
@@ -348,10 +348,11 @@ struct RequestLog {
 }
 
 impl RequestLog {
-    /// Times saved while the system clock was ahead are counted again from
-    /// `now`, once: a request time becomes now, a pause its full length from
-    /// now. So a wait never lasts longer than its own length and does not
-    /// start again on the next call. True when a time changed.
+    /// Times in the future (the system clock was wrong when they were saved,
+    /// or is wrong now) are counted again from `now`, once: a request time
+    /// becomes now, a pause its full length from now. So a wait never lasts
+    /// longer than its own length and does not start again on the next call.
+    /// True when a time changed.
     fn correct_clock(&mut self, now: i64) -> bool {
         let mut changed = false;
         let mut cap = |at: &mut i64, length: i64| {
@@ -1120,7 +1121,9 @@ mod tests {
         let shown = refused.get(starlink(), ON).await.unwrap();
         let note = shown.note.as_deref().unwrap();
         assert!(
-            note.contains("dated 2026-09-22 14:13 UTC (the system clock was ahead"),
+            note.contains(
+                "dated 2026-09-22 14:13 UTC (the system clock was wrong when it was saved, or is wrong now)"
+            ),
             "{note}"
         );
         std::fs::remove_dir_all(&dir).unwrap();
