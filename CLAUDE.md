@@ -36,7 +36,7 @@ node scripts/infra-data/build-cloud-regions.mjs  # Rebuild src/renderer/public/i
 node scripts/globe-check/ui-shots.mjs [dir]  # After a build: screenshots of every UI state, dark/light/960x640/reduced motion+transparency
 
 # Rust
-cd src-tauri && cargo test                                # 201 tests (+4 ignored network smoke tests)
+cd src-tauri && cargo test                                # 207 tests (+4 ignored network smoke tests)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -125,7 +125,7 @@ Key Events (Tauri emit/listen):
 - `commands/satellites.rs`: opt-in satellite groups from CelesTrak (CSV, parsed at the edge): `SATELLITE_GROUPS` table (layer id, group, default), single flight, the saved switch read at the start, after the lock and right before the request, `$APPCACHE/satellites/<group>.json` for 12 h, `requests.json` saved before each request (no request without it; one per group in 2 h, also after a timeout or broken answer; 2 h stop after an HTTP error or unusable data; 15 min after a failed connection), older copy with a note; a saved time more than 5 min in the future (clock ahead) makes a copy stale and is moved to now plus its length, once
 - `commands/retry.rs`: `ProviderError`, backoff with jitter, `with_retry`
 - `commands/dns.rs`: Reverse DNS on the blocking pool with caching; at most 8 resolver calls at once for all runs (a call keeps its slot after the 4 s timeout until `getnameinfo` returns), so a dead resolver cannot grow the pool
-- `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup
+- `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup; no record is no result, a record that does not decode is no result with a warning; typed fields decode strictly, so the record types match GeoLite2's (`accuracy_radius` is read from any number type)
 - `commands/app_info.rs`: App version and updater key state
 - `commands/tile_cache.rs`: globe tile cache: allowlisted GIBS layers, URI parsing, `$APPCACHE/tiles` with a 500 MB LRU cap, single-flight downloads, 3-failure pause, redirect allowlist; no upstream request while the "Online imagery" layer switch is off (`set_online_enabled`, applied at start and on every `set_settings`)
 - `commands/geodb_downloader.rs`: MaxMind database auto-download
@@ -287,13 +287,14 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 201 tests in `src-tauri/src/` (plus four ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache, `smoke_real_cable_map` downloads the TeleGeography cable map, `smoke_real_celestrak` downloads the GPS group from CelesTrak once) covering:
+- 207 tests in `src-tauri/src/` (plus four ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache, `smoke_real_cable_map` downloads the TeleGeography cable map, `smoke_real_celestrak` downloads the GPS group from CelesTrak once) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
   - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
   - Reverse DNS against a fake resolver that does not answer: at most the cap of calls reach it, every caller returns at the timeout, a new lookup starts no call while the slots are held, lookups work again after it answers
+  - GeoLite2 lookups against MaxMind's test databases (`fixtures/geoip/`, Apache-2.0 or MIT): City and ASN records (IPv4 and IPv6), an address without a record, a file that is not a database, a damaged record, `accuracy_radius` from every MMDB data type
   - Settings validation (including `ixMatching` defaults for old settings files), UI preferences (defaults, bad ids and unbounded maps rejected, a damaged `ui` section keeps the rest of the file, one bad field keeps the other saved choices), updater key detection
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
   - PeeringDB sites: facilities and counts from real rows, served from memory and the disk cache with no download, a dataset of the previous version used and refreshed
@@ -336,7 +337,7 @@ npm run tauri:build
 - `tauri` v2: Application framework
 - `tauri-plugin-updater` (~2.14) / `tauri-plugin-process` (~2.4): in-app updates and relaunch (pinned to match tauri 2.12)
 - Every `tauri` / `tauri-plugin-*` crate must be on the same major.minor as its `@tauri-apps/*` npm package: `tauri build` and `tauri dev` stop with "Found version mismatched Tauri packages" otherwise. Upgrade both sides in one PR (Dependabot opens them as separate PRs).
-- `maxminddb`: GeoIP database reader
+- `maxminddb` 0.32: GeoIP database reader. Since 0.27 it decodes typed fields strictly (an `f64` field accepts only an MMDB double), so a record type that does not match the database fails the whole record
 - `tokio`: Async runtime
 - `reqwest`: HTTP client (for external providers, MaxMind downloads)
 - `regex`: Traceroute output parsing

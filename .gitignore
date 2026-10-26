@@ -11,6 +11,9 @@ src/**/*.js
 src/**/*.js.map
 !src/**/*.d.ts
 *.mmdb
+# MaxMind's test databases for the GeoLite2 tests (see the README there).
+# Real GeoLite2 files stay out of the repository.
+!src-tauri/fixtures/geoip/*.mmdb
 
 # Tauri
 src-tauri/target

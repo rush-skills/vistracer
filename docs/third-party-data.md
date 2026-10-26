@@ -195,6 +195,14 @@ layout with made-up rows and Vallado's published SGP4 test case 00005.
   `src/renderer/lib/satellites/isp.ts`; their names were checked in
   PeeringDB's network records on 2026-10-25.
 
+## Test data in the repository
+
+Not in the app. `src-tauri/fixtures/geoip/` holds four MaxMind DB test
+files (54 KB) from <https://github.com/maxmind/MaxMind-DB>, for the GeoLite2
+lookup tests. License: Apache-2.0 or MIT, MaxMind, Inc. The source commit,
+the hashes and the MIT notice are in
+[src-tauri/fixtures/geoip/README.md](../src-tauri/fixtures/geoip/README.md).
+
 ## Credits shown in the app
 
 A small "NASA, GIBS, CesiumJS" button in the globe's lower right corner opens
