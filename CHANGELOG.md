@@ -61,6 +61,7 @@ All notable changes to VisTracer will be documented in this file.
 - The cable notice says that TeleGeography published the map under CC BY-NC-SA 3.0, and that its current terms can be different
 - Arrow keys, Home and End no longer scroll the hop timeline while an animated export records
 - A second export started within 3.5 s of the previous one is no longer shown as finished while it still runs
+- When the tile cache cannot be cleared, Integration settings keeps showing the reason (it disappeared when the cache size was read again)
 - Team Cymru lookups could never connect, PeeringDB sent the API key in the wrong header, and RIPEstat/PeeringDB fields that do not exist were read
 - macOS TCP traces only run root-owned system binaries with administrator rights
 - A partial settings file no longer resets all settings
