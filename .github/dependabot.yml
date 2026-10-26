@@ -53,6 +53,12 @@ updates:
       - dependency-name: "@types/node"
         update-types:
           - "version-update:semver-major"
+      # react-hooks 7 removes configs["flat/recommended"], which
+      # eslint.config.js uses, and adds the React Compiler rules (19
+      # findings). Lift this in the PR that adopts v7.
+      - dependency-name: "eslint-plugin-react-hooks"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: cargo
     directory: /src-tauri
