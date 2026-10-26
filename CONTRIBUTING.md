@@ -41,7 +41,12 @@ npm run lint
 npm run typecheck
 ```
 
-Before opening a pull request, make sure both commands exit cleanly. Formatting is enforced by Prettier; run your editor's format-on-save or invoke Prettier directly if needed. Do not disable ESLint rules inline without a clear comment explaining why.
+Before opening a pull request, make sure both commands exit cleanly. `npm run lint` fails on any warning (`--max-warnings 0`). Formatting is enforced by Prettier; run your editor's format-on-save or invoke Prettier directly if needed. Do not disable ESLint rules inline without a clear comment explaining why.
+
+ESLint uses the flat config in `eslint.config.js` (ESLint 9). It applies the recommended presets of `@eslint/js`, `typescript-eslint`, `eslint-plugin-react` (with `jsx-runtime`) and `eslint-plugin-react-hooks`, then `eslint-config-prettier` last. TypeScript files are parsed against `tsconfig.renderer.json`.
+
+- ESLint stays on 9 until `eslint-plugin-react` supports ESLint 10. Dependabot ignores ESLint major updates for this reason.
+- `eslint-plugin-react-hooks` stays on 6. Version 7 adds the React Compiler rules to its recommended preset, and the app does not use the React Compiler.
 
 Key conventions:
 
