@@ -137,6 +137,16 @@ Rules:
   GeoLite2 (live BGP before the database snapshot). The name only comes from
   a source that agrees on that ASN, then PeeringDB, then the RDAP registrant.
   The prefix comes from RIPEstat (when announced), then Team Cymru, then RDAP.
+- GeoLite2 (`commands/geo.rs`, `maxminddb` 0.32) reads only the local
+  `.mmdb` files. An address without a record gives "No GeoLite2 record for
+  this address.", not an error. A file that does not open shows its error in
+  the GeoIP settings and the warning banner. A record that does not decode
+  (damaged file or another layout) gives no GeoLite2 data and a warning in
+  the log. The crate decodes typed fields strictly, so the record types
+  match GeoLite2's: latitude and longitude double, ASN uint32. Only
+  `accuracy_radius` (uint16 in GeoLite2) is read from any number type; a
+  negative number or a value that is not a number counts as missing. Tests
+  use MaxMind's test databases in `src-tauri/fixtures/geoip/`.
 
 ## Hop locations
 
