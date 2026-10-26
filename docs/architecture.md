@@ -19,7 +19,7 @@ flowchart LR
     state -->|"take_changed()"| early["hop event<br/>lookupState: pending"]
     state -->|new address| spawn["JoinSet task<br/>max 8 per run"]
     spawn --> worker["Lookup worker<br/>(one per address)"]
-    worker --> dns["Reverse DNS<br/>blocking pool, 4 s timeout"]
+    worker --> dns["Reverse DNS<br/>blocking pool, max 8 calls,<br/>4 s timeout"]
     worker --> geolite["GeoLite2 City + ASN<br/>local .mmdb"]
     worker --> enrich["EnrichmentService"]
     enrich --> cache[("TTL cache 7 d<br/>memory + $APPCACHE/enrichment-cache.json")]
@@ -75,6 +75,15 @@ flowchart LR
    is started as root through `osascript`. Cancel kills `osascript`, but the
    root `traceroute` keeps running until it ends (stopping it needs root);
    its output is ignored.
+
+### Lookup limits
+
+| Limit | Value |
+| --- | --- |
+| Lookup tasks of a run | 8 at a time (`LOOKUP_CONCURRENCY`, `commands/traceroute.rs`) |
+| Reverse DNS calls in the system resolver | 8 at a time, for all runs together (`MAX_RESOLVER_CALLS`, `commands/dns.rs`). `getnameinfo` blocks and cannot be stopped, so a call keeps its slot until the resolver answers or gives up, also after the timeout |
+| Reverse DNS wait | 4 s, the wait for a slot included (`REVERSE_DNS_TIMEOUT`). After it, the hop has no host name. With a resolver that does not answer, 8 calls hold the slots; later lookups wait 4 s and start no call, so the blocking pool does not grow |
+| Provider calls | See [Enrichment](#enrichment) |
 
 ### Linux privileges
 
@@ -1122,7 +1131,7 @@ the address in its firewall). `commands/satellites.rs` follows it:
 | After a failure that may have reached CelesTrak (a timeout, a broken answer) | It counts as the group's download: the group waits 2 hours |
 | After a failed connection (no request sent, `FetchError.sent` false) | That group again after 15 minutes |
 | At a time | One request, for all groups |
-| A time in the future (the clock was ahead, more than 5 minutes, `CLOCK_TOLERANCE_MS`) | A saved copy counts as stale (its note gives the date and time, UTC); a saved request or pause time is moved to now plus its own length (2 hours, 15 minutes) and saved once, so a wrong clock never waits longer than the rule itself |
+| A time in the future (the clock was wrong when it was saved, or is wrong now; more than 5 minutes, `CLOCK_TOLERANCE_MS`) | A saved copy counts as stale (its note gives the date and time, UTC); a saved request or pause time is moved to now plus its own length (2 hours, 15 minutes) and saved once, so a wrong clock never waits longer than the rule itself |
 | Answer | HTTPS to `celestrak.org` only, no redirect elsewhere, 8 MB cap |
 
 When no new copy may or can be had, an older saved copy is shown with a
@@ -1215,6 +1224,36 @@ Integration settings are validated in `set_settings` (`IntegrationSettings::vali
 the RDAP base URL must be `http(s)`, the PeeringDB key must not contain spaces.
 UI preferences are validated too (`UiPreferences::validated`), see
 [UI shell](#ui-shell).
+
+## WebView floor
+
+The renderer runs in the web view of the operating system: WKWebView
+(WebKit) on macOS, WebKitGTK on Linux and WebView2 (Chromium) on Windows.
+The globe needs at least:
+
+| Platform | Floor | Why |
+| --- | --- | --- |
+| macOS | Safari 16.4: macOS 11 and 12 with the Safari update, built in from macOS 13.3 | Cesium's `Material` tests `value instanceof OffscreenCanvas` for each colour uniform (the country borders at start, every arc and ring). Before Safari 16.4 there is no `OffscreenCanvas` global, so the test throws a `ReferenceError`. Cesium also calls `Array.prototype.toSorted` (Safari 16.0) when its camera controller starts. |
+| Linux | WebKitGTK 2.46 | WebKitGTK exposes `OffscreenCanvas` by default from 2.46 (September 2024). |
+| Windows | WebView2 (Chromium) 110 | `Array.prototype.toSorted`. WebView2 updates itself, and the installer adds it when it is missing. |
+
+- **Build target** (`vite.config.ts` → `build.target`): `safari16.4` for
+  macOS and Linux, `chrome110` for Windows builds
+  (`TAURI_ENV_PLATFORM=windows`). esbuild lowers newer syntax to the
+  target. It adds no polyfills, so code must not use a built-in that the
+  floor does not have.
+- **macOS minimum** (`tauri.conf.json` → `bundle.macOS.minimumSystemVersion`,
+  `11.0`): macOS 10.15 and earlier get Safari 15.6 at most, so the app
+  would start with a globe that cannot draw. On macOS 11 and 12, a Safari
+  update also updates WKWebView, so these versions stay in.
+- **Type checking**: the renderer's TypeScript library is ES2021, below the
+  floor. A newer built-in needs a library change and a check that the
+  floor has it.
+- **Other built-ins in the shipped chunks**: `Object.hasOwn` (Cesium
+  buffer collections the app does not use) and `Array.prototype.at`
+  (satellite.js `propagate`) need Safari 15.4. The render governor calls
+  `navigator.getBattery` only where it exists.
+- **Not tested at the floor**: the globe check runs in the current Chrome.
 
 ## Security
 

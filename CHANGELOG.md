@@ -48,6 +48,7 @@ All notable changes to VisTracer will be documented in this file.
 - The command bar offers "Show AWS regions" (and other switches under a hidden layer) as "Show", with the parent layer, instead of "Hide"
 - Hovering a site marker restyles that marker instead of rebuilding every site marker
 - The credits chip names each opt-in data source while its layer is on
+- Needs macOS 11 or later with Safari 16.4 (built in from macOS 13.3), WebKitGTK 2.46 on Linux, or WebView2 110 on Windows: the globe engine cannot draw in older web views. The app no longer starts on macOS 10.15 or earlier, where the globe could not draw
 
 ### Fixed
 

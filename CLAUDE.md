@@ -28,7 +28,7 @@ npm run typecheck
 npm run lint
 
 # Testing
-npm run test           # Run unit + component tests (356 tests across 38 files)
+npm run test           # Run unit + component tests (358 tests across 38 files)
 npm run test:e2e       # Run e2e tests (84 tests across 7 files)
 npm run test:watch     # Run tests in watch mode
 node scripts/globe-check/check.mjs  # After a build (Node >= 22.4): wide start view, idle frames and compositor frames, online tile requests (incl. the online imagery switch), export input lock, infrastructure layers (no request while off, each source once, cable consent, no request to TeleGeography), satellites (no request or SGP4 code while off, consent, one frame per second, none while hidden), accessible names in headless Chrome (50 checks)
@@ -36,7 +36,7 @@ node scripts/infra-data/build-cloud-regions.mjs  # Rebuild src/renderer/public/i
 node scripts/globe-check/ui-shots.mjs [dir]  # After a build: screenshots of every UI state, dark/light/960x640/reduced motion+transparency
 
 # Rust
-cd src-tauri && cargo test                                # 199 tests (+4 ignored network smoke tests)
+cd src-tauri && cargo test                                # 201 tests (+4 ignored network smoke tests)
 cd src-tauri && cargo clippy --all-targets -- -D warnings # must be clean
 ```
 
@@ -124,7 +124,7 @@ Key Events (Tauri emit/listen):
 - `commands/cables.rs`: opt-in submarine cable map: parse and compact the GeoJSON at the edge, single flight, `$APPCACHE/submarine-cables.json` for 7 days, 10 min backoff with the old copy
 - `commands/satellites.rs`: opt-in satellite groups from CelesTrak (CSV, parsed at the edge): `SATELLITE_GROUPS` table (layer id, group, default), single flight, the saved switch read at the start, after the lock and right before the request, `$APPCACHE/satellites/<group>.json` for 12 h, `requests.json` saved before each request (no request without it; one per group in 2 h, also after a timeout or broken answer; 2 h stop after an HTTP error or unusable data; 15 min after a failed connection), older copy with a note; a saved time more than 5 min in the future (clock ahead) makes a copy stale and is moved to now plus its length, once
 - `commands/retry.rs`: `ProviderError`, backoff with jitter, `with_retry`
-- `commands/dns.rs`: Reverse DNS on the blocking pool with timeout and caching
+- `commands/dns.rs`: Reverse DNS on the blocking pool with caching; at most 8 resolver calls at once for all runs (a call keeps its slot after the 4 s timeout until `getnameinfo` returns), so a dead resolver cannot grow the pool
 - `commands/geo.rs`: MaxMind GeoLite2 readers and local lookup
 - `commands/app_info.rs`: App version and updater key state
 - `commands/tile_cache.rs`: globe tile cache: allowlisted GIBS layers, URI parsing, `$APPCACHE/tiles` with a 500 MB LRU cap, single-flight downloads, 3-failure pause, redirect allowlist; no upstream request while the "Online imagery" layer switch is off (`set_online_enabled`, applied at start and on every `set_settings`)
@@ -235,7 +235,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### TypeScript Tests (Vitest)
 
-- **Unit and component tests** (`vitest.config.ts`): 356 tests across 38 files (`*.test.ts` and `*.test.tsx`)
+- **Unit and component tests** (`vitest.config.ts`): 358 tests across 38 files (`*.test.ts` and `*.test.tsx`)
   - `src/common/__tests__/net.test.ts` — 18 tests: IPv4/IPv6 private IP detection
   - `src/renderer/state/__tests__/tracerouteStore.test.ts` — 11 tests: store behavior, hovered hop, user selections ignored during an export
   - `src/renderer/state/__tests__/updateStore.test.ts` — 6 tests: update check/install states
@@ -270,10 +270,10 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
   - `src/renderer/modules/app/lib/__tests__/exportCredits.test.ts` — 2 tests: TeleGeography and CelesTrak credits in exports only while their layer is on, drawn in the lower right corner
   - `src/renderer/modules/app/lib/__tests__/integrationSettings.test.ts` — 3 tests: defaults, old saved settings keep exchange matching on
   - `src/renderer/modules/app/components/__tests__/UpdateBanner.test.tsx` — 3 tests: banner states
-  - `src/renderer/hooks/__tests__/useInfraLoading.test.tsx` — 3 tests: a source read again when one of its layers is turned off and on (also while a sibling layer stays on), a failed source retried only then, a missing exchange list read again after a trace for the layers that show it
+  - `src/renderer/hooks/__tests__/useInfraLoading.test.tsx` — 4 tests: a source read again when one of its layers is turned off and on (also while a sibling layer stays on), a failed source retried only then, a missing exchange list read again after a trace for the layers that show it, and not read after a trace while only layers with other sources show
   - `src/renderer/lib/satellites/__tests__/propagate.test.ts` — 5 tests: SGP4 against Vallado's case 00005 (distance and z to the metre at 0 and 360 min), a geostationary longitude against IAU 1982 sidereal time (independent of satellite.js), a Starlink-like height, NaN for a decayed satellite
   - `src/renderer/lib/satellites/__tests__/clock.test.ts` — 5 tests: nothing while there is nothing to move, at most one update a second (also with new data), the first data at once, paused while hidden and one catch-up, stopped and disposed
-  - `src/renderer/lib/satellites/__tests__/satellites.test.ts` — 15 tests: `parseSatelliteGroup` (keys, malformed records dropped and counted, wrong group or shape), satellite ISP match (Starlink medium, GEO by RTT, other networks ignored, highlight only likely links, "possible" wording for low confidence), drawing (style, stable arrays, highlight, even thinning, 3:1 on the dark globe), `planSatelliteGroups` (keep, rebuild, remove), satellite card and key (own group names only), element age text
+  - `src/renderer/lib/satellites/__tests__/satellites.test.ts` — 16 tests: `parseSatelliteGroup` (keys, malformed records dropped and counted, wrong group or shape), satellite ISP match (Starlink medium, GEO by RTT, other networks ignored, highlight only likely links, "possible" wording for low confidence, a low-confidence link without a doubt does not compile), drawing (style, stable arrays, highlight, even thinning, 3:1 on the dark globe), `planSatelliteGroups` (keep, rebuild, remove), satellite card and key (own group names only), element age text
   - Use `fireEvent` from `@testing-library/react`, not `user-event`: two copies of `@testing-library/dom` in the lockfile make user-event skip `act()`.
 
 - **E2E tests** (`vitest.e2e.config.ts`): 84 tests across 7 files
@@ -287,12 +287,13 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 
 ### Rust Tests
 
-- 199 tests in `src-tauri/src/` (plus four ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache, `smoke_real_cable_map` downloads the TeleGeography cable map, `smoke_real_celestrak` downloads the GPS group from CelesTrak once) covering:
+- 201 tests in `src-tauri/src/` (plus four ignored smoke tests: `smoke_real_traceroute` runs real traceroutes through the real pipeline, `smoke_real_gibs_tile` fetches one NASA GIBS tile through the tile cache, `smoke_real_cable_map` downloads the TeleGeography cable map, `smoke_real_celestrak` downloads the GPS group from CelesTrak once) covering:
   - Line parsing (macOS, Linux, Windows, multipath, continuation lines, timeouts, IPv6) and a real macOS multipath capture (`fixtures/traceroute/`)
   - Binary lookup, trusted-binary check, per-platform plans, Linux UDP fallback, target validation
   - Provider parsers against real responses, merge rules, TTL cache and persistence, retry/backoff
   - `EnrichmentService` against local mock HTTP/whois servers (retry on 429/503, cache, degradation, private/disabled)
   - Pipeline runs against a fake traceroute process (slow lookup does not delay later hops, cancel, failure)
+  - Reverse DNS against a fake resolver that does not answer: at most the cap of calls reach it, every caller returns at the timeout, a new lookup starts no call while the slots are held, lookups work again after it answers
   - Settings validation (including `ixMatching` defaults for old settings files), UI preferences (defaults, bad ids and unbounded maps rejected, a damaged `ui` section keeps the rest of the file, one bad field keeps the other saved choices), updater key detection
   - Geolocation: prefix table edges (v4/v6, nested), RTT math, host name fixtures (`fixtures/hostnames/hints.txt`, positive and negative), IX dataset from real PeeringDB rows (`fixtures/providers/peeringdb-ix/`), precedence, reference hop (medium confidence; cannot rule out stronger candidates, Mumbai/Delhi regression), later-hop and primary-responder bounds, anycast, IX download/backoff/stale-while-refresh/final 429, exchange matching with PeeringDB off and switched off, concurrent cache writes
   - PeeringDB sites: facilities and counts from real rows, served from memory and the disk cache with no download, a dataset of the previous version used and refreshed
@@ -311,6 +312,7 @@ Each `HopResolution` carries `location: HopLocation` (`best`, `alternatives`, `i
 - **State persistence**: In-memory `AppStore` with `Mutex` for thread-safe access; settings in `$APPDATA/settings.json`, provider cache in `$APPCACHE/enrichment-cache.json`, globe tiles in `$APPCACHE/tiles/`
 - **CSP**: strict policy in `tauri.conf.json` (`script-src 'self'`); never inject inline scripts (gif.js loads as a `?url` asset). The tile scheme (`vistiles:`, `http://vistiles.localhost`) is allowed in `img-src`/`connect-src`; no `'wasm-unsafe-eval'` (see `meshoptimizerStub.ts`)
 - **Updater**: `plugins.updater.pubkey` is a placeholder until the signing key is set up; `get_app_info` reports `updaterConfigured`
+- **WebView floor**: Safari 16.4 (macOS 11+, `bundle.macOS.minimumSystemVersion` 11.0), WebKitGTK 2.46, WebView2 110; `build.target` is `safari16.4` / `chrome110`. esbuild adds no polyfills: do not use a built-in the floor lacks ([docs/architecture.md#webview-floor](./docs/architecture.md#webview-floor))
 - **Never run `prettier --write` on whole folders**: the repo is not Prettier-clean, so it rewrites lines nobody changed. Format only new files or new code.
 
 ## Build & Package

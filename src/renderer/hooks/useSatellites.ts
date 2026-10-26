@@ -16,7 +16,7 @@ import { useUiStore } from "@renderer/state/uiStore";
 const NO_HOPS: HopResolution[] = [];
 const NO_DRAWING: readonly SatelliteGroupDrawing[] = Object.freeze([]);
 
-/** Likely satellite links of the current route, by hop, from the hops' ASNs. */
+/** Likely or possible satellite links of the current route, by hop, from the hops' ASNs. */
 export function useSatelliteLinks(): ReadonlyMap<number, SatelliteLink> {
   const hops = useTracerouteStore((state) => selectCurrentRun(state)?.hops) ?? NO_HOPS;
   return useMemo(() => satelliteLinks(hops), [hops]);

@@ -26,6 +26,18 @@ Pre-built binaries are available on the [Releases](https://github.com/rush-skill
 
 Releases after v1.0.0 update themselves: VisTracer checks the latest GitHub release on start and offers **Install and restart**. Downloads are signature-checked before they are installed.
 
+### System requirements
+
+VisTracer draws in the web view of the operating system. The globe needs at least:
+
+| Platform | Web view |
+|----------|----------|
+| macOS    | macOS 11 or later with Safari 16.4 or later (built in from macOS 13.3; on macOS 11 and 12, install the Safari update from Software Update). VisTracer does not start on macOS 10.15 or earlier. |
+| Windows  | Microsoft Edge WebView2 110 or later. WebView2 updates itself, and the installer adds it when it is missing. |
+| Linux    | WebKitGTK 2.46 or later (`libwebkit2gtk-4.1`). |
+
+With an older web view, the globe cannot draw. Details: [docs/architecture.md](./docs/architecture.md#webview-floor).
+
 ## Why a Desktop App?
 
 VisTracer is built as a native desktop application (Tauri v2 + Rust) rather than a web app because **traceroute requires native system access**. Web browsers cannot execute system commands like `traceroute` or `tracert` for security reasons. As a Tauri app, VisTracer can:
